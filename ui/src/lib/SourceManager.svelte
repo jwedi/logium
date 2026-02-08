@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { sources as sourcesApi, templates as templatesApi, type Source, type SourceTemplate } from './api';
+  import {
+    sources as sourcesApi,
+    templates as templatesApi,
+    type Source,
+    type SourceTemplate,
+  } from './api';
   import LogViewer from './LogViewer.svelte';
 
   let { projectId }: { projectId: number } = $props();
@@ -70,7 +75,7 @@
 
 {#if selectedSource}
   <div class="viewer-header">
-    <button onclick={() => selectedSource = null}>Back to list</button>
+    <button onclick={() => (selectedSource = null)}>Back to list</button>
     <span class="source-title">{selectedSource.name}</span>
     <span class="badge">{selectedSource.file_path || 'no file'}</span>
   </div>
@@ -117,7 +122,7 @@
             </span>
           </div>
           <div class="source-actions">
-            <button onclick={() => selectedSource = source}>View logs</button>
+            <button onclick={() => (selectedSource = source)}>View logs</button>
             <button class="danger" onclick={() => deleteSource(source.id)}>Delete</button>
           </div>
         </div>

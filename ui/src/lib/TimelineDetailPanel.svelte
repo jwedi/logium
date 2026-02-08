@@ -13,7 +13,13 @@
     colorIndex: number;
   }
 
-  let { event, sourceList, ruleList, patternList, onClose }: {
+  let {
+    event,
+    sourceList,
+    ruleList,
+    patternList,
+    onClose,
+  }: {
     event: TimelineEvent;
     sourceList: Source[];
     ruleList: LogRule[];
@@ -22,15 +28,15 @@
   } = $props();
 
   function getRuleName(id: number): string {
-    return ruleList.find(r => r.id === id)?.name ?? `Rule #${id}`;
+    return ruleList.find((r) => r.id === id)?.name ?? `Rule #${id}`;
   }
 
   function getPatternName(id: number): string {
-    return patternList.find(p => p.id === id)?.name ?? `Pattern #${id}`;
+    return patternList.find((p) => p.id === id)?.name ?? `Pattern #${id}`;
   }
 
   function getSourceName(id: number): string {
-    return sourceList.find(s => s.id === id)?.name ?? `Source #${id}`;
+    return sourceList.find((s) => s.id === id)?.name ?? `Source #${id}`;
   }
 
   function formatStateValue(sv: StateValue): string {
@@ -59,7 +65,9 @@
     {@const rm = event.ruleMatch}
     <div class="detail-section">
       <div class="detail-label">Rule</div>
-      <div class="detail-value rule-name" style="color: var(--rule-border-{event.colorIndex})">{getRuleName(rm.rule_id)}</div>
+      <div class="detail-value rule-name" style="color: var(--rule-border-{event.colorIndex})">
+        {getRuleName(rm.rule_id)}
+      </div>
     </div>
     <div class="detail-section">
       <div class="detail-label">Source</div>

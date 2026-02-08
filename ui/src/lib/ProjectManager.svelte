@@ -1,7 +1,12 @@
 <script lang="ts">
   import { projects as projectsApi, type Project } from './api';
 
-  let { projects, onProjectCreated, onProjectDeleted, onSelect }: {
+  let {
+    projects,
+    onProjectCreated,
+    onProjectDeleted,
+    onSelect,
+  }: {
     projects: Project[];
     onProjectCreated: (p: Project) => void;
     onProjectDeleted: (id: number) => void;

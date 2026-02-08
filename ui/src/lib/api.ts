@@ -126,69 +126,110 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const projects = {
   list: () => request<Project[]>('/projects'),
   get: (id: number) => request<Project>(`/projects/${id}`),
-  create: (data: { name: string }) => request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
-  update: (id: number, data: Partial<Project>) => request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  create: (data: { name: string }) =>
+    request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: number, data: Partial<Project>) =>
+    request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
 };
 
 // Timestamp Templates
 export const timestampTemplates = {
   list: (pid: number) => request<TimestampTemplate[]>(`/projects/${pid}/timestamp-templates`),
-  get: (pid: number, id: number) => request<TimestampTemplate>(`/projects/${pid}/timestamp-templates/${id}`),
-  create: (pid: number, data: Omit<TimestampTemplate, 'id'>) => request<TimestampTemplate>(`/projects/${pid}/timestamp-templates`, { method: 'POST', body: JSON.stringify(data) }),
-  update: (pid: number, id: number, data: Partial<TimestampTemplate>) => request<TimestampTemplate>(`/projects/${pid}/timestamp-templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (pid: number, id: number) => request<void>(`/projects/${pid}/timestamp-templates/${id}`, { method: 'DELETE' }),
+  get: (pid: number, id: number) =>
+    request<TimestampTemplate>(`/projects/${pid}/timestamp-templates/${id}`),
+  create: (pid: number, data: Omit<TimestampTemplate, 'id'>) =>
+    request<TimestampTemplate>(`/projects/${pid}/timestamp-templates`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (pid: number, id: number, data: Partial<TimestampTemplate>) =>
+    request<TimestampTemplate>(`/projects/${pid}/timestamp-templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (pid: number, id: number) =>
+    request<void>(`/projects/${pid}/timestamp-templates/${id}`, { method: 'DELETE' }),
 };
 
 // Templates
 export const templates = {
   list: (pid: number) => request<SourceTemplate[]>(`/projects/${pid}/templates`),
   get: (pid: number, id: number) => request<SourceTemplate>(`/projects/${pid}/templates/${id}`),
-  create: (pid: number, data: Omit<SourceTemplate, 'id'>) => request<SourceTemplate>(`/projects/${pid}/templates`, { method: 'POST', body: JSON.stringify(data) }),
-  update: (pid: number, id: number, data: Partial<SourceTemplate>) => request<SourceTemplate>(`/projects/${pid}/templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (pid: number, id: number) => request<void>(`/projects/${pid}/templates/${id}`, { method: 'DELETE' }),
+  create: (pid: number, data: Omit<SourceTemplate, 'id'>) =>
+    request<SourceTemplate>(`/projects/${pid}/templates`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (pid: number, id: number, data: Partial<SourceTemplate>) =>
+    request<SourceTemplate>(`/projects/${pid}/templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (pid: number, id: number) =>
+    request<void>(`/projects/${pid}/templates/${id}`, { method: 'DELETE' }),
 };
 
 // Sources
 export const sources = {
   list: (pid: number) => request<Source[]>(`/projects/${pid}/sources`),
   get: (pid: number, id: number) => request<Source>(`/projects/${pid}/sources/${id}`),
-  create: (pid: number, data: Omit<Source, 'id'>) => request<Source>(`/projects/${pid}/sources`, { method: 'POST', body: JSON.stringify(data) }),
+  create: (pid: number, data: Omit<Source, 'id'>) =>
+    request<Source>(`/projects/${pid}/sources`, { method: 'POST', body: JSON.stringify(data) }),
   upload: async (pid: number, id: number, file: File): Promise<Source> => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch(`${BASE}/projects/${pid}/sources/${id}/upload`, { method: 'POST', body: form });
+    const res = await fetch(`${BASE}/projects/${pid}/sources/${id}/upload`, {
+      method: 'POST',
+      body: form,
+    });
     if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
     return res.json();
   },
-  delete: (pid: number, id: number) => request<void>(`/projects/${pid}/sources/${id}`, { method: 'DELETE' }),
+  delete: (pid: number, id: number) =>
+    request<void>(`/projects/${pid}/sources/${id}`, { method: 'DELETE' }),
 };
 
 // Rules
 export const rules = {
   list: (pid: number) => request<LogRule[]>(`/projects/${pid}/rules`),
   get: (pid: number, id: number) => request<LogRule>(`/projects/${pid}/rules/${id}`),
-  create: (pid: number, data: Omit<LogRule, 'id'>) => request<LogRule>(`/projects/${pid}/rules`, { method: 'POST', body: JSON.stringify(data) }),
-  update: (pid: number, id: number, data: Partial<LogRule>) => request<LogRule>(`/projects/${pid}/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (pid: number, id: number) => request<void>(`/projects/${pid}/rules/${id}`, { method: 'DELETE' }),
+  create: (pid: number, data: Omit<LogRule, 'id'>) =>
+    request<LogRule>(`/projects/${pid}/rules`, { method: 'POST', body: JSON.stringify(data) }),
+  update: (pid: number, id: number, data: Partial<LogRule>) =>
+    request<LogRule>(`/projects/${pid}/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (pid: number, id: number) =>
+    request<void>(`/projects/${pid}/rules/${id}`, { method: 'DELETE' }),
 };
 
 // Rulesets
 export const rulesets = {
   list: (pid: number) => request<Ruleset[]>(`/projects/${pid}/rulesets`),
   get: (pid: number, id: number) => request<Ruleset>(`/projects/${pid}/rulesets/${id}`),
-  create: (pid: number, data: Omit<Ruleset, 'id'>) => request<Ruleset>(`/projects/${pid}/rulesets`, { method: 'POST', body: JSON.stringify(data) }),
-  update: (pid: number, id: number, data: Partial<Ruleset>) => request<Ruleset>(`/projects/${pid}/rulesets/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (pid: number, id: number) => request<void>(`/projects/${pid}/rulesets/${id}`, { method: 'DELETE' }),
+  create: (pid: number, data: Omit<Ruleset, 'id'>) =>
+    request<Ruleset>(`/projects/${pid}/rulesets`, { method: 'POST', body: JSON.stringify(data) }),
+  update: (pid: number, id: number, data: Partial<Ruleset>) =>
+    request<Ruleset>(`/projects/${pid}/rulesets/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (pid: number, id: number) =>
+    request<void>(`/projects/${pid}/rulesets/${id}`, { method: 'DELETE' }),
 };
 
 // Patterns
 export const patterns = {
   list: (pid: number) => request<Pattern[]>(`/projects/${pid}/patterns`),
   get: (pid: number, id: number) => request<Pattern>(`/projects/${pid}/patterns/${id}`),
-  create: (pid: number, data: Omit<Pattern, 'id'>) => request<Pattern>(`/projects/${pid}/patterns`, { method: 'POST', body: JSON.stringify(data) }),
-  update: (pid: number, id: number, data: Partial<Pattern>) => request<Pattern>(`/projects/${pid}/patterns/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  delete: (pid: number, id: number) => request<void>(`/projects/${pid}/patterns/${id}`, { method: 'DELETE' }),
+  create: (pid: number, data: Omit<Pattern, 'id'>) =>
+    request<Pattern>(`/projects/${pid}/patterns`, { method: 'POST', body: JSON.stringify(data) }),
+  update: (pid: number, id: number, data: Partial<Pattern>) =>
+    request<Pattern>(`/projects/${pid}/patterns/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (pid: number, id: number) =>
+    request<void>(`/projects/${pid}/patterns/${id}`, { method: 'DELETE' }),
 };
 
 // Analysis events (matches Rust AnalysisEvent serde output)
@@ -196,14 +237,21 @@ export type AnalysisEvent =
   | { type: 'rule_match'; data: RuleMatch }
   | { type: 'pattern_match'; data: PatternMatch }
   | { type: 'progress'; data: { lines_processed: number } }
-  | { type: 'complete'; data: { total_lines: number; total_rule_matches: number; total_pattern_matches: number } }
+  | {
+      type: 'complete';
+      data: { total_lines: number; total_rule_matches: number; total_pattern_matches: number };
+    }
   | { type: 'error'; data: { message: string } };
 
 export interface StreamingCallbacks {
   onRuleMatch: (rm: RuleMatch) => void;
   onPatternMatch: (pm: PatternMatch) => void;
   onProgress: (linesProcessed: number) => void;
-  onComplete: (totals: { total_lines: number; total_rule_matches: number; total_pattern_matches: number }) => void;
+  onComplete: (totals: {
+    total_lines: number;
+    total_rule_matches: number;
+    total_pattern_matches: number;
+  }) => void;
   onError: (message: string) => void;
 }
 
@@ -243,6 +291,14 @@ export const analysis = {
 
     return { close: () => ws.close() };
   },
-  detectTemplate: (pid: number, data: { content: string }) => request<SourceTemplate>(`/projects/${pid}/detect-template`, { method: 'POST', body: JSON.stringify(data) }),
-  suggestRule: (pid: number, data: { text: string }) => request<LogRule>(`/projects/${pid}/suggest-rule`, { method: 'POST', body: JSON.stringify(data) }),
+  detectTemplate: (pid: number, data: { content: string }) =>
+    request<SourceTemplate>(`/projects/${pid}/detect-template`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  suggestRule: (pid: number, data: { text: string }) =>
+    request<LogRule>(`/projects/${pid}/suggest-rule`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };

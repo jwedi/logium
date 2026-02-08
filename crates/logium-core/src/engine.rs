@@ -46,9 +46,17 @@ impl std::error::Error for AnalysisError {}
 pub enum AnalysisEvent {
     RuleMatch(RuleMatch),
     PatternMatch(PatternMatch),
-    Progress { lines_processed: u64 },
-    Complete { total_lines: u64, total_rule_matches: u64, total_pattern_matches: u64 },
-    Error { message: String },
+    Progress {
+        lines_processed: u64,
+    },
+    Complete {
+        total_lines: u64,
+        total_rule_matches: u64,
+        total_pattern_matches: u64,
+    },
+    Error {
+        message: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -72,21 +80,18 @@ impl LogLineIterator {
         template: &SourceTemplate,
         ts_template: &TimestampTemplate,
     ) -> Result<Self, AnalysisError> {
-        let file = File::open(&source.file_path).map_err(|_| {
-            AnalysisError::FileNotFound(source.file_path.clone())
-        })?;
+        let file = File::open(&source.file_path)
+            .map_err(|_| AnalysisError::FileNotFound(source.file_path.clone()))?;
         let content_regex = match &template.content_regex {
             Some(pat) => {
-                let re = Regex::new(pat)
-                    .map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
+                let re = Regex::new(pat).map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
                 Some(re)
             }
             None => None,
         };
         let extraction_regex = match &ts_template.extraction_regex {
             Some(pat) => {
-                let re = Regex::new(pat)
-                    .map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
+                let re = Regex::new(pat).map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
                 Some(re)
             }
             None => None,
@@ -111,7 +116,11 @@ impl Iterator for LogLineIterator {
         match self.reader.read_line(&mut self.buf) {
             Ok(0) => None,
             Ok(_) => {
-                let raw = self.buf.trim_end_matches('\n').trim_end_matches('\r').to_string();
+                let raw = self
+                    .buf
+                    .trim_end_matches('\n')
+                    .trim_end_matches('\r')
+                    .to_string();
                 let content = if let Some(re) = &self.content_regex {
                     if let Some(caps) = re.captures(&raw) {
                         caps.get(1).map_or(raw.clone(), |m| m.as_str().to_string())
@@ -142,8 +151,9 @@ impl Iterator for LogLineIterator {
                         if let Some(year) = self.default_year {
                             let augmented_input = format!("{year} {ts_input}");
                             let augmented_fmt = format!("%Y {}", self.timestamp_format);
-                            NaiveDateTime::parse_from_str(&augmented_input, &augmented_fmt)
-                                .or_else(|_| parse_timestamp_prefix(&augmented_input, &augmented_fmt))
+                            NaiveDateTime::parse_from_str(&augmented_input, &augmented_fmt).or_else(
+                                |_| parse_timestamp_prefix(&augmented_input, &augmented_fmt),
+                            )
                         } else {
                             Err(e)
                         }
@@ -169,10 +179,7 @@ impl Iterator for LogLineIterator {
 
 /// Parse a timestamp from the beginning of a line by trying progressively
 /// shorter prefixes until chrono can parse it without "trailing input" errors.
-fn parse_timestamp_prefix(
-    line: &str,
-    fmt: &str,
-) -> Result<NaiveDateTime, chrono::ParseError> {
+fn parse_timestamp_prefix(line: &str, fmt: &str) -> Result<NaiveDateTime, chrono::ParseError> {
     // Try substrings from the full line down to a minimum length.
     // This handles the common case where the timestamp is at the start of the line
     // and is followed by arbitrary content.
@@ -284,19 +291,22 @@ pub struct CompiledRule {
 fn compile_rules(rules: &[LogRule]) -> Result<Vec<CompiledRule>, AnalysisError> {
     let mut compiled = Vec::with_capacity(rules.len());
     for rule in rules {
-        let patterns: Vec<&str> = rule.match_rules.iter().map(|m| m.pattern.as_str()).collect();
-        let match_set = RegexSet::new(&patterns)
-            .map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
+        let patterns: Vec<&str> = rule
+            .match_rules
+            .iter()
+            .map(|m| m.pattern.as_str())
+            .collect();
+        let match_set =
+            RegexSet::new(&patterns).map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
         let match_count = rule.match_rules.len();
 
         let mut extraction_regexes = Vec::new();
         for (idx, ext) in rule.extraction_rules.iter().enumerate() {
-            if let ExtractionType::Parsed = ext.extraction_type {
-                if let Some(pat) = &ext.pattern {
-                    let re = Regex::new(pat)
-                        .map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
-                    extraction_regexes.push((idx, re));
-                }
+            if let ExtractionType::Parsed = ext.extraction_type
+                && let Some(pat) = &ext.pattern
+            {
+                let re = Regex::new(pat).map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
+                extraction_regexes.push((idx, re));
             }
         }
 
@@ -321,7 +331,11 @@ pub fn evaluate_rule(
     line: &LogLine,
     compiled: &CompiledRule,
 ) -> Option<HashMap<String, StateValue>> {
-    let matches: Vec<usize> = compiled.match_set.matches(&line.content).into_iter().collect();
+    let matches: Vec<usize> = compiled
+        .match_set
+        .matches(&line.content)
+        .into_iter()
+        .collect();
 
     let matched = match compiled.match_mode {
         MatchMode::Any => !matches.is_empty(),
@@ -351,23 +365,21 @@ pub fn evaluate_rule(
                     .extraction_regexes
                     .iter()
                     .find(|(idx, _)| rule.extraction_rules[*idx].id == ext.id)
+                    && let Some(caps) = re.captures(&line.content)
+                    && let Some(m) = caps.name(&ext.state_key)
                 {
-                    if let Some(caps) = re.captures(&line.content) {
-                        if let Some(m) = caps.name(&ext.state_key) {
-                            let val_str = m.as_str();
-                            // Try to parse as integer, then float, otherwise string
-                            let value = if let Ok(i) = val_str.parse::<i64>() {
-                                StateValue::Integer(i)
-                            } else if let Ok(f) = val_str.parse::<f64>() {
-                                StateValue::Float(f)
-                            } else if val_str == "true" || val_str == "false" {
-                                StateValue::Bool(val_str == "true")
-                            } else {
-                                StateValue::String(val_str.to_string())
-                            };
-                            extracted.insert(ext.state_key.clone(), value);
-                        }
-                    }
+                    let val_str = m.as_str();
+                    // Try to parse as integer, then float, otherwise string
+                    let value = if let Ok(i) = val_str.parse::<i64>() {
+                        StateValue::Integer(i)
+                    } else if let Ok(f) = val_str.parse::<f64>() {
+                        StateValue::Float(f)
+                    } else if val_str == "true" || val_str == "false" {
+                        StateValue::Bool(val_str == "true")
+                    } else {
+                        StateValue::String(val_str.to_string())
+                    };
+                    extracted.insert(ext.state_key.clone(), value);
                 }
             }
         }
@@ -566,54 +578,38 @@ fn evaluate_predicate(pred: &PatternPredicate, state: &StateManager) -> bool {
 
     match pred.operator {
         Operator::Exists => current_val.is_some(),
-        Operator::Eq => {
-            match (current_val, &operand_val) {
-                (Some(a), Some(b)) => a == b,
-                _ => false,
+        Operator::Eq => match (current_val, &operand_val) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        },
+        Operator::Neq => match (current_val, &operand_val) {
+            (Some(a), Some(b)) => a != b,
+            _ => false,
+        },
+        Operator::Gt => match (current_val, &operand_val) {
+            (Some(a), Some(b)) => a.partial_cmp(b) == Some(Ordering::Greater),
+            _ => false,
+        },
+        Operator::Lt => match (current_val, &operand_val) {
+            (Some(a), Some(b)) => a.partial_cmp(b) == Some(Ordering::Less),
+            _ => false,
+        },
+        Operator::Gte => match (current_val, &operand_val) {
+            (Some(a), Some(b)) => {
+                matches!(a.partial_cmp(b), Some(Ordering::Greater | Ordering::Equal))
             }
-        }
-        Operator::Neq => {
-            match (current_val, &operand_val) {
-                (Some(a), Some(b)) => a != b,
-                _ => false,
+            _ => false,
+        },
+        Operator::Lte => match (current_val, &operand_val) {
+            (Some(a), Some(b)) => {
+                matches!(a.partial_cmp(b), Some(Ordering::Less | Ordering::Equal))
             }
-        }
-        Operator::Gt => {
-            match (current_val, &operand_val) {
-                (Some(a), Some(b)) => a.partial_cmp(b) == Some(Ordering::Greater),
-                _ => false,
-            }
-        }
-        Operator::Lt => {
-            match (current_val, &operand_val) {
-                (Some(a), Some(b)) => a.partial_cmp(b) == Some(Ordering::Less),
-                _ => false,
-            }
-        }
-        Operator::Gte => {
-            match (current_val, &operand_val) {
-                (Some(a), Some(b)) => matches!(
-                    a.partial_cmp(b),
-                    Some(Ordering::Greater | Ordering::Equal)
-                ),
-                _ => false,
-            }
-        }
-        Operator::Lte => {
-            match (current_val, &operand_val) {
-                (Some(a), Some(b)) => matches!(
-                    a.partial_cmp(b),
-                    Some(Ordering::Less | Ordering::Equal)
-                ),
-                _ => false,
-            }
-        }
-        Operator::Contains => {
-            match (current_val, &operand_val) {
-                (Some(StateValue::String(a)), Some(StateValue::String(b))) => a.contains(b.as_str()),
-                _ => false,
-            }
-        }
+            _ => false,
+        },
+        Operator::Contains => match (current_val, &operand_val) {
+            (Some(StateValue::String(a)), Some(StateValue::String(b))) => a.contains(b.as_str()),
+            _ => false,
+        },
     }
 }
 
@@ -631,8 +627,7 @@ pub fn analyze(
     patterns: &[Pattern],
 ) -> Result<AnalysisResult, AnalysisError> {
     // Build template lookup
-    let template_map: HashMap<u64, &SourceTemplate> =
-        templates.iter().map(|t| (t.id, t)).collect();
+    let template_map: HashMap<u64, &SourceTemplate> = templates.iter().map(|t| (t.id, t)).collect();
 
     // Build timestamp template lookup
     let ts_template_map: HashMap<u64, &TimestampTemplate> =
@@ -656,23 +651,26 @@ pub fn analyze(
     }
 
     // Build source -> template_id lookup
-    let source_template: HashMap<u64, u64> = sources.iter().map(|s| (s.id, s.template_id)).collect();
+    let source_template: HashMap<u64, u64> =
+        sources.iter().map(|s| (s.id, s.template_id)).collect();
 
     // Create log line iterators
     let mut iterators = Vec::new();
     for source in sources {
-        let template = template_map
-            .get(&source.template_id)
-            .ok_or_else(|| AnalysisError::ParseError(format!(
+        let template = template_map.get(&source.template_id).ok_or_else(|| {
+            AnalysisError::ParseError(format!(
                 "no template found for template_id {}",
                 source.template_id
-            )))?;
+            ))
+        })?;
         let ts_template = ts_template_map
             .get(&template.timestamp_template_id)
-            .ok_or_else(|| AnalysisError::ParseError(format!(
-                "no timestamp template found for timestamp_template_id {}",
-                template.timestamp_template_id
-            )))?;
+            .ok_or_else(|| {
+                AnalysisError::ParseError(format!(
+                    "no timestamp template found for timestamp_template_id {}",
+                    template.timestamp_template_id
+                ))
+            })?;
         iterators.push(LogLineIterator::new(source, template, ts_template)?);
     }
 
@@ -688,32 +686,28 @@ pub fn analyze(
 
     for result in stream {
         let line = result?;
-        let tmpl_id = source_template
-            .get(&line.source_id)
-            .copied()
-            .unwrap_or(0);
+        let tmpl_id = source_template.get(&line.source_id).copied().unwrap_or(0);
 
         // Find applicable rule ids
         if let Some(rule_ids) = template_rule_ids.get(&tmpl_id) {
             for rule_id in rule_ids {
                 if let (Some(rule), Some(compiled)) =
                     (rule_map.get(rule_id), compiled_map.get(rule_id))
+                    && let Some(extracted) = evaluate_rule(rule, &line, compiled)
                 {
-                    if let Some(extracted) = evaluate_rule(rule, &line, compiled) {
-                        // Apply state mutations
-                        state_manager.apply_mutations(
-                            line.source_id,
-                            &extracted,
-                            &rule.extraction_rules,
-                        );
+                    // Apply state mutations
+                    state_manager.apply_mutations(
+                        line.source_id,
+                        &extracted,
+                        &rule.extraction_rules,
+                    );
 
-                        all_rule_matches.push(RuleMatch {
-                            rule_id: *rule_id,
-                            source_id: line.source_id,
-                            log_line: line.clone(),
-                            extracted_state: extracted,
-                        });
-                    }
+                    all_rule_matches.push(RuleMatch {
+                        rule_id: *rule_id,
+                        source_id: line.source_id,
+                        log_line: line.clone(),
+                        extracted_state: extracted,
+                    });
                 }
             }
         }
@@ -746,8 +740,7 @@ pub fn analyze_streaming(
     tx: std::sync::mpsc::Sender<AnalysisEvent>,
 ) -> Result<(), AnalysisError> {
     // Build template lookup
-    let template_map: HashMap<u64, &SourceTemplate> =
-        templates.iter().map(|t| (t.id, t)).collect();
+    let template_map: HashMap<u64, &SourceTemplate> = templates.iter().map(|t| (t.id, t)).collect();
     let ts_template_map: HashMap<u64, &TimestampTemplate> =
         timestamp_templates.iter().map(|t| (t.id, t)).collect();
     let rule_map: HashMap<u64, &LogRule> = rules.iter().map(|r| (r.id, r)).collect();
@@ -764,22 +757,25 @@ pub fn analyze_streaming(
             .extend(rs.rule_ids.iter());
     }
 
-    let source_template: HashMap<u64, u64> = sources.iter().map(|s| (s.id, s.template_id)).collect();
+    let source_template: HashMap<u64, u64> =
+        sources.iter().map(|s| (s.id, s.template_id)).collect();
 
     let mut iterators = Vec::new();
     for source in sources {
-        let template = template_map
-            .get(&source.template_id)
-            .ok_or_else(|| AnalysisError::ParseError(format!(
+        let template = template_map.get(&source.template_id).ok_or_else(|| {
+            AnalysisError::ParseError(format!(
                 "no template found for template_id {}",
                 source.template_id
-            )))?;
+            ))
+        })?;
         let ts_template = ts_template_map
             .get(&template.timestamp_template_id)
-            .ok_or_else(|| AnalysisError::ParseError(format!(
-                "no timestamp template found for timestamp_template_id {}",
-                template.timestamp_template_id
-            )))?;
+            .ok_or_else(|| {
+                AnalysisError::ParseError(format!(
+                    "no timestamp template found for timestamp_template_id {}",
+                    template.timestamp_template_id
+                ))
+            })?;
         iterators.push(LogLineIterator::new(source, template, ts_template)?);
     }
 
@@ -796,40 +792,38 @@ pub fn analyze_streaming(
         let line = match result {
             Ok(l) => l,
             Err(e) => {
-                let _ = tx.send(AnalysisEvent::Error { message: e.to_string() });
+                let _ = tx.send(AnalysisEvent::Error {
+                    message: e.to_string(),
+                });
                 return Err(e);
             }
         };
 
         lines_processed += 1;
 
-        let tmpl_id = source_template
-            .get(&line.source_id)
-            .copied()
-            .unwrap_or(0);
+        let tmpl_id = source_template.get(&line.source_id).copied().unwrap_or(0);
 
         if let Some(rule_ids) = template_rule_ids.get(&tmpl_id) {
             for rule_id in rule_ids {
                 if let (Some(rule), Some(compiled)) =
                     (rule_map.get(rule_id), compiled_map.get(rule_id))
+                    && let Some(extracted) = evaluate_rule(rule, &line, compiled)
                 {
-                    if let Some(extracted) = evaluate_rule(rule, &line, compiled) {
-                        state_manager.apply_mutations(
-                            line.source_id,
-                            &extracted,
-                            &rule.extraction_rules,
-                        );
+                    state_manager.apply_mutations(
+                        line.source_id,
+                        &extracted,
+                        &rule.extraction_rules,
+                    );
 
-                        let rm = RuleMatch {
-                            rule_id: *rule_id,
-                            source_id: line.source_id,
-                            log_line: line.clone(),
-                            extracted_state: extracted,
-                        };
-                        total_rule_matches += 1;
-                        if tx.send(AnalysisEvent::RuleMatch(rm)).is_err() {
-                            return Ok(()); // receiver dropped
-                        }
+                    let rm = RuleMatch {
+                        rule_id: *rule_id,
+                        source_id: line.source_id,
+                        log_line: line.clone(),
+                        extracted_state: extracted,
+                    };
+                    total_rule_matches += 1;
+                    if tx.send(AnalysisEvent::RuleMatch(rm)).is_err() {
+                        return Ok(()); // receiver dropped
                     }
                 }
             }
@@ -844,10 +838,12 @@ pub fn analyze_streaming(
             }
         }
 
-        if lines_processed % 500 == 0 {
-            if tx.send(AnalysisEvent::Progress { lines_processed }).is_err() {
-                return Ok(());
-            }
+        if lines_processed.is_multiple_of(500)
+            && tx
+                .send(AnalysisEvent::Progress { lines_processed })
+                .is_err()
+        {
+            return Ok(());
         }
     }
 
@@ -877,11 +873,8 @@ mod tests {
 
     fn make_log_line(content: &str) -> LogLine {
         LogLine {
-            timestamp: NaiveDateTime::parse_from_str(
-                "2024-01-01 00:00:00",
-                "%Y-%m-%d %H:%M:%S",
-            )
-            .unwrap(),
+            timestamp: NaiveDateTime::parse_from_str("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
+                .unwrap(),
             source_id: 1,
             raw: content.to_string(),
             content: content.to_string(),
@@ -933,8 +926,14 @@ mod tests {
             name: "test".into(),
             match_mode: MatchMode::Any,
             match_rules: vec![
-                MatchRule { id: 1, pattern: r"ERROR".into() },
-                MatchRule { id: 2, pattern: r"WARN".into() },
+                MatchRule {
+                    id: 1,
+                    pattern: r"ERROR".into(),
+                },
+                MatchRule {
+                    id: 2,
+                    pattern: r"WARN".into(),
+                },
             ],
             extraction_rules: vec![],
         };
@@ -960,8 +959,14 @@ mod tests {
             name: "test".into(),
             match_mode: MatchMode::All,
             match_rules: vec![
-                MatchRule { id: 1, pattern: r"server".into() },
-                MatchRule { id: 2, pattern: r"error".into() },
+                MatchRule {
+                    id: 1,
+                    pattern: r"server".into(),
+                },
+                MatchRule {
+                    id: 2,
+                    pattern: r"error".into(),
+                },
             ],
             extraction_rules: vec![],
         };
@@ -1160,8 +1165,18 @@ mod tests {
 
     fn make_sources() -> Vec<Source> {
         vec![
-            Source { id: 1, name: "server".into(), template_id: 1, file_path: "".into() },
-            Source { id: 2, name: "client".into(), template_id: 1, file_path: "".into() },
+            Source {
+                id: 1,
+                name: "server".into(),
+                template_id: 1,
+                file_path: "".into(),
+            },
+            Source {
+                id: 2,
+                name: "client".into(),
+                template_id: 1,
+                file_path: "".into(),
+            },
         ]
     }
 
@@ -1342,14 +1357,14 @@ mod tests {
     fn test_all_operators() {
         let sources = make_sources();
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state.entry(1).or_default().insert(
-            "val".into(),
-            StateValue::Integer(10),
-        );
-        sm.per_source_state.entry(1).or_default().insert(
-            "name".into(),
-            StateValue::String("hello world".into()),
-        );
+        sm.per_source_state
+            .entry(1)
+            .or_default()
+            .insert("val".into(), StateValue::Integer(10));
+        sm.per_source_state
+            .entry(1)
+            .or_default()
+            .insert("name".into(), StateValue::String("hello world".into()));
 
         // Eq
         assert!(evaluate_predicate(
@@ -1495,10 +1510,25 @@ mod tests {
         let template = make_template();
         let ts_template = make_ts_template();
 
-        let sources = vec![
-            Source { id: 1, name: "s1".into(), template_id: 1, file_path: f1.path().to_str().unwrap().into() },
-            Source { id: 2, name: "s2".into(), template_id: 1, file_path: f2.path().to_str().unwrap().into() },
-            Source { id: 3, name: "s3".into(), template_id: 1, file_path: f3.path().to_str().unwrap().into() },
+        let sources = [
+            Source {
+                id: 1,
+                name: "s1".into(),
+                template_id: 1,
+                file_path: f1.path().to_str().unwrap().into(),
+            },
+            Source {
+                id: 2,
+                name: "s2".into(),
+                template_id: 1,
+                file_path: f2.path().to_str().unwrap().into(),
+            },
+            Source {
+                id: 3,
+                name: "s3".into(),
+                template_id: 1,
+                file_path: f3.path().to_str().unwrap().into(),
+            },
         ];
 
         let iters: Vec<LogLineIterator> = sources
@@ -1530,13 +1560,25 @@ mod tests {
         let mut client_log = NamedTempFile::new().unwrap();
 
         // Server log: has player count and region info
-        writeln!(server_log, "2024-01-01 00:00:01 [INFO] Server started in region us-east").unwrap();
+        writeln!(
+            server_log,
+            "2024-01-01 00:00:01 [INFO] Server started in region us-east"
+        )
+        .unwrap();
         writeln!(server_log, "2024-01-01 00:00:03 [INFO] Players online: 42").unwrap();
         writeln!(server_log, "2024-01-01 00:00:05 [INFO] Players online: 100").unwrap();
 
         // Client log: has region info
-        writeln!(client_log, "2024-01-01 00:00:02 [INFO] Client connecting to region us-east").unwrap();
-        writeln!(client_log, "2024-01-01 00:00:04 [INFO] Client connected, status active").unwrap();
+        writeln!(
+            client_log,
+            "2024-01-01 00:00:02 [INFO] Client connecting to region us-east"
+        )
+        .unwrap();
+        writeln!(
+            client_log,
+            "2024-01-01 00:00:04 [INFO] Client connected, status active"
+        )
+        .unwrap();
 
         let ts_template = make_ts_template();
 
@@ -1622,14 +1664,12 @@ mod tests {
 
         let rules = vec![server_region_rule, player_count_rule, client_region_rule];
 
-        let rulesets = vec![
-            Ruleset {
-                id: 1,
-                name: "server_rules".into(),
-                template_id: 1,
-                rule_ids: vec![1, 2, 3],
-            },
-        ];
+        let rulesets = vec![Ruleset {
+            id: 1,
+            name: "server_rules".into(),
+            template_id: 1,
+            rule_ids: vec![1, 2, 3],
+        }];
 
         // Pattern: detect when server and client are in same region AND player count > 50
         let pattern = Pattern {
@@ -1700,12 +1740,24 @@ mod tests {
         let mut server_log = NamedTempFile::new().unwrap();
         let mut client_log = NamedTempFile::new().unwrap();
 
-        writeln!(server_log, "2024-01-01 00:00:01 [INFO] Server started in region us-east").unwrap();
+        writeln!(
+            server_log,
+            "2024-01-01 00:00:01 [INFO] Server started in region us-east"
+        )
+        .unwrap();
         writeln!(server_log, "2024-01-01 00:00:03 [INFO] Players online: 42").unwrap();
         writeln!(server_log, "2024-01-01 00:00:05 [INFO] Players online: 100").unwrap();
 
-        writeln!(client_log, "2024-01-01 00:00:02 [INFO] Client connecting to region us-east").unwrap();
-        writeln!(client_log, "2024-01-01 00:00:04 [INFO] Client connected, status active").unwrap();
+        writeln!(
+            client_log,
+            "2024-01-01 00:00:02 [INFO] Client connecting to region us-east"
+        )
+        .unwrap();
+        writeln!(
+            client_log,
+            "2024-01-01 00:00:04 [INFO] Client connected, status active"
+        )
+        .unwrap();
 
         let ts_template = make_ts_template();
         let template = SourceTemplate {
@@ -1718,65 +1770,96 @@ mod tests {
 
         let sources = vec![
             Source {
-                id: 1, name: "server".into(), template_id: 1,
+                id: 1,
+                name: "server".into(),
+                template_id: 1,
                 file_path: server_log.path().to_str().unwrap().into(),
             },
             Source {
-                id: 2, name: "client".into(), template_id: 1,
+                id: 2,
+                name: "client".into(),
+                template_id: 1,
                 file_path: client_log.path().to_str().unwrap().into(),
             },
         ];
 
         let rules = vec![
             LogRule {
-                id: 1, name: "server_region".into(),
+                id: 1,
+                name: "server_region".into(),
                 match_mode: MatchMode::Any,
-                match_rules: vec![MatchRule { id: 1, pattern: r"region \w+".into() }],
+                match_rules: vec![MatchRule {
+                    id: 1,
+                    pattern: r"region \w+".into(),
+                }],
                 extraction_rules: vec![ExtractionRule {
-                    id: 1, extraction_type: ExtractionType::Parsed,
+                    id: 1,
+                    extraction_type: ExtractionType::Parsed,
                     state_key: "region".into(),
                     pattern: Some(r"region (?P<region>\S+)".into()),
-                    static_value: None, mode: ExtractionMode::Replace,
+                    static_value: None,
+                    mode: ExtractionMode::Replace,
                 }],
             },
             LogRule {
-                id: 2, name: "player_count".into(),
+                id: 2,
+                name: "player_count".into(),
                 match_mode: MatchMode::Any,
-                match_rules: vec![MatchRule { id: 2, pattern: r"Players online: \d+".into() }],
+                match_rules: vec![MatchRule {
+                    id: 2,
+                    pattern: r"Players online: \d+".into(),
+                }],
                 extraction_rules: vec![ExtractionRule {
-                    id: 2, extraction_type: ExtractionType::Parsed,
+                    id: 2,
+                    extraction_type: ExtractionType::Parsed,
                     state_key: "player_count".into(),
                     pattern: Some(r"Players online: (?P<player_count>\d+)".into()),
-                    static_value: None, mode: ExtractionMode::Replace,
+                    static_value: None,
+                    mode: ExtractionMode::Replace,
                 }],
             },
             LogRule {
-                id: 3, name: "client_region".into(),
+                id: 3,
+                name: "client_region".into(),
                 match_mode: MatchMode::Any,
-                match_rules: vec![MatchRule { id: 3, pattern: r"connecting to region".into() }],
+                match_rules: vec![MatchRule {
+                    id: 3,
+                    pattern: r"connecting to region".into(),
+                }],
                 extraction_rules: vec![ExtractionRule {
-                    id: 3, extraction_type: ExtractionType::Parsed,
+                    id: 3,
+                    extraction_type: ExtractionType::Parsed,
                     state_key: "region".into(),
                     pattern: Some(r"region (?P<region>\S+)".into()),
-                    static_value: None, mode: ExtractionMode::Replace,
+                    static_value: None,
+                    mode: ExtractionMode::Replace,
                 }],
             },
         ];
 
         let rulesets = vec![Ruleset {
-            id: 1, name: "server_rules".into(), template_id: 1, rule_ids: vec![1, 2, 3],
+            id: 1,
+            name: "server_rules".into(),
+            template_id: 1,
+            rule_ids: vec![1, 2, 3],
         }];
 
         let pattern = Pattern {
-            id: 1, name: "cross_source_detect".into(),
+            id: 1,
+            name: "cross_source_detect".into(),
             predicates: vec![
                 PatternPredicate {
-                    source_name: "server".into(), state_key: "region".into(),
+                    source_name: "server".into(),
+                    state_key: "region".into(),
                     operator: Operator::Eq,
-                    operand: Operand::StateRef { source_name: "client".into(), state_key: "region".into() },
+                    operand: Operand::StateRef {
+                        source_name: "client".into(),
+                        state_key: "region".into(),
+                    },
                 },
                 PatternPredicate {
-                    source_name: "server".into(), state_key: "player_count".into(),
+                    source_name: "server".into(),
+                    state_key: "player_count".into(),
                     operator: Operator::Gt,
                     operand: Operand::Literal(StateValue::Integer(50)),
                 },
@@ -1786,33 +1869,64 @@ mod tests {
         // Run streaming analysis
         let (tx, rx) = std::sync::mpsc::channel();
         analyze_streaming(
-            &sources, &[template.clone()], &[ts_template.clone()],
-            &rules, &rulesets, &[pattern.clone()], tx,
-        ).unwrap();
+            &sources,
+            std::slice::from_ref(&template),
+            std::slice::from_ref(&ts_template),
+            &rules,
+            &rulesets,
+            std::slice::from_ref(&pattern),
+            tx,
+        )
+        .unwrap();
 
         // Also run synchronous analysis for comparison
         let sync_result = analyze(
-            &sources, &[template], &[ts_template],
-            &rules, &rulesets, &[pattern],
-        ).unwrap();
+            &sources,
+            std::slice::from_ref(&template),
+            std::slice::from_ref(&ts_template),
+            &rules,
+            &rulesets,
+            std::slice::from_ref(&pattern),
+        )
+        .unwrap();
 
         // Collect streaming events
         let events: Vec<AnalysisEvent> = rx.iter().collect();
 
-        let stream_rule_matches: Vec<_> = events.iter().filter(|e| matches!(e, AnalysisEvent::RuleMatch(_))).collect();
-        let stream_pattern_matches: Vec<_> = events.iter().filter(|e| matches!(e, AnalysisEvent::PatternMatch(_))).collect();
-        let complete_events: Vec<_> = events.iter().filter(|e| matches!(e, AnalysisEvent::Complete { .. })).collect();
+        let stream_rule_matches: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, AnalysisEvent::RuleMatch(_)))
+            .collect();
+        let stream_pattern_matches: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, AnalysisEvent::PatternMatch(_)))
+            .collect();
+        let complete_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, AnalysisEvent::Complete { .. }))
+            .collect();
 
         // Same number of matches as synchronous
         assert_eq!(stream_rule_matches.len(), sync_result.rule_matches.len());
-        assert_eq!(stream_pattern_matches.len(), sync_result.pattern_matches.len());
+        assert_eq!(
+            stream_pattern_matches.len(),
+            sync_result.pattern_matches.len()
+        );
 
         // Exactly one Complete event
         assert_eq!(complete_events.len(), 1);
-        if let AnalysisEvent::Complete { total_lines, total_rule_matches, total_pattern_matches } = &complete_events[0] {
+        if let AnalysisEvent::Complete {
+            total_lines,
+            total_rule_matches,
+            total_pattern_matches,
+        } = &complete_events[0]
+        {
             assert_eq!(*total_lines, 5);
             assert_eq!(*total_rule_matches, sync_result.rule_matches.len() as u64);
-            assert_eq!(*total_pattern_matches, sync_result.pattern_matches.len() as u64);
+            assert_eq!(
+                *total_pattern_matches,
+                sync_result.pattern_matches.len() as u64
+            );
         } else {
             panic!("expected Complete event");
         }

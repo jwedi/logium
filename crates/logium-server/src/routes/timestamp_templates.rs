@@ -1,11 +1,11 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::{Json, Router};
 use axum::routing::get;
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use crate::AppState;
 use super::ApiResult;
+use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()

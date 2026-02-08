@@ -1,21 +1,18 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::{Json, Router};
 use axum::routing::get;
+use axum::{Json, Router};
 use serde::Deserialize;
 
 use logium_core::model::MatchMode;
 
-use crate::db::{CreateExtractionRule, CreateMatchRule};
-use crate::AppState;
 use super::ApiResult;
+use crate::AppState;
+use crate::db::{CreateExtractionRule, CreateMatchRule};
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/api/projects/{project_id}/rules",
-            get(list).post(create),
-        )
+        .route("/api/projects/{project_id}/rules", get(list).post(create))
         .route(
             "/api/projects/{project_id}/rules/{id}",
             get(get_one).put(update).delete(remove),

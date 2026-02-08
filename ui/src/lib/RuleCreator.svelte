@@ -1,7 +1,12 @@
 <script lang="ts">
   import { rules as rulesApi } from './api';
 
-  let { projectId, selectedText, onClose, onCreated }: {
+  let {
+    projectId,
+    selectedText,
+    onClose,
+    onCreated,
+  }: {
     projectId: number;
     selectedText: string;
     onClose: () => void;
@@ -11,7 +16,11 @@
   let ruleName = $state('');
   let regexPattern = $state('');
   let matchMode: 'Any' | 'All' = $state('Any');
-  let captureGroups: { name: string; extractionType: 'Parsed' | 'Static' | 'Clear'; mode: 'Replace' | 'Accumulate' }[] = $state([]);
+  let captureGroups: {
+    name: string;
+    extractionType: 'Parsed' | 'Static' | 'Clear';
+    mode: 'Replace' | 'Accumulate';
+  }[] = $state([]);
   let previewResult = $state('');
   let saving = $state(false);
 
@@ -51,7 +60,12 @@
       if (m) {
         previewResult = `Match: "${m[0]}"`;
         if (m.length > 1) {
-          previewResult += ' | Groups: ' + m.slice(1).map((g, i) => `${i}: "${g}"`).join(', ');
+          previewResult +=
+            ' | Groups: ' +
+            m
+              .slice(1)
+              .map((g, i) => `${i}: "${g}"`)
+              .join(', ');
         }
       } else {
         previewResult = 'No match on selected text';
@@ -68,7 +82,7 @@
   $effect(() => {
     regexPattern;
     const groups = detectGroups(regexPattern);
-    captureGroups = groups.map(name => ({
+    captureGroups = groups.map((name) => ({
       name,
       extractionType: 'Parsed' as const,
       mode: 'Replace' as const,
@@ -133,7 +147,10 @@
       <div class="field">
         <label>Regex Pattern</label>
         <textarea rows="3" bind:value={regexPattern} oninput={updatePreview}></textarea>
-        <div class="preview" class:error={previewResult.startsWith('Invalid') || previewResult.startsWith('No match')}>
+        <div
+          class="preview"
+          class:error={previewResult.startsWith('Invalid') || previewResult.startsWith('No match')}
+        >
           {previewResult}
         </div>
       </div>
@@ -170,7 +187,11 @@
 
     <div class="modal-footer">
       <button onclick={onClose}>Cancel</button>
-      <button class="primary" onclick={save} disabled={saving || !ruleName.trim() || !regexPattern.trim()}>
+      <button
+        class="primary"
+        onclick={save}
+        disabled={saving || !ruleName.trim() || !regexPattern.trim()}
+      >
         {saving ? 'Saving...' : 'Create Rule'}
       </button>
     </div>

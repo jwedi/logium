@@ -197,7 +197,7 @@ describe('TimelineDetailPanel', () => {
       event: makePatternTimelineEvent({
         patternMatch: makePatternMatch({
           state_snapshot: {
-            'src1': { key1: { String: 'val1' } },
+            src1: { key1: { String: 'val1' } },
           },
         }),
       }),

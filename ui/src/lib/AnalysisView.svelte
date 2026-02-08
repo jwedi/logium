@@ -1,5 +1,17 @@
 <script lang="ts">
-  import { analysis as analysisApi, sources as sourcesApi, rules as rulesApi, patterns as patternsApi, type AnalysisResult, type RuleMatch, type PatternMatch, type Source, type LogRule, type Pattern, type StateValue } from './api';
+  import {
+    analysis as analysisApi,
+    sources as sourcesApi,
+    rules as rulesApi,
+    patterns as patternsApi,
+    type AnalysisResult,
+    type RuleMatch,
+    type PatternMatch,
+    type Source,
+    type LogRule,
+    type Pattern,
+    type StateValue,
+  } from './api';
   import LogViewer from './LogViewer.svelte';
   import TimelineView from './TimelineView.svelte';
 
@@ -15,22 +27,22 @@
   let viewMode: 'table' | 'timeline' = $state('table');
   let linesProcessed: number = $state(0);
 
-  let selectedSource = $derived(sourceList.find(s => s.id === selectedSourceId) ?? null);
+  let selectedSource = $derived(sourceList.find((s) => s.id === selectedSourceId) ?? null);
 
   let sourceRuleMatches = $derived(
-    result?.rule_matches.filter(m => m.source_id === selectedSourceId) ?? []
+    result?.rule_matches.filter((m) => m.source_id === selectedSourceId) ?? [],
   );
 
   function getRuleName(id: number): string {
-    return ruleList.find(r => r.id === id)?.name ?? `Rule #${id}`;
+    return ruleList.find((r) => r.id === id)?.name ?? `Rule #${id}`;
   }
 
   function getPatternName(id: number): string {
-    return patternList.find(p => p.id === id)?.name ?? `Pattern #${id}`;
+    return patternList.find((p) => p.id === id)?.name ?? `Pattern #${id}`;
   }
 
   function getSourceName(id: number): string {
-    return sourceList.find(s => s.id === id)?.name ?? `Source #${id}`;
+    return sourceList.find((s) => s.id === id)?.name ?? `Source #${id}`;
   }
 
   function formatStateValue(sv: StateValue): string {
@@ -124,7 +136,11 @@
 <div class="header-row">
   <h2>Analysis</h2>
   <button class="primary" onclick={runAnalysis} disabled={running}>
-    {running ? (linesProcessed > 0 ? `Processing... ${linesProcessed} lines` : 'Running...') : 'Run Analysis'}
+    {running
+      ? linesProcessed > 0
+        ? `Processing... ${linesProcessed} lines`
+        : 'Running...'
+      : 'Run Analysis'}
   </button>
 </div>
 
@@ -148,8 +164,10 @@
   </div>
 
   <div class="view-tabs">
-    <button class:active={viewMode === 'table'} onclick={() => viewMode = 'table'}>Table</button>
-    <button class:active={viewMode === 'timeline'} onclick={() => viewMode = 'timeline'}>Timeline</button>
+    <button class:active={viewMode === 'table'} onclick={() => (viewMode = 'table')}>Table</button>
+    <button class:active={viewMode === 'timeline'} onclick={() => (viewMode = 'timeline')}
+      >Timeline</button
+    >
   </div>
 
   {#if viewMode === 'table'}
@@ -160,11 +178,13 @@
           {#each sourceList as src}
             <button
               class:active={selectedSourceId === src.id}
-              onclick={() => selectedSourceId = src.id}
+              onclick={() => (selectedSourceId = src.id)}
             >
               {src.name}
-              {#if result.rule_matches.filter(m => m.source_id === src.id).length > 0}
-                <span class="match-count">{result.rule_matches.filter(m => m.source_id === src.id).length}</span>
+              {#if result.rule_matches.filter((m) => m.source_id === src.id).length > 0}
+                <span class="match-count"
+                  >{result.rule_matches.filter((m) => m.source_id === src.id).length}</span
+                >
               {/if}
             </button>
           {/each}
@@ -231,7 +251,9 @@
     <TimelineView {result} {sourceList} {ruleList} {patternList} />
   {/if}
 {:else if !running}
-  <div class="empty">Click "Run Analysis" to analyze all sources with configured rules and patterns.</div>
+  <div class="empty">
+    Click "Run Analysis" to analyze all sources with configured rules and patterns.
+  </div>
 {/if}
 
 <style>
@@ -336,7 +358,8 @@
     margin-bottom: 24px;
   }
 
-  .pattern-matches-section, .rule-matches-section {
+  .pattern-matches-section,
+  .rule-matches-section {
     margin-top: 24px;
   }
 

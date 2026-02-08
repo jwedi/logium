@@ -16,7 +16,7 @@
   let loading = $state(false);
   let error: string | null = $state(null);
 
-  let currentProject = $derived(allProjects.find(p => p.id === currentProjectId) ?? null);
+  let currentProject = $derived(allProjects.find((p) => p.id === currentProjectId) ?? null);
 
   const navItems: { view: View; label: string; requiresProject: boolean }[] = [
     { view: 'projects', label: 'Projects', requiresProject: false },
@@ -51,7 +51,7 @@
   }
 
   function onProjectDeleted(id: number) {
-    allProjects = allProjects.filter(p => p.id !== id);
+    allProjects = allProjects.filter((p) => p.id !== id);
     if (currentProjectId === id) {
       currentProjectId = null;
       currentView = 'projects';
@@ -93,7 +93,7 @@
           <button
             class="nav-item"
             class:active={currentView === item.view}
-            onclick={() => currentView = item.view}
+            onclick={() => (currentView = item.view)}
           >
             {item.label}
           </button>

@@ -2,12 +2,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import AnalysisView from '../AnalysisView.svelte';
-import { makeAnalysisResult, makeSource, makeRule, makePattern, makeRuleMatch, makePatternMatch } from './fixtures';
+import {
+  makeAnalysisResult,
+  makeSource,
+  makeRule,
+  makePattern,
+  makeRuleMatch,
+  makePatternMatch,
+} from './fixtures';
 
 const mockRuleMatch = {
   rule_id: 1,
   source_id: 1,
-  log_line: { timestamp: '2024-01-15T10:30:00.000', source_id: 1, raw: 'ERROR test', content: 'test' },
+  log_line: {
+    timestamp: '2024-01-15T10:30:00.000',
+    source_id: 1,
+    raw: 'ERROR test',
+    content: 'test',
+  },
   extracted_state: {},
 };
 
@@ -32,15 +44,11 @@ let runStreamingImpl = defaultRunStreaming;
 
 // Mock the api module
 vi.mock('../api', () => {
-  const mockSources = [
-    { id: 1, name: 'app.log', template_id: 1, file_path: '/var/log/app.log' },
-  ];
+  const mockSources = [{ id: 1, name: 'app.log', template_id: 1, file_path: '/var/log/app.log' }];
   const mockRules = [
     { id: 1, name: 'Error Rule', match_mode: 'Any', match_rules: [], extraction_rules: [] },
   ];
-  const mockPatterns = [
-    { id: 1, name: 'Failure Pattern', predicates: [] },
-  ];
+  const mockPatterns = [{ id: 1, name: 'Failure Pattern', predicates: [] }];
 
   return {
     analysis: {
@@ -63,7 +71,12 @@ vi.mock('../api', () => {
 });
 
 // Get a reference to the mocked module
-import { analysis as analysisApi, sources as sourcesApi, rules as rulesApi, patterns as patternsApi } from '../api';
+import {
+  analysis as analysisApi,
+  sources as sourcesApi,
+  rules as rulesApi,
+  patterns as patternsApi,
+} from '../api';
 
 function renderAnalysis(projectId = 1) {
   return render(AnalysisView, { props: { projectId } });
@@ -162,7 +175,9 @@ describe('AnalysisView', () => {
       }, 0);
       return { close: vi.fn() };
     };
-    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) => runStreamingImpl(args[0], args[1]));
+    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) =>
+      runStreamingImpl(args[0], args[1]),
+    );
 
     renderAnalysis();
     await tick();
@@ -179,7 +194,9 @@ describe('AnalysisView', () => {
     runStreamingImpl = (_pid: number, _callbacks: any) => {
       return { close: vi.fn() };
     };
-    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) => runStreamingImpl(args[0], args[1]));
+    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) =>
+      runStreamingImpl(args[0], args[1]),
+    );
 
     renderAnalysis();
     await tick();

@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { templates as templatesApi, timestampTemplates as tsTemplatesApi, type SourceTemplate, type TimestampTemplate } from './api';
+  import {
+    templates as templatesApi,
+    timestampTemplates as tsTemplatesApi,
+    type SourceTemplate,
+    type TimestampTemplate,
+  } from './api';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -14,7 +19,7 @@
   let newContentRegex = $state('');
 
   function tsTemplateName(id: number): string {
-    return tsTemplateList.find(t => t.id === id)?.name ?? `#${id}`;
+    return tsTemplateList.find((t) => t.id === id)?.name ?? `#${id}`;
   }
 
   async function load() {
@@ -111,7 +116,11 @@
     </div>
   </div>
   <div class="actions">
-    <button class="primary" onclick={createTemplate} disabled={!newName.trim() || newTimestampTemplateId == null}>Create Template</button>
+    <button
+      class="primary"
+      onclick={createTemplate}
+      disabled={!newName.trim() || newTimestampTemplateId == null}>Create Template</button
+    >
   </div>
 </div>
 
@@ -148,7 +157,7 @@
           </div>
           <div class="actions">
             <button class="primary" onclick={updateTemplate}>Save</button>
-            <button onclick={() => editing = null}>Cancel</button>
+            <button onclick={() => (editing = null)}>Cancel</button>
           </div>
         {:else}
           <div class="template-info">
@@ -162,7 +171,7 @@
             </div>
           </div>
           <div class="template-actions">
-            <button onclick={() => editing = { ...tmpl }}>Edit</button>
+            <button onclick={() => (editing = { ...tmpl })}>Edit</button>
             <button class="danger" onclick={() => deleteTemplate(tmpl.id)}>Delete</button>
           </div>
         {/if}

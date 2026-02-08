@@ -1,19 +1,16 @@
 use axum::extract::{Multipart, Path, State};
 use axum::http::StatusCode;
-use axum::{Json, Router};
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::Deserialize;
 
-use crate::AppState;
 use super::{ApiError, ApiResult};
+use crate::AppState;
 use crate::db::DbError;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/api/projects/{project_id}/sources",
-            get(list).post(create),
-        )
+        .route("/api/projects/{project_id}/sources", get(list).post(create))
         .route(
             "/api/projects/{project_id}/sources/{id}",
             get(get_one).delete(remove),
@@ -78,15 +75,12 @@ async fn upload(
     // Verify source exists
     let _source = state.db.get_source(project_id, id).await?;
 
-    while let Some(field) = multipart
+    if let Some(field) = multipart
         .next_field()
         .await
         .map_err(|e| ApiError::from(DbError::InvalidData(format!("multipart error: {e}"))))?
     {
-        let file_name = field
-            .file_name()
-            .unwrap_or("upload.log")
-            .to_string();
+        let file_name = field.file_name().unwrap_or("upload.log").to_string();
         let data = field
             .bytes()
             .await
@@ -106,10 +100,10 @@ async fn upload(
             .await?;
 
         let source = state.db.get_source(project_id, id).await?;
-        return Ok(Json(serde_json::to_value(source).unwrap()));
+        Ok(Json(serde_json::to_value(source).unwrap()))
+    } else {
+        Err(ApiError::from(DbError::InvalidData(
+            "no file field in multipart upload".to_string(),
+        )))
     }
-
-    Err(ApiError::from(DbError::InvalidData(
-        "no file field in multipart upload".to_string(),
-    )))
 }

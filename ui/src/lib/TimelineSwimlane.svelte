@@ -13,7 +13,18 @@
     colorIndex: number;
   }
 
-  let { events, sourceName, laneWidth, totalHeight, minTime, msPerPixel, scrollTop = 0, viewportHeight = 600, selectedEventId = null, onEventClick }: {
+  let {
+    events,
+    sourceName,
+    laneWidth,
+    totalHeight,
+    minTime,
+    msPerPixel,
+    scrollTop = 0,
+    viewportHeight = 600,
+    selectedEventId = null,
+    onEventClick,
+  }: {
     events: TimelineEvent[];
     sourceName: string;
     laneWidth: number;
@@ -40,20 +51,24 @@
     const visMaxY = scrollTop + viewportHeight + 50;
 
     // Binary search for start
-    let lo = 0, hi = events.length;
+    let lo = 0,
+      hi = events.length;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
       const y = (events[mid].timestamp - minTime) / msPerPixel;
-      if (y < visMinY) lo = mid + 1; else hi = mid;
+      if (y < visMinY) lo = mid + 1;
+      else hi = mid;
     }
     const startIdx = lo;
 
     // Binary search for end
-    lo = startIdx; hi = events.length;
+    lo = startIdx;
+    hi = events.length;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
       const y = (events[mid].timestamp - minTime) / msPerPixel;
-      if (y <= visMaxY) lo = mid + 1; else hi = mid;
+      if (y <= visMaxY) lo = mid + 1;
+      else hi = mid;
     }
     const endIdx = lo;
 
@@ -96,7 +111,7 @@
   }
 
   function isSelected(item: ClusterOrDot): boolean {
-    return selectedEventId !== null && item.events.some(e => e.id === selectedEventId);
+    return selectedEventId !== null && item.events.some((e) => e.id === selectedEventId);
   }
 </script>
 
@@ -115,7 +130,8 @@
     >
       {#if isSelected(item)}
         <circle
-          cx={cx} cy={item.y}
+          {cx}
+          cy={item.y}
           r={DOT_RADIUS + 3}
           fill="none"
           stroke="var(--accent)"
@@ -123,19 +139,21 @@
         />
       {/if}
       <circle
-        cx={cx} cy={item.y}
+        {cx}
+        cy={item.y}
         r={item.isCluster ? DOT_RADIUS + 1 : DOT_RADIUS}
         fill={dotColor(item)}
         opacity={item.isCluster ? 0.8 : 0.7}
       />
       {#if item.isCluster}
         <text
-          x={cx} y={item.y + 3.5}
+          x={cx}
+          y={item.y + 3.5}
           text-anchor="middle"
           fill="var(--bg)"
           font-size="8"
-          font-weight="700"
-        >{item.events.length}</text>
+          font-weight="700">{item.events.length}</text
+        >
       {/if}
     </g>
   {/each}

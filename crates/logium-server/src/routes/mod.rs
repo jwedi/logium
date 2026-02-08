@@ -7,9 +7,9 @@ pub mod sources;
 pub mod templates;
 pub mod timestamp_templates;
 
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 
 use crate::db::DbError;
 
