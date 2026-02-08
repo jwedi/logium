@@ -6,6 +6,7 @@
     type Ruleset,
     type SuggestRuleResponse,
   } from './api';
+  import { invalidateAnalysis } from './analysisInvalidation.svelte';
 
   let {
     projectId,
@@ -159,6 +160,7 @@
         }
       }
 
+      invalidateAnalysis();
       onCreated();
     } catch (e: any) {
       alert(e.message);

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { rules as rulesApi, type LogRule } from './api';
+  import { invalidateAnalysis } from './analysisInvalidation.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -37,6 +38,7 @@
       newMatchPattern = '';
       showCreate = false;
       await load();
+      invalidateAnalysis();
     } catch (e: any) {
       alert(e.message);
     }
@@ -47,6 +49,7 @@
     try {
       await rulesApi.delete(projectId, id);
       await load();
+      invalidateAnalysis();
     } catch (e: any) {
       alert(e.message);
     }

@@ -14,6 +14,7 @@
   } from './api';
   import LogViewer from './LogViewer.svelte';
   import TimelineView from './TimelineView.svelte';
+  import { getInvalidationStamp } from './analysisInvalidation.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -26,6 +27,9 @@
   let selectedSourceId: number | null = $state(null);
   let viewMode: 'table' | 'timeline' = $state('table');
   let linesProcessed: number = $state(0);
+  let autoTriggered = $state(false);
+  let currentHandle: { close: () => void } | null = $state(null);
+  let lastRunStamp = $state(0);
 
   let selectedSource = $derived(sourceList.find((s) => s.id === selectedSourceId) ?? null);
 
@@ -65,11 +69,22 @@
     }
   }
 
-  function runAnalysis() {
+  function runAnalysis(auto = false) {
+    // Cancel any in-flight analysis
+    if (currentHandle) {
+      currentHandle.close();
+      currentHandle = null;
+    }
+
+    autoTriggered = auto;
     running = true;
     error = null;
     linesProcessed = 0;
+    lastRunStamp = getInvalidationStamp();
     result = { rule_matches: [], pattern_matches: [] };
+
+    // Re-fetch rules/patterns/sources for auto-reruns
+    load();
 
     // Buffers for batched UI updates
     let ruleMatchBuffer: RuleMatch[] = [];
@@ -108,6 +123,7 @@
           patternMatchBuffer = [];
         }
         running = false;
+        currentHandle = null;
       },
       onError: (message) => {
         clearInterval(flushInterval);
@@ -120,10 +136,11 @@
         }
         error = message;
         running = false;
+        currentHandle = null;
       },
     });
 
-    // Store handle for potential cancellation
+    currentHandle = handle;
     return handle;
   }
 
@@ -131,15 +148,28 @@
     projectId;
     load();
   });
+
+  // Auto-rerun analysis when rules/patterns/rulesets change
+  $effect(() => {
+    const stamp = getInvalidationStamp();
+    if (stamp > 0 && stamp !== lastRunStamp) {
+      const timer = setTimeout(() => {
+        runAnalysis(true);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  });
 </script>
 
 <div class="header-row">
   <h2>Analysis</h2>
-  <button class="primary" onclick={runAnalysis} disabled={running}>
+  <button class="primary" onclick={() => runAnalysis(false)} disabled={running}>
     {running
       ? linesProcessed > 0
         ? `Processing... ${linesProcessed} lines`
-        : 'Running...'
+        : autoTriggered
+          ? 'Re-analyzing...'
+          : 'Running...'
       : 'Run Analysis'}
   </button>
 </div>
