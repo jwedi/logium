@@ -138,9 +138,7 @@
     }
   }
 
-  let activePredicates = $derived(
-    editingPattern ? editingPattern.predicates : newPredicates,
-  );
+  let activePredicates = $derived(editingPattern ? editingPattern.predicates : newPredicates);
 
   $effect(() => {
     projectId;
