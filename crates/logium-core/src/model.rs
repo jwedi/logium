@@ -53,12 +53,22 @@ impl PartialOrd for StateValue {
     }
 }
 
+/// Timestamp template - describes how to parse timestamps from log lines.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimestampTemplate {
+    pub id: u64,
+    pub name: String,
+    pub format: String,
+    pub extraction_regex: Option<String>,
+    pub default_year: Option<i32>,
+}
+
 /// Source template - describes how to read a log source.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceTemplate {
     pub id: u64,
     pub name: String,
-    pub timestamp_format: String,
+    pub timestamp_template_id: u64,
     pub line_delimiter: String,
     pub content_regex: Option<String>,
 }

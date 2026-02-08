@@ -6,10 +6,18 @@ export interface Project {
   created_at: string;
 }
 
+export interface TimestampTemplate {
+  id: number;
+  name: string;
+  format: string;
+  extraction_regex: string | null;
+  default_year: number | null;
+}
+
 export interface SourceTemplate {
   id: number;
   name: string;
-  timestamp_format: string;
+  timestamp_template_id: number;
   line_delimiter: string;
   content_regex: string | null;
 }
@@ -121,6 +129,15 @@ export const projects = {
   create: (data: { name: string }) => request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
   update: (id: number, data: Partial<Project>) => request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
+};
+
+// Timestamp Templates
+export const timestampTemplates = {
+  list: (pid: number) => request<TimestampTemplate[]>(`/projects/${pid}/timestamp-templates`),
+  get: (pid: number, id: number) => request<TimestampTemplate>(`/projects/${pid}/timestamp-templates/${id}`),
+  create: (pid: number, data: Omit<TimestampTemplate, 'id'>) => request<TimestampTemplate>(`/projects/${pid}/timestamp-templates`, { method: 'POST', body: JSON.stringify(data) }),
+  update: (pid: number, id: number, data: Partial<TimestampTemplate>) => request<TimestampTemplate>(`/projects/${pid}/timestamp-templates/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  delete: (pid: number, id: number) => request<void>(`/projects/${pid}/timestamp-templates/${id}`, { method: 'DELETE' }),
 };
 
 // Templates

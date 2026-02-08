@@ -30,6 +30,7 @@ async fn analyze(
         logium_core::engine::analyze(
             &data.sources,
             &data.templates,
+            &data.timestamp_templates,
             &data.rules,
             &data.rulesets,
             &data.patterns,

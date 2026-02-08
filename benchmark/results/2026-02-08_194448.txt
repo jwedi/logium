@@ -1,0 +1,4 @@
+Benchmark                                         Low         Mean         High
+---------------------------------------- ------------ ------------ ------------
+nginx_cross_source_1k_each                 5.8346 ms   5.8571 ms   5.8810 ms
+nginx_large_51k_lines                      88.027 ms   88.263 ms   88.506 ms

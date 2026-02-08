@@ -43,6 +43,8 @@ pub struct LogLineIterator {
     reader: BufReader<File>,
     source_id: u64,
     timestamp_format: String,
+    extraction_regex: Option<Regex>,
+    default_year: Option<i32>,
     content_regex: Option<Regex>,
     buf: String,
 }
@@ -51,6 +53,7 @@ impl LogLineIterator {
     pub fn new(
         source: &Source,
         template: &SourceTemplate,
+        ts_template: &TimestampTemplate,
     ) -> Result<Self, AnalysisError> {
         let file = File::open(&source.file_path).map_err(|_| {
             AnalysisError::FileNotFound(source.file_path.clone())
@@ -63,10 +66,20 @@ impl LogLineIterator {
             }
             None => None,
         };
+        let extraction_regex = match &ts_template.extraction_regex {
+            Some(pat) => {
+                let re = Regex::new(pat)
+                    .map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
+                Some(re)
+            }
+            None => None,
+        };
         Ok(Self {
             reader: BufReader::new(file),
             source_id: source.id,
-            timestamp_format: template.timestamp_format.clone(),
+            timestamp_format: ts_template.format.clone(),
+            extraction_regex,
+            default_year: ts_template.default_year,
             content_regex,
             buf: String::new(),
         })
@@ -91,12 +104,34 @@ impl Iterator for LogLineIterator {
                 } else {
                     raw.clone()
                 };
-                let timestamp =
-                    NaiveDateTime::parse_from_str(&raw, &self.timestamp_format).or_else(|_| {
-                        // Try parsing only the prefix that matches the format length
-                        // by attempting progressively shorter prefixes
-                        parse_timestamp_prefix(&raw, &self.timestamp_format)
+
+                // Extract timestamp substring: use extraction_regex if set, otherwise raw line
+                let ts_input = if let Some(re) = &self.extraction_regex {
+                    if let Some(caps) = re.captures(&raw) {
+                        caps.get(1)
+                            .map(|m| m.as_str().to_string())
+                            .unwrap_or_else(|| raw.clone())
+                    } else {
+                        raw.clone()
+                    }
+                } else {
+                    raw.clone()
+                };
+
+                let timestamp = NaiveDateTime::parse_from_str(&ts_input, &self.timestamp_format)
+                    .or_else(|_| parse_timestamp_prefix(&ts_input, &self.timestamp_format))
+                    .or_else(|e| {
+                        // For yearless formats, prepend default_year and try again
+                        if let Some(year) = self.default_year {
+                            let augmented_input = format!("{year} {ts_input}");
+                            let augmented_fmt = format!("%Y {}", self.timestamp_format);
+                            NaiveDateTime::parse_from_str(&augmented_input, &augmented_fmt)
+                                .or_else(|_| parse_timestamp_prefix(&augmented_input, &augmented_fmt))
+                        } else {
+                            Err(e)
+                        }
                     });
+
                 match timestamp {
                     Ok(ts) => Some(Ok(LogLine {
                         timestamp: ts,
@@ -573,6 +608,7 @@ fn evaluate_predicate(pred: &PatternPredicate, state: &StateManager) -> bool {
 pub fn analyze(
     sources: &[Source],
     templates: &[SourceTemplate],
+    timestamp_templates: &[TimestampTemplate],
     rules: &[LogRule],
     rulesets: &[Ruleset],
     patterns: &[Pattern],
@@ -580,6 +616,10 @@ pub fn analyze(
     // Build template lookup
     let template_map: HashMap<u64, &SourceTemplate> =
         templates.iter().map(|t| (t.id, t)).collect();
+
+    // Build timestamp template lookup
+    let ts_template_map: HashMap<u64, &TimestampTemplate> =
+        timestamp_templates.iter().map(|t| (t.id, t)).collect();
 
     // Build rule lookup
     let rule_map: HashMap<u64, &LogRule> = rules.iter().map(|r| (r.id, r)).collect();
@@ -610,7 +650,13 @@ pub fn analyze(
                 "no template found for template_id {}",
                 source.template_id
             )))?;
-        iterators.push(LogLineIterator::new(source, template)?);
+        let ts_template = ts_template_map
+            .get(&template.timestamp_template_id)
+            .ok_or_else(|| AnalysisError::ParseError(format!(
+                "no timestamp template found for timestamp_template_id {}",
+                template.timestamp_template_id
+            )))?;
+        iterators.push(LogLineIterator::new(source, template, ts_template)?);
     }
 
     // K-way merge
@@ -1264,6 +1310,26 @@ mod tests {
     // K-way merge test
     // -----------------------------------------------------------------------
 
+    fn make_ts_template() -> TimestampTemplate {
+        TimestampTemplate {
+            id: 1,
+            name: "default".into(),
+            format: "%Y-%m-%d %H:%M:%S".into(),
+            extraction_regex: None,
+            default_year: None,
+        }
+    }
+
+    fn make_template() -> SourceTemplate {
+        SourceTemplate {
+            id: 1,
+            name: "test".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: None,
+        }
+    }
+
     #[test]
     fn test_kway_merge_three_sources() {
         // Create 3 temp files with interleaved timestamps
@@ -1281,13 +1347,8 @@ mod tests {
         writeln!(f3, "2024-01-01 00:00:03 source3 line1").unwrap();
         writeln!(f3, "2024-01-01 00:00:06 source3 line2").unwrap();
 
-        let template = SourceTemplate {
-            id: 1,
-            name: "test".into(),
-            timestamp_format: "%Y-%m-%d %H:%M:%S".into(),
-            line_delimiter: "\n".into(),
-            content_regex: None,
-        };
+        let template = make_template();
+        let ts_template = make_ts_template();
 
         let sources = vec![
             Source { id: 1, name: "s1".into(), template_id: 1, file_path: f1.path().to_str().unwrap().into() },
@@ -1297,7 +1358,7 @@ mod tests {
 
         let iters: Vec<LogLineIterator> = sources
             .iter()
-            .map(|s| LogLineIterator::new(s, &template).unwrap())
+            .map(|s| LogLineIterator::new(s, &template, &ts_template).unwrap())
             .collect();
 
         let stream = MergedLogStream::new(iters).unwrap();
@@ -1332,10 +1393,12 @@ mod tests {
         writeln!(client_log, "2024-01-01 00:00:02 [INFO] Client connecting to region us-east").unwrap();
         writeln!(client_log, "2024-01-01 00:00:04 [INFO] Client connected, status active").unwrap();
 
+        let ts_template = make_ts_template();
+
         let template = SourceTemplate {
             id: 1,
             name: "default".into(),
-            timestamp_format: "%Y-%m-%d %H:%M:%S".into(),
+            timestamp_template_id: 1,
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
         };
@@ -1449,6 +1512,7 @@ mod tests {
         let result = analyze(
             &sources,
             &[template],
+            &[ts_template],
             &rules,
             &rulesets,
             &[pattern],

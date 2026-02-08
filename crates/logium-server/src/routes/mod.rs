@@ -5,6 +5,7 @@ pub mod rules;
 pub mod rulesets;
 pub mod sources;
 pub mod templates;
+pub mod timestamp_templates;
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

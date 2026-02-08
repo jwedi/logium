@@ -1,21 +1,32 @@
 <script lang="ts">
-  import { templates as templatesApi, type SourceTemplate } from './api';
+  import { templates as templatesApi, timestampTemplates as tsTemplatesApi, type SourceTemplate, type TimestampTemplate } from './api';
 
   let { projectId }: { projectId: number } = $props();
 
   let templateList: SourceTemplate[] = $state([]);
+  let tsTemplateList: TimestampTemplate[] = $state([]);
   let loading = $state(false);
   let editing: SourceTemplate | null = $state(null);
 
   let newName = $state('');
-  let newTimestampFormat = $state('%Y-%m-%d %H:%M:%S');
+  let newTimestampTemplateId: number | null = $state(null);
   let newLineDelimiter = $state('\\n');
   let newContentRegex = $state('');
+
+  function tsTemplateName(id: number): string {
+    return tsTemplateList.find(t => t.id === id)?.name ?? `#${id}`;
+  }
 
   async function load() {
     loading = true;
     try {
-      templateList = await templatesApi.list(projectId);
+      [templateList, tsTemplateList] = await Promise.all([
+        templatesApi.list(projectId),
+        tsTemplatesApi.list(projectId),
+      ]);
+      if (tsTemplateList.length > 0 && newTimestampTemplateId == null) {
+        newTimestampTemplateId = tsTemplateList[0].id;
+      }
     } catch (e: any) {
       alert(e.message);
     } finally {
@@ -24,16 +35,15 @@
   }
 
   async function createTemplate() {
-    if (!newName.trim()) return;
+    if (!newName.trim() || newTimestampTemplateId == null) return;
     try {
       await templatesApi.create(projectId, {
         name: newName.trim(),
-        timestamp_format: newTimestampFormat,
+        timestamp_template_id: newTimestampTemplateId,
         line_delimiter: newLineDelimiter,
         content_regex: newContentRegex || null,
       });
       newName = '';
-      newTimestampFormat = '%Y-%m-%d %H:%M:%S';
       newLineDelimiter = '\\n';
       newContentRegex = '';
       await load();
@@ -80,8 +90,16 @@
       <input type="text" bind:value={newName} placeholder="Template name..." />
     </div>
     <div class="field">
-      <label>Timestamp Format</label>
-      <input type="text" bind:value={newTimestampFormat} placeholder="%Y-%m-%d %H:%M:%S" />
+      <label>Timestamp Template</label>
+      {#if tsTemplateList.length === 0}
+        <span class="hint">No timestamp templates available</span>
+      {:else}
+        <select bind:value={newTimestampTemplateId}>
+          {#each tsTemplateList as ts}
+            <option value={ts.id}>{ts.name} ({ts.format})</option>
+          {/each}
+        </select>
+      {/if}
     </div>
     <div class="field">
       <label>Line Delimiter</label>
@@ -93,7 +111,7 @@
     </div>
   </div>
   <div class="actions">
-    <button class="primary" onclick={createTemplate} disabled={!newName.trim()}>Create Template</button>
+    <button class="primary" onclick={createTemplate} disabled={!newName.trim() || newTimestampTemplateId == null}>Create Template</button>
   </div>
 </div>
 
@@ -112,8 +130,12 @@
               <input type="text" bind:value={editing.name} />
             </div>
             <div class="field">
-              <label>Timestamp Format</label>
-              <input type="text" bind:value={editing.timestamp_format} />
+              <label>Timestamp Template</label>
+              <select bind:value={editing.timestamp_template_id}>
+                {#each tsTemplateList as ts}
+                  <option value={ts.id}>{ts.name} ({ts.format})</option>
+                {/each}
+              </select>
             </div>
             <div class="field">
               <label>Line Delimiter</label>
@@ -132,7 +154,7 @@
           <div class="template-info">
             <span class="template-name">{tmpl.name}</span>
             <div class="template-details">
-              <span><strong>Format:</strong> {tmpl.timestamp_format}</span>
+              <span><strong>Timestamp:</strong> {tsTemplateName(tmpl.timestamp_template_id)}</span>
               <span><strong>Delimiter:</strong> {tmpl.line_delimiter}</span>
               {#if tmpl.content_regex}
                 <span><strong>Regex:</strong> <code>{tmpl.content_regex}</code></span>
@@ -203,5 +225,11 @@
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+  }
+
+  .hint {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-style: italic;
   }
 </style>

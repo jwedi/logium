@@ -1,3 +1,4 @@
+use chrono::Datelike;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 
@@ -56,11 +57,24 @@ impl Database {
         .await?;
 
         sqlx::query(
+            "CREATE TABLE IF NOT EXISTS timestamp_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                format TEXT NOT NULL,
+                extraction_regex TEXT,
+                default_year INTEGER
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS source_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
                 name TEXT NOT NULL,
-                timestamp_format TEXT NOT NULL,
+                timestamp_template_id INTEGER NOT NULL REFERENCES timestamp_templates(id),
                 line_delimiter TEXT NOT NULL,
                 content_regex TEXT
             )",
@@ -201,11 +215,34 @@ impl Database {
         .bind(&created_at)
         .fetch_one(&self.pool)
         .await?;
+        self.seed_default_timestamp_templates(id).await?;
         Ok(ProjectRow {
             id,
             name: name.to_string(),
             created_at,
         })
+    }
+
+    async fn seed_default_timestamp_templates(&self, project_id: i64) -> Result<(), DbError> {
+        let current_year = chrono::Utc::now().year();
+        let defaults: &[(&str, &str, Option<&str>, Option<i32>)] = &[
+            ("ISO 8601", "%Y-%m-%dT%H:%M:%S", None, None),
+            ("ISO 8601 (millis)", "%Y-%m-%dT%H:%M:%S%.f", None, None),
+            ("Standard Datetime", "%Y-%m-%d %H:%M:%S", None, None),
+            ("Standard Datetime (millis)", "%Y-%m-%d %H:%M:%S%.f", None, None),
+            (
+                "Apache/Nginx",
+                "%d/%b/%Y:%H:%M:%S",
+                Some(r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2})"),
+                None,
+            ),
+            ("Syslog (RFC 3164)", "%b %d %H:%M:%S", None, Some(current_year)),
+        ];
+        for (name, format, regex, year) in defaults {
+            self.create_timestamp_template(project_id, name, format, *regex, *year)
+                .await?;
+        }
+        Ok(())
     }
 
     pub async fn update_project(&self, id: i64, name: &str) -> Result<ProjectRow, DbError> {
@@ -235,9 +272,118 @@ impl Database {
     // Source Templates
     // -----------------------------------------------------------------------
 
+    // -----------------------------------------------------------------------
+    // Timestamp Templates
+    // -----------------------------------------------------------------------
+
+    pub async fn list_timestamp_templates(&self, project_id: i64) -> Result<Vec<TimestampTemplate>, DbError> {
+        let rows = sqlx::query(
+            "SELECT id, name, format, extraction_regex, default_year
+             FROM timestamp_templates WHERE project_id = ? ORDER BY id",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(row_to_timestamp_template).collect())
+    }
+
+    pub async fn get_timestamp_template(
+        &self,
+        project_id: i64,
+        id: i64,
+    ) -> Result<TimestampTemplate, DbError> {
+        let row = sqlx::query(
+            "SELECT id, name, format, extraction_regex, default_year
+             FROM timestamp_templates WHERE id = ? AND project_id = ?",
+        )
+        .bind(id)
+        .bind(project_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(DbError::NotFound)?;
+
+        Ok(row_to_timestamp_template(&row))
+    }
+
+    pub async fn create_timestamp_template(
+        &self,
+        project_id: i64,
+        name: &str,
+        format: &str,
+        extraction_regex: Option<&str>,
+        default_year: Option<i32>,
+    ) -> Result<TimestampTemplate, DbError> {
+        let id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO timestamp_templates (project_id, name, format, extraction_regex, default_year)
+             VALUES (?, ?, ?, ?, ?) RETURNING id",
+        )
+        .bind(project_id)
+        .bind(name)
+        .bind(format)
+        .bind(extraction_regex)
+        .bind(default_year)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(TimestampTemplate {
+            id: id as u64,
+            name: name.to_string(),
+            format: format.to_string(),
+            extraction_regex: extraction_regex.map(|s| s.to_string()),
+            default_year,
+        })
+    }
+
+    pub async fn update_timestamp_template(
+        &self,
+        project_id: i64,
+        id: i64,
+        name: &str,
+        format: &str,
+        extraction_regex: Option<&str>,
+        default_year: Option<i32>,
+    ) -> Result<TimestampTemplate, DbError> {
+        let result = sqlx::query(
+            "UPDATE timestamp_templates SET name = ?, format = ?, extraction_regex = ?, default_year = ?
+             WHERE id = ? AND project_id = ?",
+        )
+        .bind(name)
+        .bind(format)
+        .bind(extraction_regex)
+        .bind(default_year)
+        .bind(id)
+        .bind(project_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        self.get_timestamp_template(project_id, id).await
+    }
+
+    pub async fn delete_timestamp_template(&self, project_id: i64, id: i64) -> Result<(), DbError> {
+        let result = sqlx::query(
+            "DELETE FROM timestamp_templates WHERE id = ? AND project_id = ?",
+        )
+        .bind(id)
+        .bind(project_id)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Source Templates
+    // -----------------------------------------------------------------------
+
     pub async fn list_templates(&self, project_id: i64) -> Result<Vec<SourceTemplate>, DbError> {
         let rows = sqlx::query(
-            "SELECT id, name, timestamp_format, line_delimiter, content_regex
+            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex
              FROM source_templates WHERE project_id = ? ORDER BY id",
         )
         .bind(project_id)
@@ -253,7 +399,7 @@ impl Database {
         id: i64,
     ) -> Result<SourceTemplate, DbError> {
         let row = sqlx::query(
-            "SELECT id, name, timestamp_format, line_delimiter, content_regex
+            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex
              FROM source_templates WHERE id = ? AND project_id = ?",
         )
         .bind(id)
@@ -269,17 +415,17 @@ impl Database {
         &self,
         project_id: i64,
         name: &str,
-        timestamp_format: &str,
+        timestamp_template_id: i64,
         line_delimiter: &str,
         content_regex: Option<&str>,
     ) -> Result<SourceTemplate, DbError> {
         let id = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO source_templates (project_id, name, timestamp_format, line_delimiter, content_regex)
+            "INSERT INTO source_templates (project_id, name, timestamp_template_id, line_delimiter, content_regex)
              VALUES (?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(project_id)
         .bind(name)
-        .bind(timestamp_format)
+        .bind(timestamp_template_id)
         .bind(line_delimiter)
         .bind(content_regex)
         .fetch_one(&self.pool)
@@ -288,7 +434,7 @@ impl Database {
         Ok(SourceTemplate {
             id: id as u64,
             name: name.to_string(),
-            timestamp_format: timestamp_format.to_string(),
+            timestamp_template_id: timestamp_template_id as u64,
             line_delimiter: line_delimiter.to_string(),
             content_regex: content_regex.map(|s| s.to_string()),
         })
@@ -299,16 +445,16 @@ impl Database {
         project_id: i64,
         id: i64,
         name: &str,
-        timestamp_format: &str,
+        timestamp_template_id: i64,
         line_delimiter: &str,
         content_regex: Option<&str>,
     ) -> Result<SourceTemplate, DbError> {
         let result = sqlx::query(
-            "UPDATE source_templates SET name = ?, timestamp_format = ?, line_delimiter = ?, content_regex = ?
+            "UPDATE source_templates SET name = ?, timestamp_template_id = ?, line_delimiter = ?, content_regex = ?
              WHERE id = ? AND project_id = ?",
         )
         .bind(name)
-        .bind(timestamp_format)
+        .bind(timestamp_template_id)
         .bind(line_delimiter)
         .bind(content_regex)
         .bind(id)
@@ -981,12 +1127,14 @@ impl Database {
         &self,
         project_id: i64,
     ) -> Result<ProjectData, DbError> {
+        let timestamp_templates = self.list_timestamp_templates(project_id).await?;
         let templates = self.list_templates(project_id).await?;
         let sources = self.list_sources(project_id).await?;
         let rules = self.list_rules(project_id).await?;
         let rulesets = self.list_rulesets(project_id).await?;
         let patterns = self.list_patterns(project_id).await?;
         Ok(ProjectData {
+            timestamp_templates,
             templates,
             sources,
             rules,
@@ -1008,6 +1156,7 @@ pub struct ProjectRow {
 }
 
 pub struct ProjectData {
+    pub timestamp_templates: Vec<TimestampTemplate>,
     pub templates: Vec<SourceTemplate>,
     pub sources: Vec<Source>,
     pub rules: Vec<LogRule>,
@@ -1040,11 +1189,21 @@ pub struct CreatePredicate {
     pub operand: Operand,
 }
 
+fn row_to_timestamp_template(row: &sqlx::sqlite::SqliteRow) -> TimestampTemplate {
+    TimestampTemplate {
+        id: row.get::<i64, _>("id") as u64,
+        name: row.get("name"),
+        format: row.get("format"),
+        extraction_regex: row.get("extraction_regex"),
+        default_year: row.get("default_year"),
+    }
+}
+
 fn row_to_template(row: &sqlx::sqlite::SqliteRow) -> SourceTemplate {
     SourceTemplate {
         id: row.get::<i64, _>("id") as u64,
         name: row.get("name"),
-        timestamp_format: row.get("timestamp_format"),
+        timestamp_template_id: row.get::<i64, _>("timestamp_template_id") as u64,
         line_delimiter: row.get("line_delimiter"),
         content_regex: row.get("content_regex"),
     }
@@ -1246,15 +1405,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_timestamp_template_crud() {
+        let db = test_db().await;
+        let p = db.create_project("P1").await.unwrap();
+
+        let tt = db
+            .create_timestamp_template(
+                p.id,
+                "default_ts",
+                "%Y-%m-%d %H:%M:%S",
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(tt.name, "default_ts");
+        assert_eq!(tt.format, "%Y-%m-%d %H:%M:%S");
+        assert!(tt.extraction_regex.is_none());
+        assert!(tt.default_year.is_none());
+
+        let tts = db.list_timestamp_templates(p.id).await.unwrap();
+        // 6 seeded + 1 manually created
+        assert_eq!(tts.len(), 7);
+
+        let fetched = db.get_timestamp_template(p.id, tt.id as i64).await.unwrap();
+        assert_eq!(fetched.format, "%Y-%m-%d %H:%M:%S");
+
+        let updated = db
+            .update_timestamp_template(
+                p.id,
+                tt.id as i64,
+                "updated_ts",
+                "%d/%b/%Y:%H:%M:%S",
+                Some(r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2})"),
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(updated.name, "updated_ts");
+        assert!(updated.extraction_regex.is_some());
+
+        db.delete_timestamp_template(p.id, tt.id as i64).await.unwrap();
+        assert!(db.get_timestamp_template(p.id, tt.id as i64).await.is_err());
+    }
+
+    #[tokio::test]
     async fn test_template_crud() {
         let db = test_db().await;
         let p = db.create_project("P1").await.unwrap();
+
+        let tt = db
+            .create_timestamp_template(p.id, "ts", "%Y-%m-%d %H:%M:%S", None, None)
+            .await
+            .unwrap();
 
         let t = db
             .create_template(
                 p.id,
                 "default",
-                "%Y-%m-%d %H:%M:%S",
+                tt.id as i64,
                 "\n",
                 Some(r"^\d{4}.+$"),
             )
@@ -1262,15 +1471,16 @@ mod tests {
             .unwrap();
         assert_eq!(t.name, "default");
         assert_eq!(t.content_regex, Some(r"^\d{4}.+$".to_string()));
+        assert_eq!(t.timestamp_template_id, tt.id);
 
         let templates = db.list_templates(p.id).await.unwrap();
         assert_eq!(templates.len(), 1);
 
         let fetched = db.get_template(p.id, t.id as i64).await.unwrap();
-        assert_eq!(fetched.timestamp_format, "%Y-%m-%d %H:%M:%S");
+        assert_eq!(fetched.timestamp_template_id, tt.id);
 
         let updated = db
-            .update_template(p.id, t.id as i64, "updated", "%Y-%m-%d", "\r\n", None)
+            .update_template(p.id, t.id as i64, "updated", tt.id as i64, "\r\n", None)
             .await
             .unwrap();
         assert_eq!(updated.name, "updated");
@@ -1284,8 +1494,12 @@ mod tests {
     async fn test_source_crud() {
         let db = test_db().await;
         let p = db.create_project("P1").await.unwrap();
+        let tt = db
+            .create_timestamp_template(p.id, "ts", "%Y-%m-%d %H:%M:%S", None, None)
+            .await
+            .unwrap();
         let t = db
-            .create_template(p.id, "tmpl", "%Y-%m-%d %H:%M:%S", "\n", None)
+            .create_template(p.id, "tmpl", tt.id as i64, "\n", None)
             .await
             .unwrap();
 
@@ -1362,8 +1576,12 @@ mod tests {
     async fn test_ruleset_crud() {
         let db = test_db().await;
         let p = db.create_project("P1").await.unwrap();
+        let tt = db
+            .create_timestamp_template(p.id, "ts", "%Y", None, None)
+            .await
+            .unwrap();
         let t = db
-            .create_template(p.id, "tmpl", "%Y", "\n", None)
+            .create_template(p.id, "tmpl", tt.id as i64, "\n", None)
             .await
             .unwrap();
         let r1 = db
@@ -1437,6 +1655,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_project_seeds_default_timestamp_templates() {
+        let db = test_db().await;
+        let p = db.create_project("Seeded").await.unwrap();
+        let tts = db.list_timestamp_templates(p.id).await.unwrap();
+        assert_eq!(tts.len(), 6);
+        let names: Vec<&str> = tts.iter().map(|t| t.name.as_str()).collect();
+        assert!(names.contains(&"ISO 8601"));
+        assert!(names.contains(&"Syslog (RFC 3164)"));
+        let syslog = tts.iter().find(|t| t.name == "Syslog (RFC 3164)").unwrap();
+        assert!(syslog.default_year.is_some());
+    }
+
+    #[tokio::test]
     async fn test_pattern_with_state_ref_operand() {
         let db = test_db().await;
         let p = db.create_project("P1").await.unwrap();
@@ -1475,7 +1706,11 @@ mod tests {
     async fn test_load_project_data() {
         let db = test_db().await;
         let p = db.create_project("P1").await.unwrap();
-        db.create_template(p.id, "tmpl", "%Y", "\n", None)
+        let tt = db
+            .create_timestamp_template(p.id, "ts", "%Y", None, None)
+            .await
+            .unwrap();
+        db.create_template(p.id, "tmpl", tt.id as i64, "\n", None)
             .await
             .unwrap();
         db.create_rule(p.id, "r1", &MatchMode::Any, &[], &[])
@@ -1483,6 +1718,8 @@ mod tests {
             .unwrap();
 
         let data = db.load_project_data(p.id).await.unwrap();
+        // 6 seeded + 1 manually created
+        assert_eq!(data.timestamp_templates.len(), 7);
         assert_eq!(data.templates.len(), 1);
         assert_eq!(data.rules.len(), 1);
         assert!(data.sources.is_empty());
