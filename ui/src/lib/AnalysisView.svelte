@@ -17,7 +17,7 @@
 
   let { projectId }: { projectId: number } = $props();
 
-  let result: AnalysisResult | null = $state(null);
+  let result = $state<AnalysisResult | null>(null);
   let sourceList: Source[] = $state([]);
   let ruleList: LogRule[] = $state([]);
   let patternList: Pattern[] = $state([]);

@@ -13,7 +13,7 @@
   let patternList: Pattern[] = $state([]);
   let sourceList: Source[] = $state([]);
   let loading = $state(false);
-  let editingPattern: Pattern | null = $state(null);
+  let editingPattern = $state<Pattern | null>(null);
 
   const OPERATORS = ['Eq', 'Neq', 'Gt', 'Lt', 'Gte', 'Lte', 'Contains', 'Exists'];
 
@@ -138,7 +138,9 @@
     }
   }
 
-  let activePredicates = $derived(editingPattern ? editingPattern.predicates : newPredicates);
+  let activePredicates = $derived(
+    editingPattern ? editingPattern.predicates : newPredicates,
+  );
 
   $effect(() => {
     projectId;
