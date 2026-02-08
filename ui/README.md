@@ -1,47 +1,72 @@
-# Svelte + TS + Vite
+# Logium UI
 
-This template should help get you started developing with Svelte and TypeScript in Vite.
+Svelte 5 + TypeScript + Vite frontend for Logium, a log analysis tool that detects known failure cases by correlating events across multiple log sources.
 
-## Recommended IDE Setup
+## Getting Started
 
-[VS Code](https://code.visualstudio.com/) + [Svelte](https://marketplace.visualstudio.com/items?itemName=svelte.svelte-vscode).
-
-## Need an official Svelte framework?
-
-Check out [SvelteKit](https://github.com/sveltejs/kit#readme), which is also powered by Vite. Deploy anywhere with its serverless-first approach and adapt to various platforms, with out of the box support for TypeScript, SCSS, and Less, and easily-added support for mdsvex, GraphQL, PostCSS, Tailwind CSS, and more.
-
-## Technical considerations
-
-**Why use this over SvelteKit?**
-
-- It brings its own routing solution which might not be preferable for some users.
-- It is first and foremost a framework that just happens to use Vite under the hood, not a Vite app.
-
-This template contains as little as possible to get started with Vite + TypeScript + Svelte, while taking into account the developer experience with regards to HMR and intellisense. It demonstrates capabilities on par with the other `create-vite` templates and is a good starting point for beginners dipping their toes into a Vite + Svelte project.
-
-Should you later need the extended capabilities and extensibility provided by SvelteKit, the template has been structured similarly to SvelteKit so that it is easy to migrate.
-
-**Why `global.d.ts` instead of `compilerOptions.types` inside `jsconfig.json` or `tsconfig.json`?**
-
-Setting `compilerOptions.types` shuts out all other types not explicitly listed in the configuration. Using triple-slash references keeps the default TypeScript setting of accepting type information from the entire workspace, while also adding `svelte` and `vite/client` type information.
-
-**Why include `.vscode/extensions.json`?**
-
-Other templates indirectly recommend extensions via the README, but this file allows VS Code to prompt the user to install the recommended extension upon opening the project.
-
-**Why enable `allowJs` in the TS template?**
-
-While `allowJs: false` would indeed prevent the use of `.js` files in the project, it does not prevent the use of JavaScript syntax in `.svelte` files. In addition, it would force `checkJs: false`, bringing the worst of both worlds: not being able to guarantee the entire codebase is TypeScript, and also having worse typechecking for the existing JavaScript. In addition, there are valid use cases in which a mixed codebase may be relevant.
-
-**Why is HMR not preserving my local component state?**
-
-HMR state preservation comes with a number of gotchas! It has been disabled by default in both `svelte-hmr` and `@sveltejs/vite-plugin-svelte` due to its often surprising behavior. You can read the details [here](https://github.com/rixo/svelte-hmr#svelte-hmr).
-
-If you have state that's important to retain within a component, consider creating an external store which would not be replaced by HMR.
-
-```ts
-// store.ts
-// An extremely simple external store
-import { writable } from 'svelte/store'
-export default writable(0)
+```bash
+npm install
+npm run dev    # dev server with HMR
+npm run build  # production build to dist/
 ```
+
+The dev server proxies API requests to the Rust backend on port 3000.
+
+## Architecture
+
+The UI is a single-page app with client-side routing. Key views:
+
+| Component | Purpose |
+|-----------|---------|
+| `ProjectManager.svelte` | Project CRUD, top-level navigation |
+| `SourceManager.svelte` | Manage log sources and file uploads |
+| `TemplateManager.svelte` | Configure source templates and timestamp templates |
+| `RuleList.svelte` / `RuleCreator.svelte` | Manage log rules (match + extraction) |
+| `RulesetManager.svelte` | Group rules into rulesets |
+| `PatternEditor.svelte` | Define cross-source failure patterns |
+| `AnalysisView.svelte` | Run analysis, view results in Table or Timeline mode |
+| `LogViewer.svelte` | Virtualized log file viewer with rule match highlighting |
+
+## Analysis Views
+
+After running analysis, results can be viewed in two modes via a tab bar:
+
+### Table View
+
+The original flat view: source selector, virtualized LogViewer with match highlighting, pattern match cards, and a rule match table.
+
+### Timeline View
+
+A graphical timeline visualizing events on a time axis with per-source swimlanes.
+
+**Components:**
+
+```
+AnalysisView.svelte  (tab bar: Table | Timeline)
+  └─ TimelineView.svelte        (orchestrator: zoom/pan state, data transform)
+       ├─ TimelineAxis.svelte    (SVG time axis with adaptive ticks)
+       ├─ TimelineSwimlane.svelte (one SVG column per source: event dots + clustering)
+       └─ TimelineDetailPanel.svelte (right panel: event details on click)
+```
+
+**How it works:**
+
+1. **Data transform** -- `AnalysisResult` is transformed into `TimelineEvent[]` via `$derived.by()`. Timestamps are parsed from ISO strings, events are grouped by source into sorted `SourceLane[]` arrays.
+2. **Coordinate system** -- A `msPerPixel` ratio maps timestamps to Y pixel positions. Total virtual height scales with zoom level.
+3. **Virtual rendering** -- Each swimlane binary-searches its sorted events to find the visible range (O(log n)). Events within 3px are clustered into count-badged dots.
+4. **Adaptive axis** -- Tick intervals (100ms to 1h) auto-select targeting ~60px spacing. Format adapts from `HH:MM:SS.mmm` to `HH:MM` based on zoom.
+5. **Zoom/Pan** -- Pan via native scroll. Zoom via Ctrl/Cmd+scroll wheel (0.1x-50x), anchored on cursor position.
+6. **Click-to-inspect** -- Clicking an event dot opens a 300px detail panel showing rule match info (rule name, log line, extracted state) or pattern match info (state snapshot across sources).
+
+## Styling
+
+Uses a Tokyo Night-inspired dark theme defined in `app.css`. Key design tokens:
+
+- 6 rule colors (`--rule-color-N` / `--rule-border-N`) for distinguishing rules
+- `--purple` for pattern matches
+- `--cyan` for source names
+- `--font-mono` (JetBrains Mono) for code/data, `--font-sans` for UI
+
+## API
+
+All API calls go through `api.ts`, which provides typed clients for projects, sources, templates, rules, rulesets, patterns, and analysis. The backend serves at `/api/`.
