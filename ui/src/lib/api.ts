@@ -191,9 +191,58 @@ export const patterns = {
   delete: (pid: number, id: number) => request<void>(`/projects/${pid}/patterns/${id}`, { method: 'DELETE' }),
 };
 
+// Analysis events (matches Rust AnalysisEvent serde output)
+export type AnalysisEvent =
+  | { type: 'rule_match'; data: RuleMatch }
+  | { type: 'pattern_match'; data: PatternMatch }
+  | { type: 'progress'; data: { lines_processed: number } }
+  | { type: 'complete'; data: { total_lines: number; total_rule_matches: number; total_pattern_matches: number } }
+  | { type: 'error'; data: { message: string } };
+
+export interface StreamingCallbacks {
+  onRuleMatch: (rm: RuleMatch) => void;
+  onPatternMatch: (pm: PatternMatch) => void;
+  onProgress: (linesProcessed: number) => void;
+  onComplete: (totals: { total_lines: number; total_rule_matches: number; total_pattern_matches: number }) => void;
+  onError: (message: string) => void;
+}
+
 // Analysis
 export const analysis = {
   run: (pid: number) => request<AnalysisResult>(`/projects/${pid}/analyze`, { method: 'POST' }),
+  runStreaming: (pid: number, callbacks: StreamingCallbacks): { close: () => void } => {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(`${proto}//${window.location.host}/api/projects/${pid}/analyze/ws`);
+
+    ws.onmessage = (ev) => {
+      const event: AnalysisEvent = JSON.parse(ev.data);
+      switch (event.type) {
+        case 'rule_match':
+          callbacks.onRuleMatch(event.data);
+          break;
+        case 'pattern_match':
+          callbacks.onPatternMatch(event.data);
+          break;
+        case 'progress':
+          callbacks.onProgress(event.data.lines_processed);
+          break;
+        case 'complete':
+          callbacks.onComplete(event.data);
+          ws.close();
+          break;
+        case 'error':
+          callbacks.onError(event.data.message);
+          ws.close();
+          break;
+      }
+    };
+
+    ws.onerror = () => {
+      callbacks.onError('WebSocket connection failed');
+    };
+
+    return { close: () => ws.close() };
+  },
   detectTemplate: (pid: number, data: { content: string }) => request<SourceTemplate>(`/projects/${pid}/detect-template`, { method: 'POST', body: JSON.stringify(data) }),
   suggestRule: (pid: number, data: { text: string }) => request<LogRule>(`/projects/${pid}/suggest-rule`, { method: 'POST', body: JSON.stringify(data) }),
 };

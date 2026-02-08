@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { analysis as analysisApi, sources as sourcesApi, rules as rulesApi, patterns as patternsApi, type AnalysisResult, type Source, type LogRule, type Pattern, type StateValue } from './api';
+  import { analysis as analysisApi, sources as sourcesApi, rules as rulesApi, patterns as patternsApi, type AnalysisResult, type RuleMatch, type PatternMatch, type Source, type LogRule, type Pattern, type StateValue } from './api';
   import LogViewer from './LogViewer.svelte';
   import TimelineView from './TimelineView.svelte';
 
@@ -13,6 +13,7 @@
   let error: string | null = $state(null);
   let selectedSourceId: number | null = $state(null);
   let viewMode: 'table' | 'timeline' = $state('table');
+  let linesProcessed: number = $state(0);
 
   let selectedSource = $derived(sourceList.find(s => s.id === selectedSourceId) ?? null);
 
@@ -52,16 +53,66 @@
     }
   }
 
-  async function runAnalysis() {
+  function runAnalysis() {
     running = true;
     error = null;
-    try {
-      result = await analysisApi.run(projectId);
-    } catch (e: any) {
-      error = e.message;
-    } finally {
-      running = false;
-    }
+    linesProcessed = 0;
+    result = { rule_matches: [], pattern_matches: [] };
+
+    // Buffers for batched UI updates
+    let ruleMatchBuffer: RuleMatch[] = [];
+    let patternMatchBuffer: PatternMatch[] = [];
+
+    const flushInterval = setInterval(() => {
+      if (ruleMatchBuffer.length > 0 || patternMatchBuffer.length > 0) {
+        result = {
+          rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
+          pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
+        };
+        ruleMatchBuffer = [];
+        patternMatchBuffer = [];
+      }
+    }, 100);
+
+    const handle = analysisApi.runStreaming(projectId, {
+      onRuleMatch: (rm) => {
+        ruleMatchBuffer.push(rm);
+      },
+      onPatternMatch: (pm) => {
+        patternMatchBuffer.push(pm);
+      },
+      onProgress: (lines) => {
+        linesProcessed = lines;
+      },
+      onComplete: () => {
+        clearInterval(flushInterval);
+        // Final flush
+        if (ruleMatchBuffer.length > 0 || patternMatchBuffer.length > 0) {
+          result = {
+            rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
+            pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
+          };
+          ruleMatchBuffer = [];
+          patternMatchBuffer = [];
+        }
+        running = false;
+      },
+      onError: (message) => {
+        clearInterval(flushInterval);
+        // Final flush
+        if (ruleMatchBuffer.length > 0 || patternMatchBuffer.length > 0) {
+          result = {
+            rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
+            pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
+          };
+        }
+        error = message;
+        running = false;
+      },
+    });
+
+    // Store handle for potential cancellation
+    return handle;
   }
 
   $effect(() => {
@@ -73,7 +124,7 @@
 <div class="header-row">
   <h2>Analysis</h2>
   <button class="primary" onclick={runAnalysis} disabled={running}>
-    {running ? 'Running...' : 'Run Analysis'}
+    {running ? (linesProcessed > 0 ? `Processing... ${linesProcessed} lines` : 'Running...') : 'Run Analysis'}
   </button>
 </div>
 
