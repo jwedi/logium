@@ -15,8 +15,8 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
-    let db_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite:logium.db?mode=rwc".to_string());
+    let db_url =
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:logium.db?mode=rwc".to_string());
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let uploads_dir = std::env::var("UPLOADS_DIR")
         .map(PathBuf::from)

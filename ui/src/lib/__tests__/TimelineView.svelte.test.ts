@@ -56,7 +56,7 @@ describe('TimelineView', () => {
     expect(screen.getByText('app.log')).toBeInTheDocument();
     // Check lane counts via class selector to avoid collision with cluster badges
     const laneCounts = container.querySelectorAll('.lane-count');
-    const countTexts = Array.from(laneCounts).map(el => el.textContent);
+    const countTexts = Array.from(laneCounts).map((el) => el.textContent);
     expect(countTexts).toContain('2');
     expect(countTexts).toContain('1');
   });
@@ -129,18 +129,19 @@ describe('TimelineView', () => {
 
   it('matches snapshot with two sources and a pattern match', () => {
     const { container } = renderView({
-      sourceList: [
-        makeSource({ id: 1, name: 'src-a' }),
-        makeSource({ id: 2, name: 'src-b' }),
-      ],
+      sourceList: [makeSource({ id: 1, name: 'src-a' }), makeSource({ id: 2, name: 'src-b' })],
       result: makeAnalysisResult({
         rule_matches: [
-          makeRuleMatch({ source_id: 1, log_line: makeLogLine({ timestamp: '2024-01-15T10:30:00.000' }) }),
-          makeRuleMatch({ source_id: 2, log_line: makeLogLine({ timestamp: '2024-01-15T10:30:01.000' }) }),
+          makeRuleMatch({
+            source_id: 1,
+            log_line: makeLogLine({ timestamp: '2024-01-15T10:30:00.000' }),
+          }),
+          makeRuleMatch({
+            source_id: 2,
+            log_line: makeLogLine({ timestamp: '2024-01-15T10:30:01.000' }),
+          }),
         ],
-        pattern_matches: [
-          makePatternMatch({ timestamp: '2024-01-15T10:30:02.000' }),
-        ],
+        pattern_matches: [makePatternMatch({ timestamp: '2024-01-15T10:30:02.000' })],
       }),
     });
     expect(container.innerHTML).toMatchSnapshot();

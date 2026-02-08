@@ -1,5 +1,13 @@
 <script lang="ts">
-  import type { AnalysisResult, Source, LogRule, Pattern, RuleMatch, PatternMatch, StateValue } from './api';
+  import type {
+    AnalysisResult,
+    Source,
+    LogRule,
+    Pattern,
+    RuleMatch,
+    PatternMatch,
+    StateValue,
+  } from './api';
   import TimelineAxis from './TimelineAxis.svelte';
   import TimelineSwimlane from './TimelineSwimlane.svelte';
   import TimelineDetailPanel from './TimelineDetailPanel.svelte';
@@ -22,7 +30,12 @@
     events: TimelineEvent[];
   }
 
-  let { result, sourceList, ruleList, patternList }: {
+  let {
+    result,
+    sourceList,
+    ruleList,
+    patternList,
+  }: {
     result: AnalysisResult;
     sourceList: Source[];
     ruleList: LogRule[];
@@ -40,7 +53,7 @@
   let selectedEvent: TimelineEvent | null = $state(null);
 
   function getSourceName(id: number): string {
-    return sourceList.find(s => s.id === id)?.name ?? `Source #${id}`;
+    return sourceList.find((s) => s.id === id)?.name ?? `Source #${id}`;
   }
 
   // Transform analysis result into timeline events
@@ -83,7 +96,7 @@
 
   // Compute time domain
   let domain = $derived.by(() => {
-    const timestamps = allEvents.map(e => e.timestamp);
+    const timestamps = allEvents.map((e) => e.timestamp);
     if (timestamps.length === 0) return { minTime: 0, maxTime: 1000, span: 1000 };
     const minTime = Math.min(...timestamps);
     const maxTime = Math.max(...timestamps);
@@ -121,7 +134,7 @@
 
   // Pattern events for cross-lane bands
   let patternEvents = $derived(
-    allEvents.filter(e => e.type === 'pattern').sort((a, b) => a.timestamp - b.timestamp)
+    allEvents.filter((e) => e.type === 'pattern').sort((a, b) => a.timestamp - b.timestamp),
   );
 
   function onScroll() {
@@ -177,7 +190,7 @@
 
   $effect(() => {
     if (scrollContainer) {
-      const obs = new ResizeObserver(entries => {
+      const obs = new ResizeObserver((entries) => {
         for (const entry of entries) {
           viewportHeight = entry.contentRect.height;
         }
@@ -188,7 +201,7 @@
   });
 
   let laneWidth = $derived(
-    sourceLanes.length > 0 ? Math.max(60, Math.min(120, 600 / sourceLanes.length)) : 100
+    sourceLanes.length > 0 ? Math.max(60, Math.min(120, 600 / sourceLanes.length)) : 100,
   );
   let swimlanesWidth = $derived(sourceLanes.length * laneWidth);
 </script>
@@ -216,12 +229,7 @@
     </div>
 
     <!-- Scrollable timeline area -->
-    <div
-      class="scroll-area"
-      bind:this={scrollContainer}
-      onscroll={onScroll}
-      onwheel={onWheel}
-    >
+    <div class="scroll-area" bind:this={scrollContainer} onscroll={onScroll} onwheel={onWheel}>
       <div class="scroll-content" style="height: {totalHeight}px">
         <!-- Time axis -->
         <div class="axis-column">
@@ -235,11 +243,7 @@
         </div>
 
         <!-- Swimlanes SVG -->
-        <svg
-          class="swimlanes-svg"
-          width={swimlanesWidth}
-          height={totalHeight}
-        >
+        <svg class="swimlanes-svg" width={swimlanesWidth} height={totalHeight}>
           <!-- Alternating lane backgrounds -->
           {#each sourceLanes as lane, i}
             <rect
@@ -256,7 +260,8 @@
           {#each patternEvents as pev}
             {@const y = (pev.timestamp - domain.minTime) / msPerPixel}
             <rect
-              x="0" y={y - 1}
+              x="0"
+              y={y - 1}
               width={swimlanesWidth}
               height="3"
               fill="var(--purple)"
@@ -264,25 +269,16 @@
               rx="1"
             />
             <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <g
-              onclick={() => onEventClick(pev)}
-              role="button"
-              tabindex="0"
-              style="cursor: pointer"
-            >
-              <rect
-                x="0" y={y - 8}
-                width={swimlanesWidth}
-                height="16"
-                fill="transparent"
-              />
+            <g onclick={() => onEventClick(pev)} role="button" tabindex="0" style="cursor: pointer">
+              <rect x="0" y={y - 8} width={swimlanesWidth} height="16" fill="transparent" />
               <text
-                x="4" y={y - 4}
+                x="4"
+                y={y - 4}
                 fill="var(--purple)"
                 font-size="9"
                 font-family="var(--font-mono)"
-                opacity="0.7"
-              >PM</text>
+                opacity="0.7">PM</text
+              >
             </g>
           {/each}
 
@@ -314,7 +310,7 @@
       {sourceList}
       {ruleList}
       {patternList}
-      onClose={() => selectedEvent = null}
+      onClose={() => (selectedEvent = null)}
     />
   {/if}
 </div>

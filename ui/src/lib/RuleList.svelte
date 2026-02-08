@@ -60,7 +60,7 @@
 
 <div class="header-row">
   <h2>Rules</h2>
-  <button class="primary" onclick={() => showCreate = !showCreate}>
+  <button class="primary" onclick={() => (showCreate = !showCreate)}>
     {showCreate ? 'Cancel' : 'New Rule'}
   </button>
 </div>
@@ -82,11 +82,16 @@
       </div>
       <div class="field">
         <label>Match Pattern (regex)</label>
-        <textarea rows="2" bind:value={newMatchPattern} placeholder="e\.g\. ERROR.*timeout"></textarea>
+        <textarea rows="2" bind:value={newMatchPattern} placeholder="e\.g\. ERROR.*timeout"
+        ></textarea>
       </div>
     </div>
     <div class="actions">
-      <button class="primary" onclick={createRule} disabled={!newName.trim() || !newMatchPattern.trim()}>
+      <button
+        class="primary"
+        onclick={createRule}
+        disabled={!newName.trim() || !newMatchPattern.trim()}
+      >
         Create
       </button>
     </div>
@@ -96,20 +101,41 @@
 {#if loading}
   <div class="empty">Loading...</div>
 {:else if ruleList.length === 0}
-  <div class="empty">No rules yet. Create one or use the log viewer to create rules from text selection.</div>
+  <div class="empty">
+    No rules yet. Create one or use the log viewer to create rules from text selection.
+  </div>
 {:else}
   <div class="rule-list">
     {#each ruleList as rule}
       <div class="rule-card card">
-        <div class="rule-header" onclick={() => expandedId = expandedId === rule.id ? null : rule.id} onkeydown={(e) => e.key === 'Enter' && (expandedId = expandedId === rule.id ? null : rule.id)} role="button" tabindex="0">
+        <div
+          class="rule-header"
+          onclick={() => (expandedId = expandedId === rule.id ? null : rule.id)}
+          onkeydown={(e) =>
+            e.key === 'Enter' && (expandedId = expandedId === rule.id ? null : rule.id)}
+          role="button"
+          tabindex="0"
+        >
           <div class="rule-info">
             <span class="rule-name">{rule.name}</span>
             <span class="badge">{rule.match_mode}</span>
-            <span class="badge">{rule.match_rules.length} match{rule.match_rules.length !== 1 ? 'es' : ''}</span>
-            <span class="badge">{rule.extraction_rules.length} extraction{rule.extraction_rules.length !== 1 ? 's' : ''}</span>
+            <span class="badge"
+              >{rule.match_rules.length} match{rule.match_rules.length !== 1 ? 'es' : ''}</span
+            >
+            <span class="badge"
+              >{rule.extraction_rules.length} extraction{rule.extraction_rules.length !== 1
+                ? 's'
+                : ''}</span
+            >
           </div>
           <div class="rule-actions">
-            <button class="danger" onclick={(e) => { e.stopPropagation(); deleteRule(rule.id); }}>Delete</button>
+            <button
+              class="danger"
+              onclick={(e) => {
+                e.stopPropagation();
+                deleteRule(rule.id);
+              }}>Delete</button
+            >
           </div>
         </div>
 

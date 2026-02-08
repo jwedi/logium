@@ -1,5 +1,11 @@
 <script lang="ts">
-  let { minTime, maxTime, msPerPixel, scrollTop = 0, viewportHeight = 600 }: {
+  let {
+    minTime,
+    maxTime,
+    msPerPixel,
+    scrollTop = 0,
+    viewportHeight = 600,
+  }: {
     minTime: number;
     maxTime: number;
     msPerPixel: number;
@@ -8,9 +14,7 @@
   } = $props();
 
   const NICE_INTERVALS = [
-    100, 250, 500,
-    1_000, 2_000, 5_000, 10_000, 15_000, 30_000,
-    60_000, 120_000, 300_000, 600_000,
+    100, 250, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000,
     1_800_000, 3_600_000,
   ];
 
@@ -63,20 +67,15 @@
 
 <svg class="timeline-axis" width="80" height={totalHeight}>
   {#each ticks as tick}
-    <line
-      x1="70" y1={tick.y}
-      x2="80" y2={tick.y}
-      stroke="var(--text-muted)"
-      stroke-width="1"
-    />
+    <line x1="70" y1={tick.y} x2="80" y2={tick.y} stroke="var(--text-muted)" stroke-width="1" />
     <text
       x="66"
       y={tick.y + 4}
       text-anchor="end"
       fill="var(--text-dim)"
       font-family="var(--font-mono)"
-      font-size="11"
-    >{tick.label}</text>
+      font-size="11">{tick.label}</text
+    >
   {/each}
 </svg>
 

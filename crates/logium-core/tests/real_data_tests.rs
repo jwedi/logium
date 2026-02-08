@@ -1,4 +1,4 @@
-use logium_core::engine::{analyze, LogLineIterator};
+use logium_core::engine::{LogLineIterator, analyze};
 use logium_core::model::*;
 
 use std::path::PathBuf;
@@ -148,7 +148,10 @@ fn test_zookeeper_cross_source() {
         id: 1,
         name: "detect_warn".into(),
         match_mode: MatchMode::Any,
-        match_rules: vec![MatchRule { id: 1, pattern: r"WARN".into() }],
+        match_rules: vec![MatchRule {
+            id: 1,
+            pattern: r"WARN".into(),
+        }],
         extraction_rules: vec![ExtractionRule {
             id: 1,
             extraction_type: ExtractionType::Static,
@@ -163,7 +166,10 @@ fn test_zookeeper_cross_source() {
         id: 2,
         name: "detect_connection".into(),
         match_mode: MatchMode::Any,
-        match_rules: vec![MatchRule { id: 2, pattern: r"Connection broken|connection request".into() }],
+        match_rules: vec![MatchRule {
+            id: 2,
+            pattern: r"Connection broken|connection request".into(),
+        }],
         extraction_rules: vec![ExtractionRule {
             id: 2,
             extraction_type: ExtractionType::Static,
@@ -422,7 +428,10 @@ fn test_timestamp_template_reuse() {
         id: 1,
         name: "detect_info".into(),
         match_mode: MatchMode::Any,
-        match_rules: vec![MatchRule { id: 1, pattern: r"INFO".into() }],
+        match_rules: vec![MatchRule {
+            id: 1,
+            pattern: r"INFO".into(),
+        }],
         extraction_rules: vec![ExtractionRule {
             id: 1,
             extraction_type: ExtractionType::Static,
@@ -433,8 +442,18 @@ fn test_timestamp_template_reuse() {
         }],
     };
 
-    let rs_a = Ruleset { id: 1, name: "rs_a".into(), template_id: 1, rule_ids: vec![1] };
-    let rs_b = Ruleset { id: 2, name: "rs_b".into(), template_id: 2, rule_ids: vec![1] };
+    let rs_a = Ruleset {
+        id: 1,
+        name: "rs_a".into(),
+        template_id: 1,
+        rule_ids: vec![1],
+    };
+    let rs_b = Ruleset {
+        id: 2,
+        name: "rs_b".into(),
+        template_id: 2,
+        rule_ids: vec![1],
+    };
 
     let pattern = Pattern {
         id: 1,

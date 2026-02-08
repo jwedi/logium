@@ -1,12 +1,12 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::{Json, Router};
 use axum::routing::get;
+use axum::{Json, Router};
 use serde::Deserialize;
 
-use crate::db::CreatePredicate;
-use crate::AppState;
 use super::ApiResult;
+use crate::AppState;
+use crate::db::CreatePredicate;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -43,10 +43,7 @@ async fn create(
         .db
         .create_pattern(project_id, &body.name, &body.predicates)
         .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::to_value(p).unwrap()),
-    ))
+    Ok((StatusCode::CREATED, Json(serde_json::to_value(p).unwrap())))
 }
 
 async fn get_one(

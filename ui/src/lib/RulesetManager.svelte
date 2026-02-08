@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { rulesets as rulesetsApi, rules as rulesApi, templates as templatesApi, type Ruleset, type LogRule, type SourceTemplate } from './api';
+  import {
+    rulesets as rulesetsApi,
+    rules as rulesApi,
+    templates as templatesApi,
+    type Ruleset,
+    type LogRule,
+    type SourceTemplate,
+  } from './api';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -29,7 +36,7 @@
   }
 
   function toggleRule(ruleId: number, list: number[]): number[] {
-    return list.includes(ruleId) ? list.filter(id => id !== ruleId) : [...list, ruleId];
+    return list.includes(ruleId) ? list.filter((id) => id !== ruleId) : [...list, ruleId];
   }
 
   async function createRuleset() {
@@ -76,11 +83,11 @@
   }
 
   function getTemplateName(id: number): string {
-    return templateList.find(t => t.id === id)?.name ?? `Template #${id}`;
+    return templateList.find((t) => t.id === id)?.name ?? `Template #${id}`;
   }
 
   function getRuleName(id: number): string {
-    return ruleList.find(r => r.id === id)?.name ?? `Rule #${id}`;
+    return ruleList.find((r) => r.id === id)?.name ?? `Rule #${id}`;
   }
 
   $effect(() => {
@@ -118,7 +125,7 @@
               <input
                 type="checkbox"
                 checked={newRuleIds.includes(rule.id)}
-                onchange={() => newRuleIds = toggleRule(rule.id, newRuleIds)}
+                onchange={() => (newRuleIds = toggleRule(rule.id, newRuleIds))}
               />
               {rule.name}
             </label>
@@ -166,7 +173,9 @@
                     <input
                       type="checkbox"
                       checked={editing.rule_ids.includes(rule.id)}
-                      onchange={() => { if (editing) editing.rule_ids = toggleRule(rule.id, editing.rule_ids); }}
+                      onchange={() => {
+                        if (editing) editing.rule_ids = toggleRule(rule.id, editing.rule_ids);
+                      }}
                     />
                     {rule.name}
                   </label>
@@ -176,7 +185,7 @@
           </div>
           <div class="actions">
             <button class="primary" onclick={updateRuleset}>Save</button>
-            <button onclick={() => editing = null}>Cancel</button>
+            <button onclick={() => (editing = null)}>Cancel</button>
           </div>
         {:else}
           <div class="ruleset-info">
@@ -195,7 +204,7 @@
             </div>
           </div>
           <div class="ruleset-actions">
-            <button onclick={() => editing = { ...rs, rule_ids: [...rs.rule_ids] }}>Edit</button>
+            <button onclick={() => (editing = { ...rs, rule_ids: [...rs.rule_ids] })}>Edit</button>
             <button class="danger" onclick={() => deleteRuleset(rs.id)}>Delete</button>
           </div>
         {/if}

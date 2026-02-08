@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use logium_core::engine::analyze;
 use logium_core::model::*;
 use std::path::PathBuf;
@@ -106,11 +106,11 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
         b.iter(|| {
             analyze(
                 &[src_a.clone(), src_b.clone()],
-                &[tmpl.clone()],
-                &[ts.clone()],
+                std::slice::from_ref(&tmpl),
+                std::slice::from_ref(&ts),
                 &[status_rule.clone(), method_rule.clone()],
-                &[ruleset.clone()],
-                &[pattern.clone()],
+                std::slice::from_ref(&ruleset),
+                std::slice::from_ref(&pattern),
             )
             .unwrap()
         });
@@ -175,12 +175,12 @@ fn bench_nginx_large(c: &mut Criterion) {
     c.bench_function("nginx_large_51k_lines", |b| {
         b.iter(|| {
             analyze(
-                &[src.clone()],
-                &[tmpl.clone()],
-                &[ts.clone()],
-                &[status_rule.clone()],
-                &[ruleset.clone()],
-                &[pattern.clone()],
+                std::slice::from_ref(&src),
+                std::slice::from_ref(&tmpl),
+                std::slice::from_ref(&ts),
+                std::slice::from_ref(&status_rule),
+                std::slice::from_ref(&ruleset),
+                std::slice::from_ref(&pattern),
             )
             .unwrap()
         });

@@ -1,8 +1,20 @@
 <script lang="ts">
-  import { rules as rulesApi, type Source, type LogRule, type RuleMatch, type PatternMatch, type StateValue } from './api';
+  import {
+    rules as rulesApi,
+    type Source,
+    type LogRule,
+    type RuleMatch,
+    type PatternMatch,
+    type StateValue,
+  } from './api';
   import RuleCreator from './RuleCreator.svelte';
 
-  let { source, projectId, ruleMatches = [], patternMatches = [] }: {
+  let {
+    source,
+    projectId,
+    ruleMatches = [],
+    patternMatches = [],
+  }: {
     source: Source;
     projectId: number;
     ruleMatches?: RuleMatch[];
@@ -24,7 +36,9 @@
 
   let totalHeight = $derived(lines.length * LINE_HEIGHT);
   let startIdx = $derived(Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - OVERSCAN));
-  let endIdx = $derived(Math.min(lines.length, Math.ceil((scrollTop + containerHeight) / LINE_HEIGHT) + OVERSCAN));
+  let endIdx = $derived(
+    Math.min(lines.length, Math.ceil((scrollTop + containerHeight) / LINE_HEIGHT) + OVERSCAN),
+  );
   let visibleLines = $derived(lines.slice(startIdx, endIdx));
   let offsetY = $derived(startIdx * LINE_HEIGHT);
 
@@ -34,7 +48,7 @@
     for (const m of ruleMatches) {
       if (m.source_id !== source.id) continue;
       // Try to find the line index by raw content match
-      const idx = lines.findIndex(l => l === m.log_line.raw);
+      const idx = lines.findIndex((l) => l === m.log_line.raw);
       if (idx >= 0) {
         if (!map.has(idx)) map.set(idx, []);
         map.get(idx)!.push({ ruleId: m.rule_id, match: m });
@@ -105,7 +119,9 @@
   async function loadRules() {
     try {
       allRules = await rulesApi.list(projectId);
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   function onLineClick(globalIdx: number) {
@@ -140,7 +156,7 @@
 
   $effect(() => {
     if (container) {
-      const obs = new ResizeObserver(entries => {
+      const obs = new ResizeObserver((entries) => {
         for (const entry of entries) {
           containerHeight = entry.contentRect.height;
         }
@@ -168,7 +184,9 @@
             class="log-line"
             class:highlighted={!!matches}
             class:selected={selectedLineIdx === globalIdx}
-            style={matches ? `background: var(--rule-color-${getRuleColor(matches[0].ruleId)}); border-left: 3px solid var(--rule-border-${getRuleColor(matches[0].ruleId)})` : ''}
+            style={matches
+              ? `background: var(--rule-color-${getRuleColor(matches[0].ruleId)}); border-left: 3px solid var(--rule-border-${getRuleColor(matches[0].ruleId)})`
+              : ''}
             onclick={() => onLineClick(globalIdx)}
             role="button"
             tabindex="0"
@@ -184,13 +202,14 @@
   {#if selectedLineIdx !== null && lineMatchMap.has(selectedLineIdx)}
     <div class="state-panel">
       <h3>Extracted State</h3>
-      <button class="close-btn" onclick={() => selectedLineIdx = null}>x</button>
+      <button class="close-btn" onclick={() => (selectedLineIdx = null)}>x</button>
       {#each lineMatchMap.get(selectedLineIdx)! as { ruleId, match }}
         <div class="state-group">
           <div class="state-rule-name">
             Rule #{ruleId}
             {#each allRules as r}
-              {#if r.id === ruleId} - {r.name}{/if}
+              {#if r.id === ruleId}
+                - {r.name}{/if}
             {/each}
           </div>
           {#each Object.entries(match.extracted_state) as [key, val]}
@@ -216,7 +235,7 @@
   <RuleCreator
     {projectId}
     {selectedText}
-    onClose={() => showRuleCreator = false}
+    onClose={() => (showRuleCreator = false)}
     onCreated={onRuleCreated}
   />
 {/if}
@@ -348,6 +367,6 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   }
 </style>

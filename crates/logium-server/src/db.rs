@@ -1,6 +1,6 @@
 use chrono::Datelike;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use logium_core::model::*;
 
@@ -197,13 +197,11 @@ impl Database {
     }
 
     pub async fn get_project(&self, id: i64) -> Result<ProjectRow, DbError> {
-        sqlx::query_as::<_, ProjectRow>(
-            "SELECT id, name, created_at FROM projects WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(DbError::NotFound)
+        sqlx::query_as::<_, ProjectRow>("SELECT id, name, created_at FROM projects WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DbError::NotFound)
     }
 
     pub async fn create_project(&self, name: &str) -> Result<ProjectRow, DbError> {
@@ -229,14 +227,24 @@ impl Database {
             ("ISO 8601", "%Y-%m-%dT%H:%M:%S", None, None),
             ("ISO 8601 (millis)", "%Y-%m-%dT%H:%M:%S%.f", None, None),
             ("Standard Datetime", "%Y-%m-%d %H:%M:%S", None, None),
-            ("Standard Datetime (millis)", "%Y-%m-%d %H:%M:%S%.f", None, None),
+            (
+                "Standard Datetime (millis)",
+                "%Y-%m-%d %H:%M:%S%.f",
+                None,
+                None,
+            ),
             (
                 "Apache/Nginx",
                 "%d/%b/%Y:%H:%M:%S",
                 Some(r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2})"),
                 None,
             ),
-            ("Syslog (RFC 3164)", "%b %d %H:%M:%S", None, Some(current_year)),
+            (
+                "Syslog (RFC 3164)",
+                "%b %d %H:%M:%S",
+                None,
+                Some(current_year),
+            ),
         ];
         for (name, format, regex, year) in defaults {
             self.create_timestamp_template(project_id, name, format, *regex, *year)
@@ -276,7 +284,10 @@ impl Database {
     // Timestamp Templates
     // -----------------------------------------------------------------------
 
-    pub async fn list_timestamp_templates(&self, project_id: i64) -> Result<Vec<TimestampTemplate>, DbError> {
+    pub async fn list_timestamp_templates(
+        &self,
+        project_id: i64,
+    ) -> Result<Vec<TimestampTemplate>, DbError> {
         let rows = sqlx::query(
             "SELECT id, name, format, extraction_regex, default_year
              FROM timestamp_templates WHERE project_id = ? ORDER BY id",
@@ -364,13 +375,11 @@ impl Database {
     }
 
     pub async fn delete_timestamp_template(&self, project_id: i64, id: i64) -> Result<(), DbError> {
-        let result = sqlx::query(
-            "DELETE FROM timestamp_templates WHERE id = ? AND project_id = ?",
-        )
-        .bind(id)
-        .bind(project_id)
-        .execute(&self.pool)
-        .await?;
+        let result = sqlx::query("DELETE FROM timestamp_templates WHERE id = ? AND project_id = ?")
+            .bind(id)
+            .bind(project_id)
+            .execute(&self.pool)
+            .await?;
         if result.rows_affected() == 0 {
             return Err(DbError::NotFound);
         }
@@ -393,11 +402,7 @@ impl Database {
         Ok(rows.iter().map(row_to_template).collect())
     }
 
-    pub async fn get_template(
-        &self,
-        project_id: i64,
-        id: i64,
-    ) -> Result<SourceTemplate, DbError> {
+    pub async fn get_template(&self, project_id: i64, id: i64) -> Result<SourceTemplate, DbError> {
         let row = sqlx::query(
             "SELECT id, name, timestamp_template_id, line_delimiter, content_regex
              FROM source_templates WHERE id = ? AND project_id = ?",
@@ -469,13 +474,11 @@ impl Database {
     }
 
     pub async fn delete_template(&self, project_id: i64, id: i64) -> Result<(), DbError> {
-        let result = sqlx::query(
-            "DELETE FROM source_templates WHERE id = ? AND project_id = ?",
-        )
-        .bind(id)
-        .bind(project_id)
-        .execute(&self.pool)
-        .await?;
+        let result = sqlx::query("DELETE FROM source_templates WHERE id = ? AND project_id = ?")
+            .bind(id)
+            .bind(project_id)
+            .execute(&self.pool)
+            .await?;
         if result.rows_affected() == 0 {
             return Err(DbError::NotFound);
         }
@@ -542,14 +545,13 @@ impl Database {
         id: i64,
         file_path: &str,
     ) -> Result<(), DbError> {
-        let result = sqlx::query(
-            "UPDATE sources SET file_path = ? WHERE id = ? AND project_id = ?",
-        )
-        .bind(file_path)
-        .bind(id)
-        .bind(project_id)
-        .execute(&self.pool)
-        .await?;
+        let result =
+            sqlx::query("UPDATE sources SET file_path = ? WHERE id = ? AND project_id = ?")
+                .bind(file_path)
+                .bind(id)
+                .bind(project_id)
+                .execute(&self.pool)
+                .await?;
         if result.rows_affected() == 0 {
             return Err(DbError::NotFound);
         }
@@ -573,12 +575,11 @@ impl Database {
     // -----------------------------------------------------------------------
 
     pub async fn list_rules(&self, project_id: i64) -> Result<Vec<LogRule>, DbError> {
-        let rule_rows = sqlx::query(
-            "SELECT id, name, match_mode FROM rules WHERE project_id = ? ORDER BY id",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let rule_rows =
+            sqlx::query("SELECT id, name, match_mode FROM rules WHERE project_id = ? ORDER BY id")
+                .bind(project_id)
+                .fetch_all(&self.pool)
+                .await?;
 
         let mut rules = Vec::with_capacity(rule_rows.len());
         for row in &rule_rows {
@@ -589,14 +590,13 @@ impl Database {
     }
 
     pub async fn get_rule(&self, project_id: i64, id: i64) -> Result<LogRule, DbError> {
-        let row = sqlx::query(
-            "SELECT id, name, match_mode FROM rules WHERE id = ? AND project_id = ?",
-        )
-        .bind(id)
-        .bind(project_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(DbError::NotFound)?;
+        let row =
+            sqlx::query("SELECT id, name, match_mode FROM rules WHERE id = ? AND project_id = ?")
+                .bind(id)
+                .bind(project_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(DbError::NotFound)?;
 
         self.build_log_rule(&row, id).await
     }
@@ -610,12 +610,11 @@ impl Database {
         let match_mode_str: String = row.get("match_mode");
         let match_mode = parse_match_mode(&match_mode_str)?;
 
-        let match_rows = sqlx::query(
-            "SELECT id, pattern FROM match_rules WHERE rule_id = ? ORDER BY id",
-        )
-        .bind(rule_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let match_rows =
+            sqlx::query("SELECT id, pattern FROM match_rules WHERE rule_id = ? ORDER BY id")
+                .bind(rule_id)
+                .fetch_all(&self.pool)
+                .await?;
 
         let match_rules: Vec<MatchRule> = match_rows
             .iter()
@@ -868,12 +867,11 @@ impl Database {
     }
 
     async fn get_ruleset_rule_ids(&self, ruleset_id: i64) -> Result<Vec<u64>, DbError> {
-        let rows = sqlx::query(
-            "SELECT rule_id FROM ruleset_rules WHERE ruleset_id = ? ORDER BY rule_id",
-        )
-        .bind(ruleset_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let rows =
+            sqlx::query("SELECT rule_id FROM ruleset_rules WHERE ruleset_id = ? ORDER BY rule_id")
+                .bind(ruleset_id)
+                .fetch_all(&self.pool)
+                .await?;
         Ok(rows
             .iter()
             .map(|r| r.get::<i64, _>("rule_id") as u64)
@@ -972,12 +970,10 @@ impl Database {
     // -----------------------------------------------------------------------
 
     pub async fn list_patterns(&self, project_id: i64) -> Result<Vec<Pattern>, DbError> {
-        let rows = sqlx::query(
-            "SELECT id, name FROM patterns WHERE project_id = ? ORDER BY id",
-        )
-        .bind(project_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query("SELECT id, name FROM patterns WHERE project_id = ? ORDER BY id")
+            .bind(project_id)
+            .fetch_all(&self.pool)
+            .await?;
 
         let mut patterns = Vec::with_capacity(rows.len());
         for row in &rows {
@@ -993,14 +989,12 @@ impl Database {
     }
 
     pub async fn get_pattern(&self, project_id: i64, id: i64) -> Result<Pattern, DbError> {
-        let row = sqlx::query(
-            "SELECT id, name FROM patterns WHERE id = ? AND project_id = ?",
-        )
-        .bind(id)
-        .bind(project_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or(DbError::NotFound)?;
+        let row = sqlx::query("SELECT id, name FROM patterns WHERE id = ? AND project_id = ?")
+            .bind(id)
+            .bind(project_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DbError::NotFound)?;
 
         let predicates = self.get_predicates(id).await?;
         Ok(Pattern {
@@ -1123,10 +1117,7 @@ impl Database {
     // Load all project data (for analysis)
     // -----------------------------------------------------------------------
 
-    pub async fn load_project_data(
-        &self,
-        project_id: i64,
-    ) -> Result<ProjectData, DbError> {
+    pub async fn load_project_data(&self, project_id: i64) -> Result<ProjectData, DbError> {
         let timestamp_templates = self.list_timestamp_templates(project_id).await?;
         let templates = self.list_templates(project_id).await?;
         let sources = self.list_sources(project_id).await?;
@@ -1341,16 +1332,14 @@ fn serialize_operand(operand: &Operand) -> (&'static str, String) {
 fn deserialize_operand(operand_type: &str, operand_value: &str) -> Result<Operand, DbError> {
     match operand_type {
         "literal" => {
-            let val: StateValue = serde_json::from_str(operand_value).map_err(|e| {
-                DbError::InvalidData(format!("invalid literal operand JSON: {e}"))
-            })?;
+            let val: StateValue = serde_json::from_str(operand_value)
+                .map_err(|e| DbError::InvalidData(format!("invalid literal operand JSON: {e}")))?;
             Ok(Operand::Literal(val))
         }
         "state_ref" => {
-            let obj: serde_json::Value =
-                serde_json::from_str(operand_value).map_err(|e| {
-                    DbError::InvalidData(format!("invalid state_ref operand JSON: {e}"))
-                })?;
+            let obj: serde_json::Value = serde_json::from_str(operand_value).map_err(|e| {
+                DbError::InvalidData(format!("invalid state_ref operand JSON: {e}"))
+            })?;
             let source_name = obj["source_name"]
                 .as_str()
                 .ok_or_else(|| DbError::InvalidData("missing source_name in state_ref".into()))?
@@ -1410,13 +1399,7 @@ mod tests {
         let p = db.create_project("P1").await.unwrap();
 
         let tt = db
-            .create_timestamp_template(
-                p.id,
-                "default_ts",
-                "%Y-%m-%d %H:%M:%S",
-                None,
-                None,
-            )
+            .create_timestamp_template(p.id, "default_ts", "%Y-%m-%d %H:%M:%S", None, None)
             .await
             .unwrap();
         assert_eq!(tt.name, "default_ts");
@@ -1445,7 +1428,9 @@ mod tests {
         assert_eq!(updated.name, "updated_ts");
         assert!(updated.extraction_regex.is_some());
 
-        db.delete_timestamp_template(p.id, tt.id as i64).await.unwrap();
+        db.delete_timestamp_template(p.id, tt.id as i64)
+            .await
+            .unwrap();
         assert!(db.get_timestamp_template(p.id, tt.id as i64).await.is_err());
     }
 
@@ -1460,13 +1445,7 @@ mod tests {
             .unwrap();
 
         let t = db
-            .create_template(
-                p.id,
-                "default",
-                tt.id as i64,
-                "\n",
-                Some(r"^\d{4}.+$"),
-            )
+            .create_template(p.id, "default", tt.id as i64, "\n", Some(r"^\d{4}.+$"))
             .await
             .unwrap();
         assert_eq!(t.name, "default");
@@ -1594,12 +1573,7 @@ mod tests {
             .unwrap();
 
         let rs = db
-            .create_ruleset(
-                p.id,
-                "ruleset1",
-                t.id as i64,
-                &[r1.id as i64, r2.id as i64],
-            )
+            .create_ruleset(p.id, "ruleset1", t.id as i64, &[r1.id as i64, r2.id as i64])
             .await
             .unwrap();
         assert_eq!(rs.rule_ids.len(), 2);

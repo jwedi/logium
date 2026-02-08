@@ -1,12 +1,19 @@
 <script lang="ts">
-  import { patterns as patternsApi, sources as sourcesApi, type Pattern, type PatternPredicate, type Source, type StateValue } from './api';
+  import {
+    patterns as patternsApi,
+    sources as sourcesApi,
+    type Pattern,
+    type PatternPredicate,
+    type Source,
+    type StateValue,
+  } from './api';
 
   let { projectId }: { projectId: number } = $props();
 
   let patternList: Pattern[] = $state([]);
   let sourceList: Source[] = $state([]);
   let loading = $state(false);
-  let editingPattern: Pattern | null = $state(null);
+  let editingPattern = $state<Pattern | null>(null);
 
   const OPERATORS = ['Eq', 'Neq', 'Gt', 'Lt', 'Gte', 'Lte', 'Contains', 'Exists'];
 
@@ -27,7 +34,10 @@
     return 'Literal' in op;
   }
 
-  function getStateRef(op: PatternPredicate['operand']): { source_name: string; state_key: string } {
+  function getStateRef(op: PatternPredicate['operand']): {
+    source_name: string;
+    state_key: string;
+  } {
     if ('StateRef' in op) return op.StateRef;
     return { source_name: '', state_key: '' };
   }
@@ -153,13 +163,15 @@
   <div class="predicates-section">
     <div class="predicates-header">
       <label>Predicates (ordered)</label>
-      <button onclick={() => {
-        if (editingPattern) {
-          editingPattern.predicates = addPredicate(editingPattern.predicates);
-        } else {
-          newPredicates = addPredicate(newPredicates);
-        }
-      }}>
+      <button
+        onclick={() => {
+          if (editingPattern) {
+            editingPattern.predicates = addPredicate(editingPattern.predicates);
+          } else {
+            newPredicates = addPredicate(newPredicates);
+          }
+        }}
+      >
         Add Predicate
       </button>
     </div>
@@ -173,20 +185,22 @@
             <button
               class="move-btn"
               onclick={() => {
-                if (editingPattern) editingPattern.predicates = movePredicate(editingPattern.predicates, i, i - 1);
+                if (editingPattern)
+                  editingPattern.predicates = movePredicate(editingPattern.predicates, i, i - 1);
                 else newPredicates = movePredicate(newPredicates, i, i - 1);
               }}
-              disabled={i === 0}
-            >^</button>
+              disabled={i === 0}>^</button
+            >
             <span class="order-num">{i + 1}</span>
             <button
               class="move-btn"
               onclick={() => {
-                if (editingPattern) editingPattern.predicates = movePredicate(editingPattern.predicates, i, i + 1);
+                if (editingPattern)
+                  editingPattern.predicates = movePredicate(editingPattern.predicates, i, i + 1);
                 else newPredicates = movePredicate(newPredicates, i, i + 1);
               }}
-              disabled={i === activePredicates.length - 1}
-            >v</button>
+              disabled={i === activePredicates.length - 1}>v</button
+            >
           </div>
 
           <div class="predicate-fields">
@@ -230,14 +244,24 @@
                   <input
                     type="text"
                     value={getStateRef(pred.operand).source_name}
-                    oninput={(e) => setStateRef(pred, (e.target as HTMLInputElement).value, getStateRef(pred.operand).state_key)}
+                    oninput={(e) =>
+                      setStateRef(
+                        pred,
+                        (e.target as HTMLInputElement).value,
+                        getStateRef(pred.operand).state_key,
+                      )}
                     placeholder="source..."
                     style="flex:1"
                   />
                   <input
                     type="text"
                     value={getStateRef(pred.operand).state_key}
-                    oninput={(e) => setStateRef(pred, getStateRef(pred.operand).source_name, (e.target as HTMLInputElement).value)}
+                    oninput={(e) =>
+                      setStateRef(
+                        pred,
+                        getStateRef(pred.operand).source_name,
+                        (e.target as HTMLInputElement).value,
+                      )}
                     placeholder="key..."
                     style="flex:1"
                   />
@@ -249,10 +273,11 @@
           <button
             class="remove-btn danger"
             onclick={() => {
-              if (editingPattern) editingPattern.predicates = removePredicate(editingPattern.predicates, i);
+              if (editingPattern)
+                editingPattern.predicates = removePredicate(editingPattern.predicates, i);
               else newPredicates = removePredicate(newPredicates, i);
-            }}
-          >x</button>
+            }}>x</button
+          >
         </div>
       {/each}
     {/if}
@@ -261,9 +286,11 @@
   <div class="actions">
     {#if editingPattern}
       <button class="primary" onclick={updatePattern}>Save</button>
-      <button onclick={() => editingPattern = null}>Cancel</button>
+      <button onclick={() => (editingPattern = null)}>Cancel</button>
     {:else}
-      <button class="primary" onclick={createPattern} disabled={!newName.trim()}>Create Pattern</button>
+      <button class="primary" onclick={createPattern} disabled={!newName.trim()}
+        >Create Pattern</button
+      >
     {/if}
   </div>
 </div>
@@ -274,10 +301,18 @@
       <div class="pattern-card card">
         <div class="pattern-info">
           <span class="pattern-name">{pattern.name}</span>
-          <span class="badge">{pattern.predicates.length} predicate{pattern.predicates.length !== 1 ? 's' : ''}</span>
+          <span class="badge"
+            >{pattern.predicates.length} predicate{pattern.predicates.length !== 1 ? 's' : ''}</span
+          >
         </div>
         <div class="pattern-actions">
-          <button onclick={() => editingPattern = { ...pattern, predicates: pattern.predicates.map(p => ({ ...p })) }}>Edit</button>
+          <button
+            onclick={() =>
+              (editingPattern = {
+                ...pattern,
+                predicates: pattern.predicates.map((p) => ({ ...p })),
+              })}>Edit</button
+          >
           <button class="danger" onclick={() => deletePattern(pattern.id)}>Delete</button>
         </div>
       </div>

@@ -26,7 +26,7 @@ function makeSpreadEvents(count: number, spacingMs: number): TimelineEvent[] {
       timestamp: i * spacingMs,
       ruleId: i % 6,
       colorIndex: i % 6,
-    })
+    }),
   );
 }
 
@@ -37,7 +37,7 @@ function makeClusteredEvents(count: number, baseTimestamp: number): TimelineEven
       id: i,
       timestamp: baseTimestamp + i, // 1ms apart → within 3px cluster
       colorIndex: i % 6,
-    })
+    }),
   );
 }
 
@@ -152,9 +152,7 @@ describe('TimelineSwimlane', () => {
   });
 
   it('pattern events use purple fill', () => {
-    const events = [
-      makePatternTimelineEvent({ id: 0, timestamp: 100 }),
-    ];
+    const events = [makePatternTimelineEvent({ id: 0, timestamp: 100 })];
     const { container } = renderSwimlane({
       events,
       minTime: 0,
@@ -167,9 +165,7 @@ describe('TimelineSwimlane', () => {
   });
 
   it('rule events use rule-border color based on colorIndex', () => {
-    const events = [
-      makeRuleTimelineEvent({ id: 0, timestamp: 100, colorIndex: 3 }),
-    ];
+    const events = [makeRuleTimelineEvent({ id: 0, timestamp: 100, colorIndex: 3 })];
     const { container } = renderSwimlane({
       events,
       minTime: 0,

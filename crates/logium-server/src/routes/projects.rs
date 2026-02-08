@@ -1,11 +1,11 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::{Json, Router};
 use axum::routing::get;
+use axum::{Json, Router};
 use serde::Deserialize;
 
-use crate::AppState;
 use super::ApiResult;
+use crate::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -54,10 +54,7 @@ async fn update(
     Ok(Json(serde_json::to_value(project).unwrap()))
 }
 
-async fn remove(
-    State(state): State<AppState>,
-    Path(id): Path<i64>,
-) -> ApiResult<StatusCode> {
+async fn remove(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     state.db.delete_project(id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

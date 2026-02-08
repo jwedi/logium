@@ -1,12 +1,12 @@
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::response::Response;
-use axum::{Json, Router};
 use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 
-use crate::AppState;
 use super::{ApiError, ApiResult};
+use crate::AppState;
 use crate::db::DbError;
 
 pub fn router() -> Router<AppState> {
@@ -62,7 +62,9 @@ async fn handle_analysis_ws(mut socket: WebSocket, state: AppState, project_id: 
                 message: format!("failed to load project data: {e}"),
             };
             let _ = socket
-                .send(Message::Text(serde_json::to_string(&err_event).unwrap().into()))
+                .send(Message::Text(
+                    serde_json::to_string(&err_event).unwrap().into(),
+                ))
                 .await;
             return;
         }
@@ -71,7 +73,8 @@ async fn handle_analysis_ws(mut socket: WebSocket, state: AppState, project_id: 
     // std::sync::mpsc channel for the blocking engine -> bridge task
     let (std_tx, std_rx) = std::sync::mpsc::channel();
     // tokio::sync::mpsc channel for bridge task -> async WS loop
-    let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<logium_core::engine::AnalysisEvent>(256);
+    let (tok_tx, mut tok_rx) =
+        tokio::sync::mpsc::channel::<logium_core::engine::AnalysisEvent>(256);
 
     // Spawn the blocking engine
     tokio::task::spawn_blocking(move || {
