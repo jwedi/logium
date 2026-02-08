@@ -102,6 +102,11 @@ export interface AnalysisResult {
   pattern_matches: PatternMatch[];
 }
 
+export interface SuggestRuleResponse {
+  pattern: string;
+  capture_groups: string[];
+}
+
 // ---- API Client ----
 
 const BASE = '/api';
@@ -296,8 +301,8 @@ export const analysis = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  suggestRule: (pid: number, data: { text: string }) =>
-    request<LogRule>(`/projects/${pid}/suggest-rule`, {
+  suggestRule: (pid: number, data: { text: string; context_lines?: string[] }) =>
+    request<SuggestRuleResponse>(`/projects/${pid}/suggest-rule`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),

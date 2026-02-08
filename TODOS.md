@@ -6,22 +6,17 @@ Outstanding items from the V2 design doc (`docs/plan_v2.md`) that are not yet im
 
 ## 1. WebSocket Streaming for Analysis Results
 
-**Status:** In progress (this branch)
+**Status:** Done
 
-The design doc specifies `HTTP / WS` communication between UI and server, and `logium-server` is described as an "Axum HTTP/WebSocket server." Currently, analysis runs synchronously via `POST /api/projects/{pid}/analyze` and returns a single JSON blob. WebSocket streaming would let the frontend display results incrementally and show progress.
-
-**Implementation:** Add `AnalysisEvent` enum + `analyze_streaming()` to logium-core, WebSocket route on the server, and streaming UI updates in the frontend.
+Implemented `AnalysisEvent` enum + `analyze_streaming()` in logium-core, WebSocket route (`GET /api/projects/:pid/analyze/ws`) on the server, and streaming UI updates in the frontend with buffered rendering and a live progress counter.
 
 ---
 
 ## 2. Rule Creation by Highlighting
 
-The design doc's "Viewer-First" UI paradigm specifies:
-> The user highlights text in a log line and creates a rule directly from the selection. Logium suggests regex patterns and lets the user refine match and extraction rules in-place.
+**Status:** Done
 
-Currently, rules are created through a separate form UI. There is no highlight-to-rule flow in the log viewer.
-
-**Implementation:** Add text selection handling in `LogViewer.svelte`, surface the `suggest-rule` API endpoint on selection, and provide an inline rule editor popover.
+The user highlights text in a log line → `RuleCreator` modal opens → the backend `suggest-rule` API generates a regex pattern (with fallback to client-side escaping) → the user refines the pattern, names the rule, and picks a ruleset → on save the rule is created and assigned to the selected ruleset so it takes effect on the next analysis run.
 
 ---
 

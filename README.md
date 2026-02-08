@@ -43,7 +43,7 @@ cd ui && npm run dev
 ### Running Tests
 
 ```bash
-cargo test --workspace    # 39 tests: 17 core unit + 8 integration + 14 server
+cargo test --workspace    # 41 tests: 18 core unit + 8 integration + 15 server
 ```
 
 ---
@@ -55,7 +55,7 @@ cargo test --workspace    # 39 tests: 17 core unit + 8 integration + 14 server
                     |       Svelte 5 UI         |
                     |  (Viewer-first interface)  |
                     +------------+--------------+
-                                 | HTTP (REST)
+                                 | HTTP / WebSocket
                     +------------+--------------+
                     |     logium-server          |
                     |  Axum  |  SQLite           |
@@ -133,11 +133,11 @@ logium/
 
 ### Why This Layering
 
-**logium-core** is a pure library with zero framework dependencies. It takes data structures in, returns results out. This makes it trivially testable (17 unit tests + 8 integration tests run in ~1s), reusable in other contexts (CLI, batch processing), and keeps the complex logic isolated from web/IO concerns.
+**logium-core** is a pure library with zero framework dependencies. It takes data structures in, returns results out. This makes it trivially testable (18 unit tests + 8 integration tests run in ~1s), reusable in other contexts (CLI, batch processing), and keeps the complex logic isolated from web/IO concerns.
 
 **logium-server** handles the "real world": HTTP, SQLite persistence, file uploads, CORS. It converts between database rows and core model types, delegates analysis to the core engine via `tokio::task::spawn_blocking`, and serves the frontend.
 
-**The frontend** communicates entirely through REST. In development, Vite proxies `/api` requests to the backend (configured in `vite.config.ts`). In production, the backend serves the built frontend from `ui/dist/` as static files.
+**The frontend** communicates via REST and WebSockets. Analysis results stream over a WebSocket connection (`/api/projects/:pid/analyze/ws`), enabling incremental rendering with a live progress counter. In development, Vite proxies `/api` and WebSocket requests to the backend (configured in `vite.config.ts`). In production, the backend serves the built frontend from `ui/dist/` as static files.
 
 ---
 
@@ -350,12 +350,13 @@ let { source, projectId, ruleMatches = [], patternMatches = [] }: {
 
 When you select text in the LogViewer:
 
-1. The selected text is passed to `RuleCreator` as a prop
-2. `generateInitialRegex()` escapes the text and replaces numbers with `(\d+)` capture groups
-3. `detectGroups()` parses the regex to find capture groups
+1. The selected text and the source's `template_id` are passed to `RuleCreator`
+2. The backend `suggest-rule` API (`POST /api/projects/:pid/suggest-rule`) generates a regex pattern with named capture groups. If the API call fails, a client-side fallback escapes the text and replaces numbers with `(\d+)` capture groups
+3. `detectGroups()` parses the regex to find capture groups (supports both JS `(?<name>...)` and Rust/Python `(?P<name>...)` syntax)
 4. Each group becomes an extraction rule row where you name the state key, pick the type (Parsed/Static/Clear), and the mode (Replace/Accumulate)
-5. A live preview shows what the regex matches against the original text
-6. On save, it creates the rule via the API
+5. A live preview shows what the regex matches against the original text (Rust `(?P<>)` syntax is transparently converted to JS `(?<>)` for the browser preview)
+6. A **ruleset picker** shows rulesets filtered to those matching the source's template. If exactly one matches, it's auto-selected
+7. On save, the rule is created via the API and — if a ruleset is selected — automatically appended to that ruleset's `rule_ids` so it takes effect on the next analysis run
 
 #### PatternEditor — Building Detection Patterns
 
@@ -368,7 +369,7 @@ The PatternEditor lets you build ordered predicate sequences. Each predicate row
 
 #### AnalysisView — Running and Viewing Results
 
-The AnalysisView calls `POST /api/projects/:id/analyze` which runs the full `logium-core` engine pipeline. Results are displayed as:
+The AnalysisView streams results over a WebSocket connection (`/api/projects/:pid/analyze/ws`). Events arrive incrementally — rule matches, pattern matches, and progress updates — and are buffered into batched UI updates every 100ms. A live progress counter shows lines processed during analysis. Results are displayed as:
 - Summary cards (N rule matches, M pattern matches)
 - Per-source LogViewer instances with match highlighting
 - Pattern match cards with full state snapshots showing the state of every source at match time
@@ -445,7 +446,8 @@ All endpoints are scoped under `/api/`. The server runs on port 3000 (configurab
 | PUT | `/api/projects/:pid/patterns/:id` | Update pattern |
 | DELETE | `/api/projects/:pid/patterns/:id` | Delete pattern |
 | **Analysis** | | |
-| POST | `/api/projects/:pid/analyze` | Run full analysis |
+| POST | `/api/projects/:pid/analyze` | Run full analysis (batch JSON) |
+| GET | `/api/projects/:pid/analyze/ws` | Run analysis (WebSocket streaming) |
 | POST | `/api/projects/:pid/detect-template` | Auto-detect timestamp format |
 | POST | `/api/projects/:pid/suggest-rule` | Suggest regex from text |
 
@@ -507,9 +509,9 @@ Supports cross-type numeric comparison (`Integer(10) == Float(10.0)`) and type-a
 
 ## Test Suite
 
-**39 tests total** across two crates:
+**41 tests total** across two crates:
 
-### logium-core: Unit Tests (17 tests)
+### logium-core: Unit Tests (18 tests)
 
 | Category | Tests | What's Covered |
 |----------|-------|----------------|
@@ -532,14 +534,28 @@ Tests against real-world log data in `crates/logium-core/tests/fixtures/`:
 
 Test fixtures are downloaded from [LogHub](https://github.com/logpai/loghub) and [Elastic examples](https://github.com/elastic/examples) via `scripts/setup_test_data.sh`, then split into A/B (odd/even lines) for cross-source testing.
 
-### logium-server (14 tests)
+### logium-server (15 tests)
 
 | Category | Tests | What's Covered |
 |----------|-------|----------------|
 | Database CRUD | 8 | Projects, timestamp templates, source templates, sources, rules (with sub-rules), rulesets (many-to-many), patterns (with predicates, including StateRef operands), bulk project data loading |
 | Analysis helpers | 6 | Regex suggestion (numbers, quoted strings, special chars), timestamp format detection, timestamp length estimation |
+| Seed data | 1 | Demo project seeding with templates, sources, rules, and patterns |
 
 All server tests use in-memory SQLite (`:memory:`) for isolation and speed.
+
+### Frontend (60 tests)
+
+Vitest tests using `@testing-library/svelte`:
+
+| Component | Tests | What's Covered |
+|-----------|-------|----------------|
+| RuleCreator | 8 | Suggest-rule API integration, fallback on API failure, ruleset filtering by template, auto-selection, rule creation with ruleset assignment, save validation |
+| AnalysisView | 8 | Run button, table/timeline tab switching, result stats, streaming error banner, in-progress state, snapshot |
+| TimelineView | 10 | Render with data, empty state, zoom controls, swimlane display, detail panel interaction |
+| TimelineDetailPanel | 17 | Rule match display, pattern match display, state snapshot rendering, empty states |
+| TimelineSwimlane | 10 | Event rendering, color coding, click handling, tooltip display |
+| TimelineAxis | 7 | Time label rendering, tick marks, zoom-level formatting |
 
 ### Benchmarks
 
@@ -556,7 +572,8 @@ Run benchmarks with `./scripts/run_benchmark.sh` — results are saved with time
 
 ## Future Work (Phase 2)
 
-- **Graphical timeline** — visual timeline component with log events and pattern matches on a time axis
-- **Interactive timeline features** — zoom, pan, click-to-navigate-to-log-line
-- **Source swimlanes** — per-source state evolution over time
+- **Real-time feedback** — automatically re-run analysis when rules or patterns change
+- **Click-to-navigate** — click timeline events to scroll to the corresponding log line in LogViewer
+- **Source swimlanes** — per-source state evolution over time on the timeline
+- **Live log sources** — file watching / stdin streaming for tailing live logs
 - See `docs/plan_v2.md` for the full design document

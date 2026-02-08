@@ -235,6 +235,7 @@
   <RuleCreator
     {projectId}
     {selectedText}
+    sourceTemplateId={source.template_id}
     onClose={() => (showRuleCreator = false)}
     onCreated={onRuleCreated}
   />

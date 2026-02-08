@@ -5,8 +5,10 @@ import type {
   Source,
   LogRule,
   Pattern,
+  Ruleset,
   StateValue,
   AnalysisResult,
+  SuggestRuleResponse,
 } from '../api';
 
 export interface TimelineEvent {
@@ -102,6 +104,26 @@ export function makePatternTimelineEvent(overrides: Partial<TimelineEvent> = {})
     patternId: 1,
     patternMatch: makePatternMatch(),
     colorIndex: -1,
+    ...overrides,
+  };
+}
+
+export function makeRuleset(overrides: Partial<Ruleset> = {}): Ruleset {
+  return {
+    id: 1,
+    name: 'Default Ruleset',
+    template_id: 1,
+    rule_ids: [],
+    ...overrides,
+  };
+}
+
+export function makeSuggestRuleResponse(
+  overrides: Partial<SuggestRuleResponse> = {},
+): SuggestRuleResponse {
+  return {
+    pattern: 'ERROR (?P<message>.+)',
+    capture_groups: ['message'],
     ...overrides,
   };
 }
