@@ -1,14 +1,22 @@
 <script lang="ts">
-  import { rules as rulesApi } from './api';
+  import {
+    rules as rulesApi,
+    rulesets as rulesetsApi,
+    analysis as analysisApi,
+    type Ruleset,
+    type SuggestRuleResponse,
+  } from './api';
 
   let {
     projectId,
     selectedText,
+    sourceTemplateId,
     onClose,
     onCreated,
   }: {
     projectId: number;
     selectedText: string;
+    sourceTemplateId: number;
     onClose: () => void;
     onCreated: () => void;
   } = $props();
@@ -21,25 +29,21 @@
     extractionType: 'Parsed' | 'Static' | 'Clear';
     mode: 'Replace' | 'Accumulate';
   }[] = $state([]);
-  let previewResult = $state('');
   let saving = $state(false);
+  let suggestLoading = $state(false);
+  let suggestError = $state('');
+  let availableRulesets: Ruleset[] = $state([]);
+  let selectedRulesetId: number | '' = $state('');
 
-  // Auto-generate regex from selected text
   function escapeRegex(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  function generateInitialRegex(text: string): string {
-    // Escape the text and replace common variable parts with capture groups
-    let pattern = escapeRegex(text);
-    // Replace numbers with a named capture group placeholder
-    pattern = pattern.replace(/\d+/g, '(\\d+)');
-    return pattern;
-  }
-
   function detectGroups(pattern: string): string[] {
     const groups: string[] = [];
-    const namedGroupRegex = /\((?:\?<([^>]+)>)?/g;
+    // Match both JS (?<name>...) and Rust/Python (?P<name>...) named groups,
+    // plus unnamed groups
+    const namedGroupRegex = /\((?:\?(?:P?<([^>]+)>))?/g;
     let match;
     let idx = 0;
     while ((match = namedGroupRegex.exec(pattern)) !== null) {
@@ -53,30 +57,68 @@
     return groups;
   }
 
-  function updatePreview() {
+  let previewResult = $derived.by(() => {
     try {
-      const re = new RegExp(regexPattern);
+      // Transform Rust/Python (?P<name>...) to JS (?<name>...) for browser preview
+      const jsPattern = regexPattern.replace(/\(\?P</g, '(?<');
+      const re = new RegExp(jsPattern);
       const m = re.exec(selectedText);
       if (m) {
-        previewResult = `Match: "${m[0]}"`;
+        let result = `Match: "${m[0]}"`;
         if (m.length > 1) {
-          previewResult +=
+          result +=
             ' | Groups: ' +
             m
               .slice(1)
               .map((g, i) => `${i}: "${g}"`)
               .join(', ');
         }
+        return result;
       } else {
-        previewResult = 'No match on selected text';
+        return 'No match on selected text';
       }
     } catch (e: any) {
-      previewResult = `Invalid regex: ${e.message}`;
+      return `Invalid regex: ${e.message}`;
+    }
+  });
+
+  async function fetchSuggestion() {
+    suggestLoading = true;
+    suggestError = '';
+    try {
+      const suggestion = await analysisApi.suggestRule(projectId, { text: selectedText });
+      regexPattern = suggestion.pattern;
+    } catch (e: any) {
+      suggestError = e.message;
+      // Fallback: escape text and replace numbers with capture groups
+      let pattern = escapeRegex(selectedText);
+      pattern = pattern.replace(/\d+/g, '(\\d+)');
+      regexPattern = pattern;
+    } finally {
+      suggestLoading = false;
+    }
+  }
+
+  async function loadRulesets() {
+    try {
+      const all = await rulesetsApi.list(projectId);
+      availableRulesets = all.filter((rs) => rs.template_id === sourceTemplateId);
+      if (availableRulesets.length === 1) {
+        selectedRulesetId = availableRulesets[0].id;
+      }
+    } catch {
+      /* ignore */
     }
   }
 
   $effect(() => {
-    regexPattern = generateInitialRegex(selectedText);
+    selectedText;
+    fetchSuggestion();
+  });
+
+  $effect(() => {
+    sourceTemplateId;
+    loadRulesets();
   });
 
   $effect(() => {
@@ -87,18 +129,17 @@
       extractionType: 'Parsed' as const,
       mode: 'Replace' as const,
     }));
-    updatePreview();
   });
 
   async function save() {
     if (!ruleName.trim() || !regexPattern.trim()) return;
     saving = true;
     try {
-      await rulesApi.create(projectId, {
+      const createdRule = await rulesApi.create(projectId, {
         name: ruleName.trim(),
         match_mode: matchMode,
         match_rules: [{ id: 0, pattern: regexPattern }],
-        extraction_rules: captureGroups.map((cg, i) => ({
+        extraction_rules: captureGroups.map((cg) => ({
           id: 0,
           extraction_type: cg.extractionType,
           state_key: cg.name,
@@ -107,6 +148,17 @@
           mode: cg.mode,
         })),
       });
+
+      // Assign rule to selected ruleset
+      if (selectedRulesetId !== '') {
+        const ruleset = availableRulesets.find((rs) => rs.id === selectedRulesetId);
+        if (ruleset) {
+          await rulesetsApi.update(projectId, ruleset.id, {
+            rule_ids: [...ruleset.rule_ids, createdRule.id],
+          });
+        }
+      }
+
       onCreated();
     } catch (e: any) {
       alert(e.message);
@@ -146,7 +198,13 @@
 
       <div class="field">
         <label>Regex Pattern</label>
-        <textarea rows="3" bind:value={regexPattern} oninput={updatePreview}></textarea>
+        <textarea rows="3" bind:value={regexPattern}></textarea>
+        {#if suggestLoading}
+          <div class="hint">Generating pattern...</div>
+        {/if}
+        {#if suggestError}
+          <div class="hint error">{suggestError} (using fallback pattern)</div>
+        {/if}
         <div
           class="preview"
           class:error={previewResult.startsWith('Invalid') || previewResult.startsWith('No match')}
@@ -181,6 +239,18 @@
               </div>
             </div>
           {/each}
+        </div>
+      {/if}
+
+      {#if availableRulesets.length > 0}
+        <div class="field">
+          <label>Assign to Ruleset</label>
+          <select bind:value={selectedRulesetId}>
+            <option value="">None (assign later)</option>
+            {#each availableRulesets as rs}
+              <option value={rs.id}>{rs.name}</option>
+            {/each}
+          </select>
         </div>
       {/if}
     </div>
@@ -259,6 +329,17 @@
     font-size: 12px;
     white-space: pre-wrap;
     word-break: break-all;
+    color: var(--yellow);
+  }
+
+  .hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    font-style: italic;
+  }
+
+  .hint.error {
     color: var(--yellow);
   }
 
