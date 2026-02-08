@@ -1,6 +1,8 @@
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
+use axum::response::Response;
 use axum::{Json, Router};
-use axum::routing::post;
+use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
@@ -10,6 +12,7 @@ use crate::db::DbError;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/projects/{project_id}/analyze", post(analyze))
+        .route("/api/projects/{project_id}/analyze/ws", get(analyze_ws))
         .route(
             "/api/projects/{project_id}/detect-template",
             post(detect_template),
@@ -41,6 +44,64 @@ async fn analyze(
     .map_err(|e| ApiError::from(DbError::InvalidData(format!("analysis error: {e}"))))?;
 
     Ok(Json(serde_json::to_value(result).unwrap()))
+}
+
+async fn analyze_ws(
+    State(state): State<AppState>,
+    Path(project_id): Path<i64>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    ws.on_upgrade(move |socket| handle_analysis_ws(socket, state, project_id))
+}
+
+async fn handle_analysis_ws(mut socket: WebSocket, state: AppState, project_id: i64) {
+    let data = match state.db.load_project_data(project_id).await {
+        Ok(d) => d,
+        Err(e) => {
+            let err_event = logium_core::engine::AnalysisEvent::Error {
+                message: format!("failed to load project data: {e}"),
+            };
+            let _ = socket
+                .send(Message::Text(serde_json::to_string(&err_event).unwrap().into()))
+                .await;
+            return;
+        }
+    };
+
+    // std::sync::mpsc channel for the blocking engine -> bridge task
+    let (std_tx, std_rx) = std::sync::mpsc::channel();
+    // tokio::sync::mpsc channel for bridge task -> async WS loop
+    let (tok_tx, mut tok_rx) = tokio::sync::mpsc::channel::<logium_core::engine::AnalysisEvent>(256);
+
+    // Spawn the blocking engine
+    tokio::task::spawn_blocking(move || {
+        let _ = logium_core::engine::analyze_streaming(
+            &data.sources,
+            &data.templates,
+            &data.timestamp_templates,
+            &data.rules,
+            &data.rulesets,
+            &data.patterns,
+            std_tx,
+        );
+    });
+
+    // Bridge std channel -> tokio channel
+    tokio::task::spawn_blocking(move || {
+        for event in std_rx {
+            if tok_tx.blocking_send(event).is_err() {
+                break;
+            }
+        }
+    });
+
+    // Async loop: read from tokio channel, send to WS
+    while let Some(event) = tok_rx.recv().await {
+        let json = serde_json::to_string(&event).unwrap();
+        if socket.send(Message::Text(json.into())).await.is_err() {
+            break; // client disconnected
+        }
+    }
 }
 
 #[derive(Deserialize)]

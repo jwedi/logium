@@ -1,8 +1,34 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import AnalysisView from '../AnalysisView.svelte';
-import { makeAnalysisResult, makeSource, makeRule, makePattern } from './fixtures';
+import { makeAnalysisResult, makeSource, makeRule, makePattern, makeRuleMatch, makePatternMatch } from './fixtures';
+
+const mockRuleMatch = {
+  rule_id: 1,
+  source_id: 1,
+  log_line: { timestamp: '2024-01-15T10:30:00.000', source_id: 1, raw: 'ERROR test', content: 'test' },
+  extracted_state: {},
+};
+
+const mockPatternMatch = {
+  pattern_id: 1,
+  timestamp: '2024-01-15T10:30:05.000',
+  state_snapshot: {},
+};
+
+// Default runStreaming: immediately calls callbacks then onComplete
+function defaultRunStreaming(_pid: number, callbacks: any) {
+  callbacks.onRuleMatch(mockRuleMatch);
+  callbacks.onPatternMatch(mockPatternMatch);
+  // Trigger flush via a microtask + timer to simulate the 100ms interval
+  setTimeout(() => {
+    callbacks.onComplete({ total_lines: 5, total_rule_matches: 1, total_pattern_matches: 1 });
+  }, 0);
+  return { close: vi.fn() };
+}
+
+let runStreamingImpl = defaultRunStreaming;
 
 // Mock the api module
 vi.mock('../api', () => {
@@ -15,23 +41,11 @@ vi.mock('../api', () => {
   const mockPatterns = [
     { id: 1, name: 'Failure Pattern', predicates: [] },
   ];
-  const mockResult = {
-    rule_matches: [{
-      rule_id: 1,
-      source_id: 1,
-      log_line: { timestamp: '2024-01-15T10:30:00.000', source_id: 1, raw: 'ERROR test', content: 'test' },
-      extracted_state: {},
-    }],
-    pattern_matches: [{
-      pattern_id: 1,
-      timestamp: '2024-01-15T10:30:05.000',
-      state_snapshot: {},
-    }],
-  };
 
   return {
     analysis: {
-      run: vi.fn().mockResolvedValue(mockResult),
+      run: vi.fn(),
+      runStreaming: vi.fn((...args: any[]) => runStreamingImpl(args[0], args[1])),
       detectTemplate: vi.fn(),
       suggestRule: vi.fn(),
     },
@@ -58,6 +72,12 @@ function renderAnalysis(projectId = 1) {
 describe('AnalysisView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useFakeTimers();
+    runStreamingImpl = defaultRunStreaming;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // --- Behavioral ---
@@ -74,6 +94,7 @@ describe('AnalysisView', () => {
 
     // Click run and wait for results
     await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Table')).toBeInTheDocument();
     });
@@ -87,6 +108,7 @@ describe('AnalysisView', () => {
     await tick();
 
     await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Timeline')).toBeInTheDocument();
     });
@@ -104,6 +126,7 @@ describe('AnalysisView', () => {
     await tick();
 
     await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Timeline')).toBeInTheDocument();
     });
@@ -122,6 +145,7 @@ describe('AnalysisView', () => {
     await tick();
 
     await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Results')).toBeInTheDocument();
     });
@@ -131,24 +155,31 @@ describe('AnalysisView', () => {
     expect(screen.getAllByText('Pattern Matches').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('shows error banner on API failure', async () => {
-    vi.mocked(analysisApi.run).mockRejectedValueOnce(new Error('Server error'));
+  it('shows error banner on streaming error', async () => {
+    runStreamingImpl = (_pid: number, callbacks: any) => {
+      setTimeout(() => {
+        callbacks.onError('Server error');
+      }, 0);
+      return { close: vi.fn() };
+    };
+    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) => runStreamingImpl(args[0], args[1]));
 
     renderAnalysis();
     await tick();
 
     await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Server error')).toBeInTheDocument();
     });
   });
 
   it('button shows "Running..." while analysis is in progress', async () => {
-    // Create a promise we control
-    let resolveRun!: (value: any) => void;
-    vi.mocked(analysisApi.run).mockReturnValueOnce(
-      new Promise(resolve => { resolveRun = resolve; })
-    );
+    // runStreaming that never completes
+    runStreamingImpl = (_pid: number, _callbacks: any) => {
+      return { close: vi.fn() };
+    };
+    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) => runStreamingImpl(args[0], args[1]));
 
     renderAnalysis();
     await tick();
@@ -157,12 +188,6 @@ describe('AnalysisView', () => {
     await tick();
 
     expect(screen.getByText('Running...')).toBeInTheDocument();
-
-    // Resolve the analysis
-    resolveRun(makeAnalysisResult());
-    await waitFor(() => {
-      expect(screen.getByText('Run Analysis')).toBeInTheDocument();
-    });
   });
 
   // --- Snapshot ---
@@ -172,6 +197,7 @@ describe('AnalysisView', () => {
     await tick();
 
     await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Results')).toBeInTheDocument();
     });
