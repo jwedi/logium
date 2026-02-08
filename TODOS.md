@@ -68,14 +68,9 @@ Search bar in `LogViewer` that lets the user find text across loaded log lines.
 
 ## 7. Rule Editing
 
-Allow editing existing rules inline in `RuleList`.
+**Status:** Done
 
-- "Edit" button on each rule row opens an inline edit form (same fields as create: name, match_mode, match patterns, extraction rules)
-- Calls existing `PUT /api/projects/:pid/rules/:id` endpoint (already implemented server-side)
-- Triggers `invalidateAnalysis()` on save so results stay in sync
-- Frontend only — no backend changes needed
-
-**Implementation:** Add an `editingRuleId` state to `RuleList`. When set, render inline inputs pre-filled with current values. On save, `PUT` the updated rule, reset `editingRuleId`, refetch the rule list, and call `invalidateAnalysis()`.
+"Edit" button on each rule in `RuleList` opens an inline `RuleEditor` component with all fields (name, match_mode, match patterns, extraction rules). Calls `PUT /api/projects/:pid/rules/:id` on save and triggers `invalidateAnalysis()`. Shared regex helpers extracted to `regexUtils.ts` and reused by both `RuleCreator` and `RuleEditor`.
 
 ---
 
@@ -94,14 +89,9 @@ Export a project's configuration as JSON (templates, rules, rulesets, patterns) 
 
 ## 9. Rule Testing / Dry Run
 
-Test a rule against a pasted log line without running a full analysis.
+**Status:** Done
 
-- "Test" button on each rule in `RuleList`
-- Opens a text input area — paste a log line, see whether the rule matches and what state would be extracted
-- Client-side regex evaluation reusing the `(?P<>)` → `(?<>)` named-group conversion already in `RuleCreator`
-- Frontend only — no backend round-trip needed
-
-**Implementation:** Add a `RuleTester` component. Convert the rule's patterns to JS-compatible regexes, run them against the input text, and display: match result (yes/no), matched substring highlight, and extracted named groups as a key-value table.
+Integrated into `RuleEditor` as a "Test Rule (dry run)" section. Paste a log line to see per-pattern match/no-match indicators, overall verdict respecting match mode (Any/All), and extraction preview showing captured values (Parsed), static values, and cleared keys. Client-side only — uses `regexUtils.ts` helpers with `(?P<>)` → `(?<>)` conversion.
 
 ---
 
