@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/logium-core", "crates/logium-server"]
+resolver = "2"
