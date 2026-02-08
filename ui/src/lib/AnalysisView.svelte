@@ -1,6 +1,7 @@
 <script lang="ts">
   import { analysis as analysisApi, sources as sourcesApi, rules as rulesApi, patterns as patternsApi, type AnalysisResult, type Source, type LogRule, type Pattern, type StateValue } from './api';
   import LogViewer from './LogViewer.svelte';
+  import TimelineView from './TimelineView.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -11,6 +12,7 @@
   let running = $state(false);
   let error: string | null = $state(null);
   let selectedSourceId: number | null = $state(null);
+  let viewMode: 'table' | 'timeline' = $state('table');
 
   let selectedSource = $derived(sourceList.find(s => s.id === selectedSourceId) ?? null);
 
@@ -94,79 +96,88 @@
     </div>
   </div>
 
-  {#if sourceList.length > 0}
-    <div class="source-selector">
-      <label>View source</label>
-      <div class="source-buttons">
-        {#each sourceList as src}
-          <button
-            class:active={selectedSourceId === src.id}
-            onclick={() => selectedSourceId = src.id}
-          >
-            {src.name}
-            {#if result.rule_matches.filter(m => m.source_id === src.id).length > 0}
-              <span class="match-count">{result.rule_matches.filter(m => m.source_id === src.id).length}</span>
-            {/if}
-          </button>
-        {/each}
-      </div>
-    </div>
-  {/if}
+  <div class="view-tabs">
+    <button class:active={viewMode === 'table'} onclick={() => viewMode = 'table'}>Table</button>
+    <button class:active={viewMode === 'timeline'} onclick={() => viewMode = 'timeline'}>Timeline</button>
+  </div>
 
-  {#if selectedSource}
-    <div class="viewer-section">
-      <LogViewer
-        source={selectedSource}
-        {projectId}
-        ruleMatches={sourceRuleMatches}
-        patternMatches={result.pattern_matches}
-      />
-    </div>
-  {/if}
-
-  {#if result.pattern_matches.length > 0}
-    <div class="pattern-matches-section">
-      <h3>Pattern Matches</h3>
-      {#each result.pattern_matches as pm}
-        <div class="pattern-match card">
-          <div class="pm-header">
-            <span class="pm-name">{getPatternName(pm.pattern_id)}</span>
-            <span class="pm-time">{pm.timestamp}</span>
-          </div>
-          <div class="pm-state">
-            {#each Object.entries(pm.state_snapshot) as [sourceName, stateMap]}
-              <div class="pm-source">
-                <span class="pm-source-name">{sourceName}</span>
-                {#each Object.entries(stateMap) as [key, val]}
-                  <div class="pm-entry">
-                    <span class="state-key">{key}</span>
-                    <span class="state-value">{formatStateValue(val)}</span>
-                  </div>
-                {/each}
-              </div>
-            {/each}
-          </div>
+  {#if viewMode === 'table'}
+    {#if sourceList.length > 0}
+      <div class="source-selector">
+        <label>View source</label>
+        <div class="source-buttons">
+          {#each sourceList as src}
+            <button
+              class:active={selectedSourceId === src.id}
+              onclick={() => selectedSourceId = src.id}
+            >
+              {src.name}
+              {#if result.rule_matches.filter(m => m.source_id === src.id).length > 0}
+                <span class="match-count">{result.rule_matches.filter(m => m.source_id === src.id).length}</span>
+              {/if}
+            </button>
+          {/each}
         </div>
-      {/each}
-    </div>
-  {/if}
+      </div>
+    {/if}
 
-  {#if result.rule_matches.length > 0 && !selectedSource}
-    <div class="rule-matches-section">
-      <h3>Rule Matches</h3>
-      <div class="match-table">
-        {#each result.rule_matches.slice(0, 100) as rm}
-          <div class="match-row">
-            <span class="badge">{getRuleName(rm.rule_id)}</span>
-            <span class="badge">{getSourceName(rm.source_id)}</span>
-            <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
+    {#if selectedSource}
+      <div class="viewer-section">
+        <LogViewer
+          source={selectedSource}
+          {projectId}
+          ruleMatches={sourceRuleMatches}
+          patternMatches={result.pattern_matches}
+        />
+      </div>
+    {/if}
+
+    {#if result.pattern_matches.length > 0}
+      <div class="pattern-matches-section">
+        <h3>Pattern Matches</h3>
+        {#each result.pattern_matches as pm}
+          <div class="pattern-match card">
+            <div class="pm-header">
+              <span class="pm-name">{getPatternName(pm.pattern_id)}</span>
+              <span class="pm-time">{pm.timestamp}</span>
+            </div>
+            <div class="pm-state">
+              {#each Object.entries(pm.state_snapshot) as [sourceName, stateMap]}
+                <div class="pm-source">
+                  <span class="pm-source-name">{sourceName}</span>
+                  {#each Object.entries(stateMap) as [key, val]}
+                    <div class="pm-entry">
+                      <span class="state-key">{key}</span>
+                      <span class="state-value">{formatStateValue(val)}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/each}
+            </div>
           </div>
         {/each}
-        {#if result.rule_matches.length > 100}
-          <div class="text-muted">...and {result.rule_matches.length - 100} more matches</div>
-        {/if}
       </div>
-    </div>
+    {/if}
+
+    {#if result.rule_matches.length > 0 && !selectedSource}
+      <div class="rule-matches-section">
+        <h3>Rule Matches</h3>
+        <div class="match-table">
+          {#each result.rule_matches.slice(0, 100) as rm}
+            <div class="match-row">
+              <span class="badge">{getRuleName(rm.rule_id)}</span>
+              <span class="badge">{getSourceName(rm.source_id)}</span>
+              <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
+            </div>
+          {/each}
+          {#if result.rule_matches.length > 100}
+            <div class="text-muted">...and {result.rule_matches.length - 100} more matches</div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+  {:else}
+    <TimelineView {result} {sourceList} {ruleList} {patternList} />
   {/if}
 {:else if !running}
   <div class="empty">Click "Run Analysis" to analyze all sources with configured rules and patterns.</div>
@@ -217,6 +228,25 @@
   .stat-label {
     font-size: 12px;
     color: var(--text-dim);
+  }
+
+  .view-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 16px;
+  }
+
+  .view-tabs button {
+    padding: 6px 16px;
+    font-size: 13px;
+    border-radius: var(--radius) var(--radius) 0 0;
+    border-bottom: 2px solid transparent;
+  }
+
+  .view-tabs button.active {
+    background: var(--bg-secondary);
+    border-bottom-color: var(--accent);
+    color: var(--accent);
   }
 
   .source-selector {
