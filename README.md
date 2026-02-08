@@ -43,7 +43,7 @@ cd ui && npm run dev
 ### Running Tests
 
 ```bash
-cargo test --workspace    # 41 tests: 18 core unit + 8 integration + 15 server
+cargo test --workspace    # 43 tests: 18 core unit + 8 integration + 17 server
 ```
 
 ---
@@ -447,6 +447,9 @@ All endpoints are scoped under `/api/`. The server runs on port 3000 (configurab
 | GET | `/api/projects/:pid/patterns/:id` | Get pattern |
 | PUT | `/api/projects/:pid/patterns/:id` | Update pattern |
 | DELETE | `/api/projects/:pid/patterns/:id` | Delete pattern |
+| **Import/Export** | | |
+| GET | `/api/projects/:pid/export` | Export project config (JSON download) |
+| POST | `/api/projects/:pid/import` | Import project config (with ID remapping) |
 | **Analysis** | | |
 | POST | `/api/projects/:pid/analyze` | Run full analysis (batch JSON) |
 | GET | `/api/projects/:pid/analyze/ws` | Run analysis (WebSocket streaming) |
@@ -511,7 +514,7 @@ Supports cross-type numeric comparison (`Integer(10) == Float(10.0)`) and type-a
 
 ## Test Suite
 
-**41 tests total** across two crates:
+**43 tests total** across two crates:
 
 ### logium-core: Unit Tests (18 tests)
 
@@ -536,11 +539,12 @@ Tests against real-world log data in `crates/logium-core/tests/fixtures/`:
 
 Test fixtures are downloaded from [LogHub](https://github.com/logpai/loghub) and [Elastic examples](https://github.com/elastic/examples) via `scripts/setup_test_data.sh`, then split into A/B (odd/even lines) for cross-source testing.
 
-### logium-server (15 tests)
+### logium-server (17 tests)
 
 | Category | Tests | What's Covered |
 |----------|-------|----------------|
 | Database CRUD | 8 | Projects, timestamp templates, source templates, sources, rules (with sub-rules), rulesets (many-to-many), patterns (with predicates, including StateRef operands), bulk project data loading |
+| Import/Export | 2 | Full round-trip import with ID remapping, empty config import |
 | Analysis helpers | 6 | Regex suggestion (numbers, quoted strings, special chars), timestamp format detection, timestamp length estimation |
 | Seed data | 1 | Demo project seeding with templates, sources, rules, and patterns |
 

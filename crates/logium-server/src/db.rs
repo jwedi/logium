@@ -1,8 +1,12 @@
+use std::collections::HashMap;
+
 use chrono::Datelike;
 use sqlx::Row;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 
 use logium_core::model::*;
+
+use crate::routes::import_export::{ImportResult, ProjectExport};
 
 #[derive(Debug)]
 pub enum DbError {
@@ -1114,6 +1118,142 @@ impl Database {
     }
 
     // -----------------------------------------------------------------------
+    // Import project configuration
+    // -----------------------------------------------------------------------
+
+    pub async fn import_project_config(
+        &self,
+        project_id: i64,
+        data: &ProjectExport,
+    ) -> Result<ImportResult, DbError> {
+        let mut tt_id_map: HashMap<u64, u64> = HashMap::new();
+        let mut st_id_map: HashMap<u64, u64> = HashMap::new();
+        let mut rule_id_map: HashMap<u64, u64> = HashMap::new();
+
+        // 1. TimestampTemplates (no FK deps)
+        for tt in &data.timestamp_templates {
+            let new_tt = self
+                .create_timestamp_template(
+                    project_id,
+                    &tt.name,
+                    &tt.format,
+                    tt.extraction_regex.as_deref(),
+                    tt.default_year,
+                )
+                .await?;
+            tt_id_map.insert(tt.id, new_tt.id);
+        }
+
+        // 2. SourceTemplates (FK: timestamp_template_id)
+        for st in &data.source_templates {
+            let new_tt_id = tt_id_map.get(&st.timestamp_template_id).ok_or_else(|| {
+                DbError::InvalidData(format!(
+                    "source template '{}' references unknown timestamp_template_id {}",
+                    st.name, st.timestamp_template_id
+                ))
+            })?;
+            let new_st = self
+                .create_template(
+                    project_id,
+                    &st.name,
+                    *new_tt_id as i64,
+                    &st.line_delimiter,
+                    st.content_regex.as_deref(),
+                )
+                .await?;
+            st_id_map.insert(st.id, new_st.id);
+        }
+
+        // 3. Rules (match_rules/extraction_rules are sub-entities)
+        for rule in &data.rules {
+            let create_match_rules: Vec<CreateMatchRule> = rule
+                .match_rules
+                .iter()
+                .map(|mr| CreateMatchRule {
+                    pattern: mr.pattern.clone(),
+                })
+                .collect();
+            let create_ext_rules: Vec<CreateExtractionRule> = rule
+                .extraction_rules
+                .iter()
+                .map(|er| CreateExtractionRule {
+                    extraction_type: er.extraction_type.clone(),
+                    state_key: er.state_key.clone(),
+                    pattern: er.pattern.clone(),
+                    static_value: er.static_value.clone(),
+                    mode: er.mode.clone(),
+                })
+                .collect();
+            let new_rule = self
+                .create_rule(
+                    project_id,
+                    &rule.name,
+                    &rule.match_mode,
+                    &create_match_rules,
+                    &create_ext_rules,
+                )
+                .await?;
+            rule_id_map.insert(rule.id, new_rule.id);
+        }
+
+        // 4. Rulesets (FK: template_id, rule_ids)
+        for rs in &data.rulesets {
+            let new_st_id = st_id_map.get(&rs.template_id).ok_or_else(|| {
+                DbError::InvalidData(format!(
+                    "ruleset '{}' references unknown template_id {}",
+                    rs.name, rs.template_id
+                ))
+            })?;
+            let remapped_rule_ids: Vec<i64> = rs
+                .rule_ids
+                .iter()
+                .map(|old_id| {
+                    rule_id_map
+                        .get(old_id)
+                        .map(|&new_id| new_id as i64)
+                        .ok_or_else(|| {
+                            DbError::InvalidData(format!(
+                                "ruleset '{}' references unknown rule_id {}",
+                                rs.name, old_id
+                            ))
+                        })
+                })
+                .collect::<Result<_, _>>()?;
+            self.create_ruleset(
+                project_id,
+                &rs.name,
+                *new_st_id as i64,
+                &remapped_rule_ids,
+            )
+            .await?;
+        }
+
+        // 5. Patterns (predicates use source_name strings, no ID FKs)
+        for pattern in &data.patterns {
+            let create_predicates: Vec<CreatePredicate> = pattern
+                .predicates
+                .iter()
+                .map(|p| CreatePredicate {
+                    source_name: p.source_name.clone(),
+                    state_key: p.state_key.clone(),
+                    operator: p.operator.clone(),
+                    operand: p.operand.clone(),
+                })
+                .collect();
+            self.create_pattern(project_id, &pattern.name, &create_predicates)
+                .await?;
+        }
+
+        Ok(ImportResult {
+            timestamp_templates: data.timestamp_templates.len(),
+            source_templates: data.source_templates.len(),
+            rules: data.rules.len(),
+            rulesets: data.rulesets.len(),
+            patterns: data.patterns.len(),
+        })
+    }
+
+    // -----------------------------------------------------------------------
     // Load all project data (for analysis)
     // -----------------------------------------------------------------------
 
@@ -1699,5 +1839,130 @@ mod tests {
         assert!(data.sources.is_empty());
         assert!(data.rulesets.is_empty());
         assert!(data.patterns.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_import_project_config() {
+        use crate::routes::import_export::ProjectExport;
+
+        let db = test_db().await;
+
+        // Create source project with full config
+        let src = db.create_project("Source").await.unwrap();
+        let tt = db
+            .create_timestamp_template(src.id, "custom_ts", "%Y-%m-%d", Some(r"\[(.+?)\]"), Some(2025))
+            .await
+            .unwrap();
+        let st = db
+            .create_template(src.id, "server_log", tt.id as i64, "\n", Some(r"^\d+"))
+            .await
+            .unwrap();
+        let rule = db
+            .create_rule(
+                src.id,
+                "error_rule",
+                &MatchMode::Any,
+                &[CreateMatchRule {
+                    pattern: "ERROR".to_string(),
+                }],
+                &[CreateExtractionRule {
+                    extraction_type: ExtractionType::Static,
+                    state_key: "status".to_string(),
+                    pattern: None,
+                    static_value: Some("error".to_string()),
+                    mode: ExtractionMode::Replace,
+                }],
+            )
+            .await
+            .unwrap();
+        db.create_ruleset(src.id, "main_rules", st.id as i64, &[rule.id as i64])
+            .await
+            .unwrap();
+        db.create_pattern(
+            src.id,
+            "failure_pattern",
+            &[CreatePredicate {
+                source_name: "server".to_string(),
+                state_key: "status".to_string(),
+                operator: Operator::Eq,
+                operand: Operand::Literal(StateValue::String("error".to_string())),
+            }],
+        )
+        .await
+        .unwrap();
+
+        // Export source project data
+        let data = db.load_project_data(src.id).await.unwrap();
+        let export = ProjectExport {
+            version: 1,
+            timestamp_templates: data.timestamp_templates,
+            source_templates: data.templates,
+            rules: data.rules,
+            rulesets: data.rulesets,
+            patterns: data.patterns,
+        };
+
+        // Import into a fresh target project
+        let target = db.create_project("Target").await.unwrap();
+        let result = db.import_project_config(target.id, &export).await.unwrap();
+
+        // Verify counts (source project has 6 seeded + 1 custom TT)
+        assert_eq!(result.timestamp_templates, 7);
+        assert_eq!(result.source_templates, 1);
+        assert_eq!(result.rules, 1);
+        assert_eq!(result.rulesets, 1);
+        assert_eq!(result.patterns, 1);
+
+        // Verify entities exist in target project
+        let target_data = db.load_project_data(target.id).await.unwrap();
+        // 6 seeded (from create_project) + 7 imported
+        assert_eq!(target_data.timestamp_templates.len(), 13);
+        assert_eq!(target_data.templates.len(), 1);
+        assert_eq!(target_data.rules.len(), 1);
+        assert_eq!(target_data.rulesets.len(), 1);
+        assert_eq!(target_data.patterns.len(), 1);
+
+        // Verify ID remapping: ruleset's template_id should point to the new source template
+        let imported_rs = &target_data.rulesets[0];
+        let imported_st = &target_data.templates[0];
+        assert_eq!(imported_rs.template_id, imported_st.id);
+
+        // Verify ruleset's rule_ids point to the new rule
+        let imported_rule = &target_data.rules[0];
+        assert_eq!(imported_rs.rule_ids, vec![imported_rule.id]);
+
+        // Verify imported template's timestamp_template_id points to a valid TT in target
+        let imported_tt = target_data
+            .timestamp_templates
+            .iter()
+            .find(|t| t.id == imported_st.timestamp_template_id)
+            .expect("imported source template should reference a valid timestamp template");
+        assert_eq!(imported_tt.name, "custom_ts");
+        assert_eq!(imported_tt.extraction_regex.as_deref(), Some(r"\[(.+?)\]"));
+        assert_eq!(imported_tt.default_year, Some(2025));
+    }
+
+    #[tokio::test]
+    async fn test_import_empty_config() {
+        use crate::routes::import_export::ProjectExport;
+
+        let db = test_db().await;
+        let p = db.create_project("P1").await.unwrap();
+
+        let export = ProjectExport {
+            version: 1,
+            timestamp_templates: vec![],
+            source_templates: vec![],
+            rules: vec![],
+            rulesets: vec![],
+            patterns: vec![],
+        };
+
+        let result = db.import_project_config(p.id, &export).await.unwrap();
+        assert_eq!(result.timestamp_templates, 0);
+        assert_eq!(result.source_templates, 0);
+        assert_eq!(result.rules, 0);
+        assert_eq!(result.rulesets, 0);
+        assert_eq!(result.patterns, 0);
     }
 }

@@ -49,6 +49,7 @@ async fn main() {
         .merge(routes::rules::router())
         .merge(routes::rulesets::router())
         .merge(routes::patterns::router())
+        .merge(routes::import_export::router())
         .merge(routes::analysis::router())
         .layer(cors)
         .with_state(state);
