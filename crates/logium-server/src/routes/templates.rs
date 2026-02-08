@@ -22,7 +22,7 @@ pub fn router() -> Router<AppState> {
 #[derive(Deserialize)]
 struct CreateTemplate {
     name: String,
-    timestamp_format: String,
+    timestamp_template_id: u64,
     line_delimiter: String,
     content_regex: Option<String>,
 }
@@ -31,7 +31,7 @@ struct CreateTemplate {
 struct TemplateResponse {
     id: u64,
     name: String,
-    timestamp_format: String,
+    timestamp_template_id: u64,
     line_delimiter: String,
     content_regex: Option<String>,
 }
@@ -41,7 +41,7 @@ impl From<logium_core::model::SourceTemplate> for TemplateResponse {
         Self {
             id: t.id,
             name: t.name,
-            timestamp_format: t.timestamp_format,
+            timestamp_template_id: t.timestamp_template_id,
             line_delimiter: t.line_delimiter,
             content_regex: t.content_regex,
         }
@@ -66,7 +66,7 @@ async fn create(
         .create_template(
             project_id,
             &body.name,
-            &body.timestamp_format,
+            body.timestamp_template_id as i64,
             &body.line_delimiter,
             body.content_regex.as_deref(),
         )
@@ -93,7 +93,7 @@ async fn update(
             project_id,
             id,
             &body.name,
-            &body.timestamp_format,
+            body.timestamp_template_id as i64,
             &body.line_delimiter,
             body.content_regex.as_deref(),
         )

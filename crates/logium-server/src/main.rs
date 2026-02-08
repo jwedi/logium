@@ -43,6 +43,7 @@ async fn main() {
 
     let mut app = Router::new()
         .merge(routes::projects::router())
+        .merge(routes::timestamp_templates::router())
         .merge(routes::templates::router())
         .merge(routes::sources::router())
         .merge(routes::rules::router())
