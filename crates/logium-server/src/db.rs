@@ -1219,13 +1219,8 @@ impl Database {
                         })
                 })
                 .collect::<Result<_, _>>()?;
-            self.create_ruleset(
-                project_id,
-                &rs.name,
-                *new_st_id as i64,
-                &remapped_rule_ids,
-            )
-            .await?;
+            self.create_ruleset(project_id, &rs.name, *new_st_id as i64, &remapped_rule_ids)
+                .await?;
         }
 
         // 5. Patterns (predicates use source_name strings, no ID FKs)
@@ -1850,7 +1845,13 @@ mod tests {
         // Create source project with full config
         let src = db.create_project("Source").await.unwrap();
         let tt = db
-            .create_timestamp_template(src.id, "custom_ts", "%Y-%m-%d", Some(r"\[(.+?)\]"), Some(2025))
+            .create_timestamp_template(
+                src.id,
+                "custom_ts",
+                "%Y-%m-%d",
+                Some(r"\[(.+?)\]"),
+                Some(2025),
+            )
             .await
             .unwrap();
         let st = db

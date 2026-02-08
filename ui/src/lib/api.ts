@@ -141,7 +141,10 @@ export const projects = {
     if (!res.ok) throw new Error(`Export failed: ${res.status}`);
     return res.blob();
   },
-  importConfig: (id: number, data: unknown): Promise<{
+  importConfig: (
+    id: number,
+    data: unknown,
+  ): Promise<{
     timestamp_templates: number;
     source_templates: number;
     rules: number;

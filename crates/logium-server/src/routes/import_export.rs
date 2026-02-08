@@ -86,10 +86,7 @@ async fn import(
     // Verify project exists
     state.db.get_project(project_id).await?;
 
-    let result = state
-        .db
-        .import_project_config(project_id, &body)
-        .await?;
+    let result = state.db.import_project_config(project_id, &body).await?;
 
     Ok((StatusCode::OK, Json(result)))
 }
