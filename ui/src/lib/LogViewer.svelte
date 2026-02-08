@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import {
     rules as rulesApi,
     type Source,
@@ -34,6 +35,13 @@
   let selectedLineIdx: number | null = $state(null);
   let allRules: LogRule[] = $state([]);
 
+  // Search state
+  let searchOpen = $state(false);
+  let searchQuery = $state('');
+  let searchIsRegex = $state(false);
+  let currentMatchIdx = $state(0);
+  let searchInput: HTMLInputElement | undefined = $state();
+
   let totalHeight = $derived(lines.length * LINE_HEIGHT);
   let startIdx = $derived(Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - OVERSCAN));
   let endIdx = $derived(
@@ -41,6 +49,34 @@
   );
   let visibleLines = $derived(lines.slice(startIdx, endIdx));
   let offsetY = $derived(startIdx * LINE_HEIGHT);
+
+  // Search: compiled regex for matching and highlighting
+  let searchRegex: RegExp | null = $derived.by(() => {
+    if (!searchQuery) return null;
+    try {
+      if (searchIsRegex) {
+        return new RegExp(searchQuery, 'gi');
+      }
+      return new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    } catch {
+      return null;
+    }
+  });
+
+  // Search: array of matching line indices
+  let searchMatches: number[] = $derived.by(() => {
+    if (!searchQuery || !searchRegex) return [];
+    const result: number[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      searchRegex.lastIndex = 0;
+      if (searchRegex.test(lines[i])) {
+        result.push(i);
+      }
+    }
+    return result;
+  });
+
+  let searchMatchSet = $derived(new Set(searchMatches));
 
   // Build a map of line content -> rule matches for highlighting
   let lineMatchMap = $derived.by(() => {
@@ -128,6 +164,73 @@
     selectedLineIdx = selectedLineIdx === globalIdx ? null : globalIdx;
   }
 
+  // Search functions
+  function onSearchKeydown(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault();
+      searchOpen = true;
+      tick().then(() => searchInput?.focus());
+    }
+    if (e.key === 'Escape' && searchOpen) {
+      closeSearch();
+    }
+  }
+
+  function onSearchInputKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) prevMatch();
+      else nextMatch();
+    }
+  }
+
+  function nextMatch() {
+    if (searchMatches.length === 0) return;
+    currentMatchIdx = (currentMatchIdx + 1) % searchMatches.length;
+    scrollToMatch();
+  }
+
+  function prevMatch() {
+    if (searchMatches.length === 0) return;
+    currentMatchIdx = (currentMatchIdx - 1 + searchMatches.length) % searchMatches.length;
+    scrollToMatch();
+  }
+
+  function scrollToMatch() {
+    const lineIdx = searchMatches[currentMatchIdx];
+    if (container) {
+      container.scrollTop = lineIdx * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
+    }
+  }
+
+  function closeSearch() {
+    searchOpen = false;
+    searchQuery = '';
+    currentMatchIdx = 0;
+  }
+
+  function splitLineBySearch(line: string): { text: string; isMatch: boolean }[] {
+    if (!searchRegex || !searchQuery) return [{ text: line, isMatch: false }];
+    const segments: { text: string; isMatch: boolean }[] = [];
+    let lastIndex = 0;
+    searchRegex.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = searchRegex.exec(line)) !== null) {
+      if (m.index > lastIndex) {
+        segments.push({ text: line.slice(lastIndex, m.index), isMatch: false });
+      }
+      segments.push({ text: m[0], isMatch: true });
+      lastIndex = searchRegex.lastIndex;
+      if (m[0].length === 0) {
+        searchRegex.lastIndex++;
+      }
+    }
+    if (lastIndex < line.length) {
+      segments.push({ text: line.slice(lastIndex), isMatch: false });
+    }
+    return segments.length > 0 ? segments : [{ text: line, isMatch: false }];
+  }
+
   // Simulate reading file lines from the source file_path
   // In real usage, the backend would serve file content
   async function loadFileContent() {
@@ -165,36 +268,79 @@
       return () => obs.disconnect();
     }
   });
+
+  // Reset match index when search results change
+  $effect(() => {
+    searchMatches;
+    currentMatchIdx = 0;
+  });
 </script>
 
+<svelte:window onkeydown={onSearchKeydown} />
+
 <div class="log-viewer-wrapper">
-  <div
-    class="log-viewer"
-    bind:this={container}
-    onscroll={onScroll}
-    onmouseup={onMouseUp}
-    role="log"
-  >
-    <div class="scroll-spacer" style="height: {totalHeight}px">
-      <div class="visible-lines" style="transform: translateY({offsetY}px)">
-        {#each visibleLines as line, i}
-          {@const globalIdx = startIdx + i}
-          {@const matches = lineMatchMap.get(globalIdx)}
-          <div
-            class="log-line"
-            class:highlighted={!!matches}
-            class:selected={selectedLineIdx === globalIdx}
-            style={matches
-              ? `background: var(--rule-color-${getRuleColor(matches[0].ruleId)}); border-left: 3px solid var(--rule-border-${getRuleColor(matches[0].ruleId)})`
+  <div class="log-viewer-column">
+    {#if searchOpen}
+      <div class="search-bar">
+        <input
+          bind:this={searchInput}
+          bind:value={searchQuery}
+          onkeydown={onSearchInputKeydown}
+          placeholder="Search..."
+        />
+        <button
+          class="search-toggle"
+          class:active={searchIsRegex}
+          onclick={() => (searchIsRegex = !searchIsRegex)}
+          title="Toggle regex">.*</button
+        >
+        <span class="match-count">
+          {searchMatches.length > 0
+            ? `${currentMatchIdx + 1} of ${searchMatches.length}`
+            : searchQuery
+              ? 'No matches'
               : ''}
-            onclick={() => onLineClick(globalIdx)}
-            role="button"
-            tabindex="0"
-          >
-            <span class="line-number">{globalIdx + 1}</span>
-            <span class="line-content">{line}</span>
-          </div>
-        {/each}
+        </span>
+        <button onclick={prevMatch} title="Previous match">&#x2191;</button>
+        <button onclick={nextMatch} title="Next match">&#x2193;</button>
+        <button onclick={closeSearch} title="Close search">&#x2715;</button>
+      </div>
+    {/if}
+
+    <div
+      class="log-viewer"
+      bind:this={container}
+      onscroll={onScroll}
+      onmouseup={onMouseUp}
+      role="log"
+    >
+      <div class="scroll-spacer" style="height: {totalHeight}px">
+        <div class="visible-lines" style="transform: translateY({offsetY}px)">
+          {#each visibleLines as line, i}
+            {@const globalIdx = startIdx + i}
+            {@const matches = lineMatchMap.get(globalIdx)}
+            <div
+              class="log-line"
+              class:highlighted={!!matches}
+              class:selected={selectedLineIdx === globalIdx}
+              class:current-search-match={searchMatches.length > 0 &&
+                searchMatches[currentMatchIdx] === globalIdx}
+              style={matches
+                ? `background: var(--rule-color-${getRuleColor(matches[0].ruleId)}); border-left: 3px solid var(--rule-border-${getRuleColor(matches[0].ruleId)})`
+                : ''}
+              onclick={() => onLineClick(globalIdx)}
+              role="button"
+              tabindex="0"
+            >
+              <span class="line-number">{globalIdx + 1}</span>
+              <span class="line-content"
+                >{#if searchMatchSet.has(globalIdx)}{#each splitLineBySearch(line) as seg}{#if seg.isMatch}<mark
+                        class="search-highlight">{seg.text}</mark
+                      >{:else}{seg.text}{/if}{/each}{:else}{line}{/if}</span
+              >
+            </div>
+          {/each}
+        </div>
       </div>
     </div>
   </div>
@@ -247,6 +393,13 @@
     gap: 0;
     height: calc(100vh - 200px);
     min-height: 400px;
+  }
+
+  .log-viewer-column {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
   }
 
   .log-viewer {
@@ -369,5 +522,51 @@
     border-radius: var(--radius);
     padding: 4px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .search-bar input {
+    flex: 1;
+    min-width: 150px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  .search-bar button {
+    padding: 2px 8px;
+    font-size: 13px;
+  }
+
+  .search-bar button.active {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+
+  .match-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    min-width: 80px;
+    text-align: center;
+  }
+
+  mark.search-highlight {
+    background: var(--yellow);
+    color: var(--bg);
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+
+  .log-line.current-search-match {
+    background: rgba(224, 175, 104, 0.1) !important;
   }
 </style>
