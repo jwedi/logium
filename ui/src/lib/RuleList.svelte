@@ -1,12 +1,14 @@
 <script lang="ts">
   import { rules as rulesApi, type LogRule } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
+  import RuleEditor from './RuleEditor.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
   let ruleList: LogRule[] = $state([]);
   let loading = $state(false);
   let expandedId: number | null = $state(null);
+  let editingId: number | null = $state(null);
 
   // Create form state
   let newName = $state('');
@@ -133,6 +135,13 @@
           </div>
           <div class="rule-actions">
             <button
+              onclick={(e) => {
+                e.stopPropagation();
+                editingId = rule.id;
+                expandedId = rule.id;
+              }}>Edit</button
+            >
+            <button
               class="danger"
               onclick={(e) => {
                 e.stopPropagation();
@@ -143,32 +152,46 @@
         </div>
 
         {#if expandedId === rule.id}
-          <div class="rule-details">
-            <div class="detail-section">
-              <h3>Match Rules</h3>
-              {#each rule.match_rules as mr}
-                <code class="pattern">{mr.pattern}</code>
-              {/each}
-            </div>
-            {#if rule.extraction_rules.length > 0}
+          {#if editingId === rule.id}
+            <RuleEditor
+              rule={structuredClone(rule)}
+              {projectId}
+              onSave={() => {
+                editingId = null;
+                load();
+              }}
+              onCancel={() => {
+                editingId = null;
+              }}
+            />
+          {:else}
+            <div class="rule-details">
               <div class="detail-section">
-                <h3>Extraction Rules</h3>
-                {#each rule.extraction_rules as er}
-                  <div class="extraction-row">
-                    <span class="state-key">{er.state_key}</span>
-                    <span class="badge">{er.extraction_type}</span>
-                    <span class="badge">{er.mode}</span>
-                    {#if er.pattern}
-                      <code class="pattern">{er.pattern}</code>
-                    {/if}
-                    {#if er.static_value}
-                      <span class="static-val">= {er.static_value}</span>
-                    {/if}
-                  </div>
+                <h3>Match Rules</h3>
+                {#each rule.match_rules as mr}
+                  <code class="pattern">{mr.pattern}</code>
                 {/each}
               </div>
-            {/if}
-          </div>
+              {#if rule.extraction_rules.length > 0}
+                <div class="detail-section">
+                  <h3>Extraction Rules</h3>
+                  {#each rule.extraction_rules as er}
+                    <div class="extraction-row">
+                      <span class="state-key">{er.state_key}</span>
+                      <span class="badge">{er.extraction_type}</span>
+                      <span class="badge">{er.mode}</span>
+                      {#if er.pattern}
+                        <code class="pattern">{er.pattern}</code>
+                      {/if}
+                      {#if er.static_value}
+                        <span class="static-val">= {er.static_value}</span>
+                      {/if}
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
         {/if}
       </div>
     {/each}

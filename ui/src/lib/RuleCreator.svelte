@@ -7,6 +7,7 @@
     type SuggestRuleResponse,
   } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
+  import { detectGroups, testPattern } from './regexUtils';
 
   let {
     projectId,
@@ -40,47 +41,18 @@
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  function detectGroups(pattern: string): string[] {
-    const groups: string[] = [];
-    // Match both JS (?<name>...) and Rust/Python (?P<name>...) named groups,
-    // plus unnamed groups
-    const namedGroupRegex = /\((?:\?(?:P?<([^>]+)>))?/g;
-    let match;
-    let idx = 0;
-    while ((match = namedGroupRegex.exec(pattern)) !== null) {
-      if (match[1]) {
-        groups.push(match[1]);
-      } else {
-        groups.push(`group_${idx}`);
-      }
-      idx++;
-    }
-    return groups;
-  }
-
   let previewResult = $derived.by(() => {
-    try {
-      // Transform Rust/Python (?P<name>...) to JS (?<name>...) for browser preview
-      const jsPattern = regexPattern.replace(/\(\?P</g, '(?<');
-      const re = new RegExp(jsPattern);
-      const m = re.exec(selectedText);
-      if (m) {
-        let result = `Match: "${m[0]}"`;
-        if (m.length > 1) {
-          result +=
-            ' | Groups: ' +
-            m
-              .slice(1)
-              .map((g, i) => `${i}: "${g}"`)
-              .join(', ');
-        }
-        return result;
-      } else {
-        return 'No match on selected text';
+    const result = testPattern(regexPattern, selectedText);
+    if (result.status === 'match') {
+      let text = result.message;
+      const groupEntries = Object.entries(result.groups);
+      if (groupEntries.length > 0) {
+        text += ' | Groups: ' + groupEntries.map(([k, v], i) => `${i}: "${v}"`).join(', ');
       }
-    } catch (e: any) {
-      return `Invalid regex: ${e.message}`;
+      return text;
     }
+    if (result.status === 'error') return result.message;
+    return 'No match on selected text';
   });
 
   async function fetchSuggestion() {

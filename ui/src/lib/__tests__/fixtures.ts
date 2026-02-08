@@ -73,6 +73,34 @@ export function makeRule(overrides: Partial<LogRule> = {}): LogRule {
   };
 }
 
+export function makeRuleWithExtractions(overrides: Partial<LogRule> = {}): LogRule {
+  return {
+    id: 1,
+    name: 'Extraction Rule',
+    match_mode: 'Any',
+    match_rules: [{ id: 1, pattern: 'ERROR (?P<message>.+)' }],
+    extraction_rules: [
+      {
+        id: 1,
+        extraction_type: 'Parsed',
+        state_key: 'message',
+        pattern: 'ERROR (?P<message>.+)',
+        static_value: null,
+        mode: 'Replace',
+      },
+      {
+        id: 2,
+        extraction_type: 'Static',
+        state_key: 'level',
+        pattern: null,
+        static_value: 'error',
+        mode: 'Replace',
+      },
+    ],
+    ...overrides,
+  };
+}
+
 export function makePattern(overrides: Partial<Pattern> = {}): Pattern {
   return {
     id: 1,
