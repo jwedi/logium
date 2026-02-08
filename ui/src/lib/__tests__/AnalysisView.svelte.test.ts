@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import AnalysisView from '../AnalysisView.svelte';
+import { invalidateAnalysis } from '../analysisInvalidation.svelte';
 import {
   makeAnalysisResult,
   makeSource,
@@ -205,6 +206,98 @@ describe('AnalysisView', () => {
     await tick();
 
     expect(screen.getByText('Running...')).toBeInTheDocument();
+  });
+
+  // --- Auto-rerun ---
+
+  it('auto-reruns on invalidation after debounce', async () => {
+    renderAnalysis();
+    await tick();
+
+    invalidateAnalysis();
+    await tick();
+
+    // Before debounce fires, runStreaming should not have been called
+    expect(analysisApi.runStreaming).not.toHaveBeenCalled();
+
+    // Advance past the 500ms debounce
+    vi.advanceTimersByTime(500);
+    await tick();
+
+    expect(analysisApi.runStreaming).toHaveBeenCalledTimes(1);
+  });
+
+  it('debounces rapid invalidations', async () => {
+    renderAnalysis();
+    await tick();
+
+    invalidateAnalysis();
+    await tick();
+    vi.advanceTimersByTime(100);
+    invalidateAnalysis();
+    await tick();
+    vi.advanceTimersByTime(100);
+    invalidateAnalysis();
+    await tick();
+
+    // Advance past the debounce from the last invalidation
+    vi.advanceTimersByTime(500);
+    await tick();
+
+    // Should only have been called once (debounced)
+    expect(analysisApi.runStreaming).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels in-flight analysis on re-trigger', async () => {
+    // First run: never completes
+    const closeHandle = vi.fn();
+    runStreamingImpl = (_pid: number, _callbacks: any) => {
+      return { close: closeHandle };
+    };
+    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) =>
+      runStreamingImpl(args[0], args[1]),
+    );
+
+    renderAnalysis();
+    await tick();
+
+    // Manual run
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    await tick();
+
+    expect(analysisApi.runStreaming).toHaveBeenCalledTimes(1);
+    expect(closeHandle).not.toHaveBeenCalled();
+
+    // Invalidate to trigger auto-rerun
+    invalidateAnalysis();
+    await tick();
+    vi.advanceTimersByTime(500);
+    await tick();
+
+    // The first handle should have been closed
+    expect(closeHandle).toHaveBeenCalled();
+    // A new run should have started
+    expect(analysisApi.runStreaming).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows "Re-analyzing..." text during auto-triggered run', async () => {
+    // runStreaming that never completes
+    runStreamingImpl = (_pid: number, _callbacks: any) => {
+      return { close: vi.fn() };
+    };
+    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) =>
+      runStreamingImpl(args[0], args[1]),
+    );
+
+    renderAnalysis();
+    await tick();
+
+    invalidateAnalysis();
+    await tick();
+    vi.advanceTimersByTime(500);
+    await tick();
+
+    expect(screen.getByText('Re-analyzing...')).toBeInTheDocument();
   });
 
   // --- Snapshot ---

@@ -7,6 +7,7 @@
     type LogRule,
     type SourceTemplate,
   } from './api';
+  import { invalidateAnalysis } from './analysisInvalidation.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -51,6 +52,7 @@
       newTemplateId = '';
       newRuleIds = [];
       await load();
+      invalidateAnalysis();
     } catch (e: any) {
       alert(e.message);
     }
@@ -66,6 +68,7 @@
       });
       editing = null;
       await load();
+      invalidateAnalysis();
     } catch (e: any) {
       alert(e.message);
     }
@@ -77,6 +80,7 @@
       await rulesetsApi.delete(projectId, id);
       if (editing?.id === id) editing = null;
       await load();
+      invalidateAnalysis();
     } catch (e: any) {
       alert(e.message);
     }

@@ -374,6 +374,8 @@ The AnalysisView streams results over a WebSocket connection (`/api/projects/:pi
 - Per-source LogViewer instances with match highlighting
 - Pattern match cards with full state snapshots showing the state of every source at match time
 
+**Live re-evaluation:** When rules, rulesets, or patterns are modified in any editor view, AnalysisView automatically re-runs analysis after a 500ms debounce. In-flight runs are cancelled before starting a new one. This is coordinated via a shared module-scoped invalidation counter (`analysisInvalidation.svelte.ts`) that persists across component mount/unmount cycles.
+
 ### Routing and Navigation
 
 The app uses **state-based routing** (no router library). `App.svelte` maintains a `currentView` state variable and renders the active component with `{#if}/{:else if}` blocks. The sidebar navigation shows project-scoped views only when a project is selected.
@@ -544,14 +546,15 @@ Test fixtures are downloaded from [LogHub](https://github.com/logpai/loghub) and
 
 All server tests use in-memory SQLite (`:memory:`) for isolation and speed.
 
-### Frontend (60 tests)
+### Frontend (68 tests)
 
 Vitest tests using `@testing-library/svelte`:
 
 | Component | Tests | What's Covered |
 |-----------|-------|----------------|
-| RuleCreator | 8 | Suggest-rule API integration, fallback on API failure, ruleset filtering by template, auto-selection, rule creation with ruleset assignment, save validation |
-| AnalysisView | 8 | Run button, table/timeline tab switching, result stats, streaming error banner, in-progress state, snapshot |
+| analysisInvalidation | 3 | Stamp starts at 0, increment, sequential increments |
+| RuleCreator | 9 | Suggest-rule API integration, fallback on API failure, ruleset filtering by template, auto-selection, rule creation with ruleset assignment, save validation, invalidation on save |
+| AnalysisView | 12 | Run button, table/timeline tab switching, result stats, streaming error banner, in-progress state, auto-rerun on invalidation, debounce, cancellation, re-analyzing text, snapshot |
 | TimelineView | 10 | Render with data, empty state, zoom controls, swimlane display, detail panel interaction |
 | TimelineDetailPanel | 17 | Rule match display, pattern match display, state snapshot rendering, empty states |
 | TimelineSwimlane | 10 | Event rendering, color coding, click handling, tooltip display |
@@ -572,7 +575,6 @@ Run benchmarks with `./scripts/run_benchmark.sh` — results are saved with time
 
 ## Future Work (Phase 2)
 
-- **Real-time feedback** — automatically re-run analysis when rules or patterns change
 - **Click-to-navigate** — click timeline events to scroll to the corresponding log line in LogViewer
 - **Source swimlanes** — per-source state evolution over time on the timeline
 - **Live log sources** — file watching / stdin streaming for tailing live logs

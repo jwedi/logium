@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import RuleCreator from '../RuleCreator.svelte';
 import { makeRule, makeRuleset, makeSuggestRuleResponse } from './fixtures';
+import * as invalidation from '../analysisInvalidation.svelte';
 
 // vi.mock factory is hoisted — cannot reference imported helpers, so use plain objects
 vi.mock('../api', () => ({
@@ -201,5 +202,31 @@ describe('RuleCreator', () => {
 
     const saveBtn = screen.getByText('Create Rule');
     expect(saveBtn).toBeDisabled();
+  });
+
+  it('calls invalidateAnalysis after successful save', async () => {
+    const spy = vi.spyOn(invalidation, 'invalidateAnalysis');
+
+    renderRuleCreator({ sourceTemplateId: 1 });
+    await tick();
+
+    await waitFor(() => {
+      expect(screen.getByText('Assign to Ruleset')).toBeInTheDocument();
+    });
+
+    const nameInput = screen.getByPlaceholderText('My rule...');
+    await fireEvent.input(nameInput, { target: { value: 'My Error Rule' } });
+
+    await fireEvent.click(screen.getByText('Create Rule'));
+
+    await waitFor(() => {
+      expect(rulesApi.create).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalled();
+    });
+
+    spy.mockRestore();
   });
 });

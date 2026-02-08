@@ -22,12 +22,9 @@ The user highlights text in a log line → `RuleCreator` modal opens → the bac
 
 ## 3. Real-Time Feedback / Live Re-evaluation
 
-The design doc states:
-> As rules and patterns are defined, the viewer immediately highlights matching log lines and shows state changes. Pattern matches appear inline in the timeline.
+**Status:** Done
 
-Currently, analysis must be explicitly triggered via the "Run Analysis" button. Rule/pattern changes do not trigger automatic re-evaluation.
-
-**Implementation:** Watch for rule/pattern mutations via the existing CRUD APIs (or WebSocket push), automatically re-run analysis on changes, and incrementally update the viewer.
+A module-scoped invalidation counter (`analysisInvalidation.svelte.ts`) is incremented after every successful CRUD operation in RuleList, RulesetManager, PatternEditor, and RuleCreator. AnalysisView watches the counter via `$effect` and auto-reruns analysis after a 500ms debounce, with cancellation of any in-flight streaming run. The button shows "Re-analyzing..." during auto-triggered runs.
 
 ---
 

@@ -7,6 +7,7 @@
     type Source,
     type StateValue,
   } from './api';
+  import { invalidateAnalysis } from './analysisInvalidation.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -108,6 +109,7 @@
       newName = '';
       newPredicates = [];
       await load();
+      invalidateAnalysis();
     } catch (e: any) {
       alert(e.message);
     }
@@ -122,6 +124,7 @@
       });
       editingPattern = null;
       await load();
+      invalidateAnalysis();
     } catch (e: any) {
       alert(e.message);
     }
@@ -133,6 +136,7 @@
       await patternsApi.delete(projectId, id);
       if (editingPattern?.id === id) editingPattern = null;
       await load();
+      invalidateAnalysis();
     } catch (e: any) {
       alert(e.message);
     }
