@@ -31,6 +31,8 @@
   let currentHandle: { close: () => void } | null = $state(null);
   let lastRunStamp = $state(0);
 
+  let navigateTarget: string | null = $state(null);
+
   let selectedSource = $derived(sourceList.find((s) => s.id === selectedSourceId) ?? null);
 
   let sourceRuleMatches = $derived(
@@ -47,6 +49,12 @@
 
   function getSourceName(id: number): string {
     return sourceList.find((s) => s.id === id)?.name ?? `Source #${id}`;
+  }
+
+  function handleNavigate(sourceId: number, rawLine: string) {
+    viewMode = 'table';
+    selectedSourceId = sourceId;
+    navigateTarget = rawLine;
   }
 
   function formatStateValue(sv: StateValue): string {
@@ -194,9 +202,19 @@
   </div>
 
   <div class="view-tabs">
-    <button class:active={viewMode === 'table'} onclick={() => (viewMode = 'table')}>Table</button>
-    <button class:active={viewMode === 'timeline'} onclick={() => (viewMode = 'timeline')}
-      >Timeline</button
+    <button
+      class:active={viewMode === 'table'}
+      onclick={() => {
+        viewMode = 'table';
+        navigateTarget = null;
+      }}>Table</button
+    >
+    <button
+      class:active={viewMode === 'timeline'}
+      onclick={() => {
+        viewMode = 'timeline';
+        navigateTarget = null;
+      }}>Timeline</button
     >
   </div>
 
@@ -208,7 +226,10 @@
           {#each sourceList as src}
             <button
               class:active={selectedSourceId === src.id}
-              onclick={() => (selectedSourceId = src.id)}
+              onclick={() => {
+                selectedSourceId = src.id;
+                navigateTarget = null;
+              }}
             >
               {src.name}
               {#if result.rule_matches.filter((m) => m.source_id === src.id).length > 0}
@@ -229,6 +250,7 @@
           {projectId}
           ruleMatches={sourceRuleMatches}
           patternMatches={result.pattern_matches}
+          {navigateTarget}
         />
       </div>
     {/if}
@@ -278,7 +300,7 @@
       </div>
     {/if}
   {:else}
-    <TimelineView {result} {sourceList} {ruleList} {patternList} />
+    <TimelineView {result} {sourceList} {ruleList} {patternList} onNavigate={handleNavigate} />
   {/if}
 {:else if !running}
   <div class="empty">

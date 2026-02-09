@@ -19,12 +19,14 @@
     ruleList,
     patternList,
     onClose,
+    onNavigate,
   }: {
     event: TimelineEvent;
     sourceList: Source[];
     ruleList: LogRule[];
     patternList: Pattern[];
     onClose: () => void;
+    onNavigate?: (sourceId: number, rawLine: string) => void;
   } = $props();
 
   function getRuleName(id: number): string {
@@ -77,6 +79,13 @@
       <div class="detail-label">Log Line</div>
       <code class="detail-log-line">{rm.log_line.content || rm.log_line.raw}</code>
     </div>
+    {#if onNavigate}
+      <div class="detail-section">
+        <button class="go-to-line-btn" onclick={() => onNavigate(rm.source_id, rm.log_line.raw)}>
+          Go to line
+        </button>
+      </div>
+    {/if}
     {#if Object.keys(rm.extracted_state).length > 0}
       <div class="detail-section">
         <div class="detail-label">Extracted State</div>
@@ -226,5 +235,12 @@
     color: var(--cyan);
     display: block;
     margin-bottom: 4px;
+  }
+
+  .go-to-line-btn {
+    width: 100%;
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
   }
 </style>

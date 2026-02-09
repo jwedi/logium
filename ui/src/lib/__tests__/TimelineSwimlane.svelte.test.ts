@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/svelte';
 import TimelineSwimlane from '../TimelineSwimlane.svelte';
-import { makeRuleTimelineEvent, makePatternTimelineEvent, type TimelineEvent } from './fixtures';
+import {
+  makeRuleTimelineEvent,
+  makePatternTimelineEvent,
+  makeRuleMatch,
+  type TimelineEvent,
+} from './fixtures';
 
 function renderSwimlane(propsOverrides: Record<string, any> = {}) {
   const defaults = {
@@ -175,6 +180,92 @@ describe('TimelineSwimlane', () => {
     const circles = container.querySelectorAll('circle');
     expect(circles.length).toBe(1);
     expect(circles[0].getAttribute('fill')).toBe('var(--rule-border-3)');
+  });
+
+  // --- State annotations ---
+
+  it('renders tooltip with extracted state values', () => {
+    const events = [
+      makeRuleTimelineEvent({
+        id: 0,
+        timestamp: 100,
+        ruleMatch: makeRuleMatch({
+          extracted_state: {
+            error_code: { String: 'E404' },
+            count: { Integer: 42 },
+          },
+        }),
+      }),
+    ];
+    const { container } = renderSwimlane({
+      events,
+      minTime: 0,
+      msPerPixel: 1,
+      viewportHeight: 600,
+    });
+    const title = container.querySelector('title');
+    expect(title).toBeInTheDocument();
+    expect(title!.textContent).toContain('error_code=E404');
+    expect(title!.textContent).toContain('count=42');
+  });
+
+  it('renders state label text when zoomed in', () => {
+    const events = [
+      makeRuleTimelineEvent({
+        id: 0,
+        timestamp: 100,
+        ruleMatch: makeRuleMatch({
+          extracted_state: { status: { String: 'failed' } },
+        }),
+      }),
+    ];
+    const { container } = renderSwimlane({
+      events,
+      minTime: 0,
+      msPerPixel: 1, // well under threshold of 50
+      viewportHeight: 600,
+    });
+    const labels = container.querySelectorAll('.state-label');
+    expect(labels.length).toBe(1);
+    expect(labels[0].textContent).toBe('status=failed');
+  });
+
+  it('hides state labels when zoomed out', () => {
+    const events = [
+      makeRuleTimelineEvent({
+        id: 0,
+        timestamp: 100,
+        ruleMatch: makeRuleMatch({
+          extracted_state: { status: { String: 'failed' } },
+        }),
+      }),
+    ];
+    const { container } = renderSwimlane({
+      events,
+      minTime: 0,
+      msPerPixel: 100, // above threshold
+      viewportHeight: 600,
+    });
+    const labels = container.querySelectorAll('.state-label');
+    expect(labels.length).toBe(0);
+  });
+
+  it('does not render tooltip or label when no extracted state', () => {
+    const events = [
+      makeRuleTimelineEvent({
+        id: 0,
+        timestamp: 100,
+        ruleMatch: makeRuleMatch({ extracted_state: {} }),
+      }),
+    ];
+    const { container } = renderSwimlane({
+      events,
+      minTime: 0,
+      msPerPixel: 1,
+      viewportHeight: 600,
+    });
+    expect(container.querySelector('title')).not.toBeInTheDocument();
+    expect(container.querySelector('.state-label')).not.toBeInTheDocument();
   });
 
   // --- Snapshot ---

@@ -550,7 +550,7 @@ Test fixtures are downloaded from [LogHub](https://github.com/logpai/loghub) and
 
 All server tests use in-memory SQLite (`:memory:`) for isolation and speed.
 
-### Frontend (126 tests)
+### Frontend (135 tests)
 
 Vitest tests using `@testing-library/svelte`:
 
@@ -562,9 +562,9 @@ Vitest tests using `@testing-library/svelte`:
 | RuleEditor | 25 | Pre-populated fields, edit & save, add/remove patterns & extractions, type toggle visibility, dry-run match/no-match/error indicators, overall verdict (Any/All), extraction preview (Parsed/Static/Clear), invalidation, (?P<>) handling |
 | AnalysisView | 12 | Run button, table/timeline tab switching, result stats, streaming error banner, in-progress state, auto-rerun on invalidation, debounce, cancellation, re-analyzing text, snapshot |
 | LogViewerSearch | 19 | Search bar, regex/plain-text modes, match navigation, highlighting |
-| TimelineView | 10 | Render with data, empty state, zoom controls, swimlane display, detail panel interaction |
-| TimelineDetailPanel | 17 | Rule match display, pattern match display, state snapshot rendering, empty states |
-| TimelineSwimlane | 10 | Event rendering, color coding, click handling, tooltip display |
+| TimelineView | 11 | Render with data, empty state, zoom controls, swimlane display, detail panel interaction, onNavigate callback |
+| TimelineDetailPanel | 21 | Rule match display, pattern match display, state snapshot rendering, empty states, "Go to line" button (render/hide/click) |
+| TimelineSwimlane | 14 | Event rendering, color coding, click handling, tooltip display, state annotation labels, zoom-dependent label visibility |
 | TimelineAxis | 7 | Time label rendering, tick marks, zoom-level formatting |
 
 ### Benchmarks

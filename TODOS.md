@@ -30,14 +30,9 @@ A module-scoped invalidation counter (`analysisInvalidation.svelte.ts`) is incre
 
 ## 4. Interactive Timeline (Phase 2)
 
-The design doc's Phase 2 deliverables include:
-> - Visual timeline component rendering log events and pattern matches on a time axis.
-> - Interactive features: zoom, pan, click-to-navigate-to-log-line.
-> - Source swimlanes showing per-source state evolution over time.
+**Status:** Done
 
-The current `TimelineView` has basic zoom/pan and swimlanes but does not support click-to-navigate-to-log-line or per-source state evolution display.
-
-**Implementation:** Add click handlers on timeline events that scroll/highlight the corresponding log line in `LogViewer`, and add a state evolution track showing extracted state values over time per swimlane.
+Click-to-navigate: clicking a timeline event in the detail panel shows a "Go to line" button that switches to the table view, selects the correct source, and scrolls `LogViewer` to the matching log line. Per-source state evolution: each swimlane dot shows extracted state as an SVG tooltip on hover, and compact `key=value` labels alongside dots when zoomed in (hidden when `msPerPixel ≥ 50` to avoid clutter).
 
 ---
 

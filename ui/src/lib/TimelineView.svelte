@@ -35,11 +35,13 @@
     sourceList,
     ruleList,
     patternList,
+    onNavigate,
   }: {
     result: AnalysisResult;
     sourceList: Source[];
     ruleList: LogRule[];
     patternList: Pattern[];
+    onNavigate?: (sourceId: number, rawLine: string) => void;
   } = $props();
 
   const BASE_HEIGHT = 2000;
@@ -311,6 +313,7 @@
       {ruleList}
       {patternList}
       onClose={() => (selectedEvent = null)}
+      {onNavigate}
     />
   {/if}
 </div>

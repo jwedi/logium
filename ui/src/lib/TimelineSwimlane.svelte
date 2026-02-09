@@ -1,6 +1,14 @@
 <script lang="ts">
   import type { RuleMatch, PatternMatch, StateValue } from './api';
 
+  function formatStateValue(sv: StateValue): string {
+    if ('String' in sv) return sv.String;
+    if ('Integer' in sv) return String(sv.Integer);
+    if ('Float' in sv) return String(sv.Float);
+    if ('Bool' in sv) return String(sv.Bool);
+    return '?';
+  }
+
   interface TimelineEvent {
     id: number;
     type: 'rule' | 'pattern';
@@ -113,6 +121,26 @@
   function isSelected(item: ClusterOrDot): boolean {
     return selectedEventId !== null && item.events.some((e) => e.id === selectedEventId);
   }
+
+  function getStateTooltip(item: ClusterOrDot): string | null {
+    const ev = item.events[0];
+    const state = ev.ruleMatch?.extracted_state;
+    if (!state || Object.keys(state).length === 0) return null;
+    return Object.entries(state)
+      .map(([k, v]) => `${k}=${formatStateValue(v)}`)
+      .join(', ');
+  }
+
+  function getStateLabel(item: ClusterOrDot): string | null {
+    const ev = item.events[0];
+    const state = ev.ruleMatch?.extracted_state;
+    if (!state || Object.keys(state).length === 0) return null;
+    const entries = Object.entries(state).slice(0, 2);
+    return entries.map(([k, v]) => `${k}=${formatStateValue(v)}`).join(' ');
+  }
+
+  // Only show labels when zoomed in enough
+  let showLabels = $derived(msPerPixel < 50);
 </script>
 
 <g class="swimlane">
@@ -144,7 +172,21 @@
         r={item.isCluster ? DOT_RADIUS + 1 : DOT_RADIUS}
         fill={dotColor(item)}
         opacity={item.isCluster ? 0.8 : 0.7}
-      />
+      >
+        {#if getStateTooltip(item)}
+          <title>{getStateTooltip(item)}</title>
+        {/if}
+      </circle>
+      {#if showLabels && !item.isCluster && getStateLabel(item)}
+        <text
+          x={cx + DOT_RADIUS + 4}
+          y={item.y + 3}
+          fill="var(--text-muted)"
+          font-size="8"
+          font-family="var(--font-mono)"
+          class="state-label">{getStateLabel(item)}</text
+        >
+      {/if}
       {#if item.isCluster}
         <text
           x={cx}
