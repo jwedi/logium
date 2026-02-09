@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import TimelineView from '../TimelineView.svelte';
 import {
@@ -123,6 +123,13 @@ describe('TimelineView', () => {
     expect(screen.getByTitle('Zoom in')).toBeInTheDocument();
     expect(screen.getByTitle('Zoom out')).toBeInTheDocument();
     expect(screen.getByTitle('Reset zoom')).toBeInTheDocument();
+  });
+
+  it('accepts onNavigate callback prop without error', () => {
+    const onNavigate = vi.fn();
+    const { container } = renderView({ onNavigate });
+    // Should render without crashing; detail panel not open yet so button won't appear
+    expect(container.querySelector('.timeline-container')).toBeInTheDocument();
   });
 
   // --- Snapshot ---

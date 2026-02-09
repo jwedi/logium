@@ -15,11 +15,13 @@
     projectId,
     ruleMatches = [],
     patternMatches = [],
+    navigateTarget = null,
   }: {
     source: Source;
     projectId: number;
     ruleMatches?: RuleMatch[];
     patternMatches?: PatternMatch[];
+    navigateTarget?: string | null;
   } = $props();
 
   const LINE_HEIGHT = 22;
@@ -273,6 +275,17 @@
   $effect(() => {
     searchMatches;
     currentMatchIdx = 0;
+  });
+
+  // Navigate to a specific line when navigateTarget is set (from timeline click)
+  $effect(() => {
+    if (navigateTarget && lines.length > 0) {
+      const idx = lines.findIndex((l) => l === navigateTarget);
+      if (idx >= 0 && container) {
+        selectedLineIdx = idx;
+        container.scrollTop = idx * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
+      }
+    }
   });
 </script>
 

@@ -179,6 +179,35 @@ describe('TimelineDetailPanel', () => {
     expect(screen.getByText('Pattern #77')).toBeInTheDocument();
   });
 
+  // --- Navigate button ---
+
+  it('shows "Go to line" button for rule match events when onNavigate is provided', () => {
+    renderPanel({ onNavigate: vi.fn() });
+    expect(screen.getByText('Go to line')).toBeInTheDocument();
+  });
+
+  it('does NOT show "Go to line" button for pattern match events', () => {
+    renderPanel({ event: makePatternTimelineEvent(), onNavigate: vi.fn() });
+    expect(screen.queryByText('Go to line')).not.toBeInTheDocument();
+  });
+
+  it('does NOT show "Go to line" button when onNavigate is not provided', () => {
+    renderPanel();
+    expect(screen.queryByText('Go to line')).not.toBeInTheDocument();
+  });
+
+  it('calls onNavigate with sourceId and rawLine when "Go to line" is clicked', async () => {
+    const onNavigate = vi.fn();
+    const rm = makeRuleMatch({ source_id: 42, log_line: makeLogLine({ raw: 'raw log text' }) });
+    renderPanel({
+      event: makeRuleTimelineEvent({ sourceId: 42, ruleMatch: rm }),
+      onNavigate,
+    });
+    await fireEvent.click(screen.getByText('Go to line'));
+    expect(onNavigate).toHaveBeenCalledOnce();
+    expect(onNavigate).toHaveBeenCalledWith(42, 'raw log text');
+  });
+
   // --- Snapshots ---
 
   it('matches snapshot for rule match panel', () => {
