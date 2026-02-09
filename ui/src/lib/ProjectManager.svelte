@@ -15,6 +15,52 @@
 
   let newName = $state('');
   let creating = $state(false);
+  let fileInput: HTMLInputElement | null = $state(null);
+  let importTargetId: number | null = $state(null);
+
+  async function exportProject(id: number, name: string) {
+    try {
+      const blob = await projectsApi.exportConfig(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${name}.logium.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(e.message);
+    }
+  }
+
+  function startImport(id: number) {
+    importTargetId = id;
+    fileInput?.click();
+  }
+
+  async function handleImportFile(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file || importTargetId == null) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const result = await projectsApi.importConfig(importTargetId, data);
+      const total =
+        result.timestamp_templates +
+        result.source_templates +
+        result.rules +
+        result.rulesets +
+        result.patterns;
+      alert(
+        `Imported ${total} items: ${result.timestamp_templates} timestamp templates, ${result.source_templates} source templates, ${result.rules} rules, ${result.rulesets} rulesets, ${result.patterns} patterns`,
+      );
+    } catch (e: any) {
+      alert(`Import failed: ${e.message}`);
+    } finally {
+      input.value = '';
+      importTargetId = null;
+    }
+  }
 
   async function createProject() {
     if (!newName.trim()) return;
@@ -67,12 +113,22 @@
         </div>
         <div class="project-actions">
           <button onclick={() => onSelect(project.id)}>Open</button>
+          <button onclick={() => exportProject(project.id, project.name)}>Export</button>
+          <button onclick={() => startImport(project.id)}>Import</button>
           <button class="danger" onclick={() => deleteProject(project.id)}>Delete</button>
         </div>
       </div>
     {/each}
   </div>
 {/if}
+
+<input
+  type="file"
+  accept=".json"
+  style="display: none"
+  bind:this={fileInput}
+  onchange={handleImportFile}
+/>
 
 <style>
   .create-form {

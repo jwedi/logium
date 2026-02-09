@@ -136,6 +136,25 @@ export const projects = {
   update: (id: number, data: Partial<Project>) =>
     request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
+  exportConfig: async (id: number): Promise<Blob> => {
+    const res = await fetch(`${BASE}/projects/${id}/export`);
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+    return res.blob();
+  },
+  importConfig: (
+    id: number,
+    data: unknown,
+  ): Promise<{
+    timestamp_templates: number;
+    source_templates: number;
+    rules: number;
+    rulesets: number;
+    patterns: number;
+  }> =>
+    request(`/projects/${id}/import`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // Timestamp Templates

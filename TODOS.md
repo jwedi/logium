@@ -76,14 +76,9 @@ Search bar in `LogViewer` that lets the user find text across loaded log lines.
 
 ## 8. Project Import/Export
 
-Export a project's configuration as JSON (templates, rules, rulesets, patterns) and import it into another project.
+**Status:** Done
 
-- "Export Project Config" button → downloads a JSON file containing all source templates, timestamp templates, rules, rulesets, and patterns (no log file data)
-- "Import Project Config" button → file picker for a JSON file; creates all entities with ID remapping to avoid conflicts
-- Backend: new `GET /api/projects/:pid/export` and `POST /api/projects/:pid/import` endpoints
-- Frontend: buttons in project settings + file picker dialog
-
-**Implementation:** Backend export endpoint queries all related entities and serializes them. Import endpoint deserializes, creates entities in dependency order (timestamp templates → source templates → rules → rulesets → patterns), maps old IDs to new IDs for foreign-key references. Frontend adds export/import buttons with fetch + Blob download / FileReader upload.
+Export/import a project's configuration (timestamp templates, source templates, rules, rulesets, patterns) as a versioned JSON file. `GET /api/projects/:pid/export` returns a downloadable JSON with `Content-Disposition: attachment`. `POST /api/projects/:pid/import` accepts the JSON and creates entities in dependency order with full ID remapping. Frontend adds per-project Export and Import buttons in ProjectManager.
 
 ---
 
