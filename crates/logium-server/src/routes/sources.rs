@@ -19,6 +19,10 @@ pub fn router() -> Router<AppState> {
             "/api/projects/{project_id}/sources/{id}/upload",
             post(upload),
         )
+        .route(
+            "/api/projects/{project_id}/sources/{id}/content",
+            get(content),
+        )
 }
 
 #[derive(Deserialize)]
@@ -65,6 +69,23 @@ async fn remove(
 ) -> ApiResult<StatusCode> {
     state.db.delete_source(project_id, id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn content(
+    State(state): State<AppState>,
+    Path((project_id, id)): Path<(i64, i64)>,
+) -> ApiResult<String> {
+    let source = state.db.get_source(project_id, id).await?;
+    let path = &source.file_path;
+    if path.is_empty() {
+        return Err(ApiError::from(DbError::InvalidData(
+            "no file uploaded for this source".to_string(),
+        )));
+    }
+    let content = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| ApiError::from(DbError::InvalidData(format!("read error: {e}"))))?;
+    Ok(content)
 }
 
 async fn upload(

@@ -154,7 +154,7 @@
         {#if expandedId === rule.id}
           {#if editingId === rule.id}
             <RuleEditor
-              rule={structuredClone(rule)}
+              rule={JSON.parse(JSON.stringify(rule))}
               {projectId}
               onSave={() => {
                 editingId = null;
