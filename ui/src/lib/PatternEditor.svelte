@@ -2,10 +2,12 @@
   import {
     patterns as patternsApi,
     sources as sourcesApi,
+    rules as rulesApi,
     type Pattern,
     type PatternPredicate,
     type Source,
     type StateValue,
+    type LogRule,
   } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
 
@@ -13,6 +15,7 @@
 
   let patternList: Pattern[] = $state([]);
   let sourceList: Source[] = $state([]);
+  let ruleList: LogRule[] = $state([]);
   let loading = $state(false);
   let editingPattern = $state<Pattern | null>(null);
 
@@ -88,9 +91,10 @@
   async function load() {
     loading = true;
     try {
-      [patternList, sourceList] = await Promise.all([
+      [patternList, sourceList, ruleList] = await Promise.all([
         patternsApi.list(projectId),
         sourcesApi.list(projectId),
+        rulesApi.list(projectId),
       ]);
     } catch (e: any) {
       alert(e.message);
@@ -98,6 +102,16 @@
       loading = false;
     }
   }
+
+  let availableStateKeys = $derived.by(() => {
+    const keys = new Set<string>();
+    for (const rule of ruleList) {
+      for (const er of rule.extraction_rules) {
+        keys.add(er.state_key);
+      }
+    }
+    return [...keys].sort();
+  });
 
   async function createPattern() {
     if (!newName.trim()) return;
@@ -219,7 +233,12 @@
             </div>
             <div class="field">
               <label>State Key</label>
-              <input type="text" bind:value={pred.state_key} placeholder="key..." />
+              <select bind:value={pred.state_key}>
+                <option value="">Select...</option>
+                {#each availableStateKeys as key}
+                  <option value={key}>{key}</option>
+                {/each}
+              </select>
             </div>
             <div class="field">
               <label>Operator</label>
@@ -245,30 +264,36 @@
                 />
               {:else}
                 <div class="row">
-                  <input
-                    type="text"
+                  <select
                     value={getStateRef(pred.operand).source_name}
-                    oninput={(e) =>
+                    onchange={(e) =>
                       setStateRef(
                         pred,
-                        (e.target as HTMLInputElement).value,
+                        (e.target as HTMLSelectElement).value,
                         getStateRef(pred.operand).state_key,
                       )}
-                    placeholder="source..."
                     style="flex:1"
-                  />
-                  <input
-                    type="text"
+                  >
+                    <option value="">Select source...</option>
+                    {#each sourceList as src}
+                      <option value={src.name}>{src.name}</option>
+                    {/each}
+                  </select>
+                  <select
                     value={getStateRef(pred.operand).state_key}
-                    oninput={(e) =>
+                    onchange={(e) =>
                       setStateRef(
                         pred,
                         getStateRef(pred.operand).source_name,
-                        (e.target as HTMLInputElement).value,
+                        (e.target as HTMLSelectElement).value,
                       )}
-                    placeholder="key..."
                     style="flex:1"
-                  />
+                  >
+                    <option value="">Select key...</option>
+                    {#each availableStateKeys as key}
+                      <option value={key}>{key}</option>
+                    {/each}
+                  </select>
                 </div>
               {/if}
             </div>

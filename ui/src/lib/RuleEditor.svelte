@@ -183,7 +183,14 @@
       <input type="text" bind:value={editName} />
     </div>
     <div class="field" style="flex:1">
-      <label>Match Mode</label>
+      <label>
+        Match Mode
+        <span
+          class="info-icon"
+          data-tooltip="Any: rule fires if at least one match pattern matches the log line. All: rule fires only if every match pattern matches the log line."
+          >?</span
+        >
+      </label>
       <select bind:value={editMatchMode}>
         <option value="Any">Any</option>
         <option value="All">All</option>
@@ -448,5 +455,47 @@
   button.small {
     padding: 2px 8px;
     font-size: 12px;
+  }
+
+  .info-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    color: var(--bg);
+    font-size: 10px;
+    font-weight: 700;
+    cursor: help;
+    vertical-align: middle;
+    margin-left: 4px;
+  }
+
+  .info-icon::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 6px);
+    transform: translateX(-50%);
+    background: var(--bg-tertiary, #333);
+    color: var(--text, #eee);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.4;
+    padding: 6px 10px;
+    border-radius: var(--radius, 4px);
+    white-space: normal;
+    width: 260px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 10;
+  }
+
+  .info-icon:hover::after {
+    opacity: 1;
   }
 </style>
