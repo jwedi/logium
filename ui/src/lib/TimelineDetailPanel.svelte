@@ -126,14 +126,11 @@
 
 <style>
   .detail-panel {
-    width: 300px;
-    min-width: 300px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-left: none;
-    border-radius: 0 var(--radius) var(--radius) 0;
+    border-radius: var(--radius);
     padding: 16px;
-    overflow-y: auto;
+    margin-top: 8px;
     position: relative;
   }
 

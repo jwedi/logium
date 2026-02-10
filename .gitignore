@@ -4,3 +4,4 @@ ui/dist/
 ui/build/
 *.db
 *.sqlite
+crates/logium-server/uploads/*

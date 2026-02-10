@@ -51,11 +51,17 @@
   let zoom = $state(1);
   let scrollTop = $state(0);
   let viewportHeight = $state(600);
+  let viewportWidth = $state(800);
   let scrollContainer: HTMLDivElement | undefined = $state();
   let selectedEvent: TimelineEvent | null = $state(null);
+  let detailPanelEl: HTMLDivElement | undefined = $state();
 
   function getSourceName(id: number): string {
     return sourceList.find((s) => s.id === id)?.name ?? `Source #${id}`;
+  }
+
+  function getPatternName(id: number): string {
+    return patternList.find((p) => p.id === id)?.name ?? `Pattern #${id}`;
   }
 
   // Transform analysis result into timeline events
@@ -187,7 +193,13 @@
   }
 
   function onEventClick(event: TimelineEvent) {
-    selectedEvent = selectedEvent?.id === event.id ? null : event;
+    const newSelection = selectedEvent?.id === event.id ? null : event;
+    selectedEvent = newSelection;
+    if (newSelection) {
+      requestAnimationFrame(() => {
+        detailPanelEl?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+    }
   }
 
   $effect(() => {
@@ -195,6 +207,7 @@
       const obs = new ResizeObserver((entries) => {
         for (const entry of entries) {
           viewportHeight = entry.contentRect.height;
+          viewportWidth = entry.contentRect.width;
         }
       });
       obs.observe(scrollContainer);
@@ -202,13 +215,17 @@
     }
   });
 
-  let laneWidth = $derived(
-    sourceLanes.length > 0 ? Math.max(60, Math.min(120, 600 / sourceLanes.length)) : 100,
-  );
+  const AXIS_WIDTH = 80;
+  const MIN_LANE_WIDTH = 60;
+  let laneWidth = $derived.by(() => {
+    if (sourceLanes.length === 0) return 100;
+    const available = viewportWidth - AXIS_WIDTH;
+    return Math.max(MIN_LANE_WIDTH, Math.floor(available / sourceLanes.length));
+  });
   let swimlanesWidth = $derived(sourceLanes.length * laneWidth);
 </script>
 
-<div class="timeline-container" class:has-detail={selectedEvent !== null}>
+<div class="timeline-container">
   <div class="zoom-controls">
     <button onclick={zoomIn} title="Zoom in">+</button>
     <button onclick={zoomOut} title="Zoom out">-</button>
@@ -258,7 +275,7 @@
             />
           {/each}
 
-          <!-- Pattern bands -->
+          <!-- Pattern bands (visual only, behind swimlanes) -->
           {#each patternEvents as pev}
             {@const y = (pev.timestamp - domain.minTime) / msPerPixel}
             <rect
@@ -270,18 +287,6 @@
               opacity="0.2"
               rx="1"
             />
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <g onclick={() => onEventClick(pev)} role="button" tabindex="0" style="cursor: pointer">
-              <rect x="0" y={y - 8} width={swimlanesWidth} height="16" fill="transparent" />
-              <text
-                x="4"
-                y={y - 4}
-                fill="var(--purple)"
-                font-size="9"
-                font-family="var(--font-mono)"
-                opacity="0.7">PM</text
-              >
-            </g>
           {/each}
 
           <!-- Per-source swimlanes -->
@@ -301,20 +306,39 @@
               />
             </g>
           {/each}
+
+          <!-- Pattern click targets (on top of swimlanes to receive clicks) -->
+          {#each patternEvents as pev}
+            {@const y = (pev.timestamp - domain.minTime) / msPerPixel}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <g onclick={() => onEventClick(pev)} role="button" tabindex="0" style="cursor: pointer">
+              <rect x="0" y={y - 8} width={swimlanesWidth} height="16" fill="transparent" />
+              <text
+                x="4"
+                y={y - 4}
+                fill="var(--purple)"
+                font-size="9"
+                font-family="var(--font-mono)"
+                opacity="0.7">{getPatternName(pev.patternId!)}</text
+              >
+            </g>
+          {/each}
         </svg>
       </div>
     </div>
   {/if}
 
   {#if selectedEvent}
-    <TimelineDetailPanel
-      event={selectedEvent}
-      {sourceList}
-      {ruleList}
-      {patternList}
-      onClose={() => (selectedEvent = null)}
-      {onNavigate}
-    />
+    <div bind:this={detailPanelEl}>
+      <TimelineDetailPanel
+        event={selectedEvent}
+        {sourceList}
+        {ruleList}
+        {patternList}
+        onClose={() => (selectedEvent = null)}
+        {onNavigate}
+      />
+    </div>
   {/if}
 </div>
 
@@ -322,26 +346,8 @@
   .timeline-container {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 260px);
     min-height: 400px;
     position: relative;
-  }
-
-  .timeline-container.has-detail {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .timeline-container.has-detail .zoom-controls {
-    width: 100%;
-  }
-
-  .timeline-container.has-detail .lane-headers {
-    width: calc(100% - 300px);
-  }
-
-  .timeline-container.has-detail .scroll-area {
-    width: calc(100% - 300px);
   }
 
   .zoom-controls {
@@ -413,7 +419,8 @@
   }
 
   .scroll-area {
-    flex: 1;
+    height: calc(100vh - 340px);
+    min-height: 300px;
     overflow-y: auto;
     overflow-x: auto;
     border: 1px solid var(--border);
