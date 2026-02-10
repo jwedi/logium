@@ -97,9 +97,20 @@ export interface PatternMatch {
   state_snapshot: Record<string, Record<string, StateValue>>;
 }
 
+export interface StateChange {
+  timestamp: string;
+  source_id: number;
+  source_name: string;
+  state_key: string;
+  old_value: StateValue | null;
+  new_value: StateValue | null;
+  rule_id: number;
+}
+
 export interface AnalysisResult {
   rule_matches: RuleMatch[];
   pattern_matches: PatternMatch[];
+  state_changes: StateChange[];
 }
 
 export interface SuggestRuleResponse {
@@ -260,21 +271,29 @@ export const patterns = {
 export type AnalysisEvent =
   | { type: 'rule_match'; data: RuleMatch }
   | { type: 'pattern_match'; data: PatternMatch }
+  | { type: 'state_change'; data: StateChange }
   | { type: 'progress'; data: { lines_processed: number } }
   | {
       type: 'complete';
-      data: { total_lines: number; total_rule_matches: number; total_pattern_matches: number };
+      data: {
+        total_lines: number;
+        total_rule_matches: number;
+        total_pattern_matches: number;
+        total_state_changes: number;
+      };
     }
   | { type: 'error'; data: { message: string } };
 
 export interface StreamingCallbacks {
   onRuleMatch: (rm: RuleMatch) => void;
   onPatternMatch: (pm: PatternMatch) => void;
+  onStateChange: (sc: StateChange) => void;
   onProgress: (linesProcessed: number) => void;
   onComplete: (totals: {
     total_lines: number;
     total_rule_matches: number;
     total_pattern_matches: number;
+    total_state_changes: number;
   }) => void;
   onError: (message: string) => void;
 }
@@ -294,6 +313,9 @@ export const analysis = {
           break;
         case 'pattern_match':
           callbacks.onPatternMatch(event.data);
+          break;
+        case 'state_change':
+          callbacks.onStateChange(event.data);
           break;
         case 'progress':
           callbacks.onProgress(event.data.lines_processed);

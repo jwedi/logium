@@ -43,7 +43,7 @@ cd ui && npm run dev
 ### Running Tests
 
 ```bash
-cargo test --workspace    # 43 tests: 18 core unit + 8 integration + 17 server
+cargo test --workspace    # 48 tests: 23 core unit + 8 integration + 17 server
 ```
 
 ---
@@ -514,14 +514,15 @@ Supports cross-type numeric comparison (`Integer(10) == Float(10.0)`) and type-a
 
 ## Test Suite
 
-**43 tests total** across two crates:
+**48 tests total** across two crates:
 
-### logium-core: Unit Tests (18 tests)
+### logium-core: Unit Tests (23 tests)
 
 | Category | Tests | What's Covered |
 |----------|-------|----------------|
 | Rule matching | 4 | Single/multiple match rules, Any/All modes, no-match case |
 | State mutations | 6 | Replace, Accumulate (strings, integers), Clear, Static assignment, Parsed extraction with named capture groups |
+| State change tracking | 5 | Replace returns (old, new), Clear returns (old, None), First set returns (None, new), Noop skipped, Streaming emits StateChange events |
 | Pattern evaluation | 5 | Two-predicate sequential match, predicate invalidation (resets progress), re-firing after match, cross-source state references, all 8 operators |
 | K-way merge | 1 | Three sources with interleaved timestamps, verifies chronological order and correct interleaving |
 | Integration | 1 | Full server+client scenario: region extraction, player count parsing, cross-source pattern detection |
@@ -550,7 +551,7 @@ Test fixtures are downloaded from [LogHub](https://github.com/logpai/loghub) and
 
 All server tests use in-memory SQLite (`:memory:`) for isolation and speed.
 
-### Frontend (135 tests)
+### Frontend (144 tests)
 
 Vitest tests using `@testing-library/svelte`:
 
@@ -560,7 +561,8 @@ Vitest tests using `@testing-library/svelte`:
 | regexUtils | 14 | detectGroups (JS/Rust/unnamed/mixed), toJsRegex conversion, testPattern (match/no-match/error/groups) |
 | RuleCreator | 9 | Suggest-rule API integration, fallback on API failure, ruleset filtering by template, auto-selection, rule creation with ruleset assignment, save validation, invalidation on save |
 | RuleEditor | 25 | Pre-populated fields, edit & save, add/remove patterns & extractions, type toggle visibility, dry-run match/no-match/error indicators, overall verdict (Any/All), extraction preview (Parsed/Static/Clear), invalidation, (?P<>) handling |
-| AnalysisView | 12 | Run button, table/timeline tab switching, result stats, streaming error banner, in-progress state, auto-rerun on invalidation, debounce, cancellation, re-analyzing text, snapshot |
+| AnalysisView | 13 | Run button, table/timeline/state tab switching, result stats, streaming error banner, in-progress state, auto-rerun on invalidation, debounce, cancellation, re-analyzing text, snapshot |
+| StateEvolutionView | 8 | Empty state, table rendering, source filter, key filter, null value display, rule name display, snapshot |
 | LogViewerSearch | 19 | Search bar, regex/plain-text modes, match navigation, highlighting |
 | TimelineView | 11 | Render with data, empty state, zoom controls, swimlane display, detail panel interaction, onNavigate callback |
 | TimelineDetailPanel | 21 | Rule match display, pattern match display, state snapshot rendering, empty states, "Go to line" button (render/hide/click) |

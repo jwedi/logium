@@ -7,6 +7,7 @@
     type AnalysisResult,
     type RuleMatch,
     type PatternMatch,
+    type StateChange,
     type Source,
     type LogRule,
     type Pattern,
@@ -14,6 +15,7 @@
   } from './api';
   import LogViewer from './LogViewer.svelte';
   import TimelineView from './TimelineView.svelte';
+  import StateEvolutionView from './StateEvolutionView.svelte';
   import { getInvalidationStamp } from './analysisInvalidation.svelte';
 
   let { projectId }: { projectId: number } = $props();
@@ -25,7 +27,7 @@
   let running = $state(false);
   let error: string | null = $state(null);
   let selectedSourceId: number | null = $state(null);
-  let viewMode: 'table' | 'timeline' = $state('table');
+  let viewMode: 'table' | 'timeline' | 'state' = $state('table');
   let linesProcessed: number = $state(0);
   let autoTriggered = $state(false);
   let currentHandle: { close: () => void } | null = $state(null);
@@ -89,7 +91,7 @@
     error = null;
     linesProcessed = 0;
     lastRunStamp = getInvalidationStamp();
-    result = { rule_matches: [], pattern_matches: [] };
+    result = { rule_matches: [], pattern_matches: [], state_changes: [] };
 
     // Re-fetch rules/patterns/sources for auto-reruns
     load();
@@ -97,15 +99,22 @@
     // Buffers for batched UI updates
     let ruleMatchBuffer: RuleMatch[] = [];
     let patternMatchBuffer: PatternMatch[] = [];
+    let stateChangeBuffer: StateChange[] = [];
 
     const flushInterval = setInterval(() => {
-      if (ruleMatchBuffer.length > 0 || patternMatchBuffer.length > 0) {
+      if (
+        ruleMatchBuffer.length > 0 ||
+        patternMatchBuffer.length > 0 ||
+        stateChangeBuffer.length > 0
+      ) {
         result = {
           rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
           pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
+          state_changes: [...result!.state_changes, ...stateChangeBuffer],
         };
         ruleMatchBuffer = [];
         patternMatchBuffer = [];
+        stateChangeBuffer = [];
       }
     }, 100);
 
@@ -116,19 +125,28 @@
       onPatternMatch: (pm) => {
         patternMatchBuffer.push(pm);
       },
+      onStateChange: (sc) => {
+        stateChangeBuffer.push(sc);
+      },
       onProgress: (lines) => {
         linesProcessed = lines;
       },
       onComplete: () => {
         clearInterval(flushInterval);
         // Final flush
-        if (ruleMatchBuffer.length > 0 || patternMatchBuffer.length > 0) {
+        if (
+          ruleMatchBuffer.length > 0 ||
+          patternMatchBuffer.length > 0 ||
+          stateChangeBuffer.length > 0
+        ) {
           result = {
             rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
             pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
+            state_changes: [...result!.state_changes, ...stateChangeBuffer],
           };
           ruleMatchBuffer = [];
           patternMatchBuffer = [];
+          stateChangeBuffer = [];
         }
         running = false;
         currentHandle = null;
@@ -136,10 +154,15 @@
       onError: (message) => {
         clearInterval(flushInterval);
         // Final flush
-        if (ruleMatchBuffer.length > 0 || patternMatchBuffer.length > 0) {
+        if (
+          ruleMatchBuffer.length > 0 ||
+          patternMatchBuffer.length > 0 ||
+          stateChangeBuffer.length > 0
+        ) {
           result = {
             rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
             pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
+            state_changes: [...result!.state_changes, ...stateChangeBuffer],
           };
         }
         error = message;
@@ -198,6 +221,10 @@
         <span class="stat-value">{result.pattern_matches.length}</span>
         <span class="stat-label">Pattern Matches</span>
       </div>
+      <div class="stat">
+        <span class="stat-value">{result.state_changes.length}</span>
+        <span class="stat-label">State Changes</span>
+      </div>
     </div>
   </div>
 
@@ -215,6 +242,13 @@
         viewMode = 'timeline';
         navigateTarget = null;
       }}>Timeline</button
+    >
+    <button
+      class:active={viewMode === 'state'}
+      onclick={() => {
+        viewMode = 'state';
+        navigateTarget = null;
+      }}>State Evolution</button
     >
   </div>
 
@@ -299,8 +333,10 @@
         </div>
       </div>
     {/if}
-  {:else}
+  {:else if viewMode === 'timeline'}
     <TimelineView {result} {sourceList} {ruleList} {patternList} onNavigate={handleNavigate} />
+  {:else if viewMode === 'state'}
+    <StateEvolutionView stateChanges={result.state_changes} {sourceList} {ruleList} />
   {/if}
 {:else if !running}
   <div class="empty">

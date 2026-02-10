@@ -207,9 +207,22 @@ pub struct PatternMatch {
     pub state_snapshot: HashMap<String, HashMap<String, StateValue>>,
 }
 
+/// A state change event emitted when a mutation modifies per-source state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StateChange {
+    pub timestamp: NaiveDateTime,
+    pub source_id: u64,
+    pub source_name: String,
+    pub state_key: String,
+    pub old_value: Option<StateValue>,
+    pub new_value: Option<StateValue>,
+    pub rule_id: u64,
+}
+
 /// Combined analysis result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
     pub rule_matches: Vec<RuleMatch>,
     pub pattern_matches: Vec<PatternMatch>,
+    pub state_changes: Vec<StateChange>,
 }
