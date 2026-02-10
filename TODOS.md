@@ -100,12 +100,6 @@ Keep the last analysis result in memory so switching tabs doesn't lose it.
 
 ## 11. State Evolution View
 
-A dedicated view showing how extracted state changes over time across sources.
+**Status:** Done
 
-- New tab or panel in `AnalysisView`: "State Evolution"
-- Table columns: timestamp | source | key | old_value → new_value
-- Filterable by source and state key
-- Backend: the engine already computes state mutations internally — expose them as `StateChange` events in the analysis output
-- Frontend: new `StateEvolutionView` component consuming the events
-
-**Implementation:** In logium-core, emit `AnalysisEvent::StateChange { timestamp, source, key, old_value, new_value }` alongside existing match events. Pipe through WebSocket. Frontend renders a sortable/filterable table with the state diff data.
+`StateChange` struct in logium-core captures old→new state diffs during `apply_mutations()`. Emitted as `AnalysisEvent::StateChange` through both `analyze()` and `analyze_streaming()`. Frontend `StateEvolutionView` component renders a filterable table (by source and state key) showing timestamp, source, key, old→new values, and triggering rule. Accessible via "State Evolution" tab in AnalysisView.

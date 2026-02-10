@@ -2,6 +2,7 @@ import type {
   LogLine,
   RuleMatch,
   PatternMatch,
+  StateChange,
   Source,
   LogRule,
   Pattern,
@@ -156,10 +157,24 @@ export function makeSuggestRuleResponse(
   };
 }
 
+export function makeStateChange(overrides: Partial<StateChange> = {}): StateChange {
+  return {
+    timestamp: '2024-01-15T10:30:00.000',
+    source_id: 1,
+    source_name: 'app.log',
+    state_key: 'status',
+    old_value: null,
+    new_value: { String: 'error_detected' },
+    rule_id: 1,
+    ...overrides,
+  };
+}
+
 export function makeAnalysisResult(overrides: Partial<AnalysisResult> = {}): AnalysisResult {
   return {
     rule_matches: [makeRuleMatch()],
     pattern_matches: [makePatternMatch()],
+    state_changes: [],
     ...overrides,
   };
 }

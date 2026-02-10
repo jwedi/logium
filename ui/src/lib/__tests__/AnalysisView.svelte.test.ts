@@ -30,13 +30,29 @@ const mockPatternMatch = {
   state_snapshot: {},
 };
 
+const mockStateChange = {
+  timestamp: '2024-01-15T10:30:00.000',
+  source_id: 1,
+  source_name: 'app.log',
+  state_key: 'status',
+  old_value: null,
+  new_value: { String: 'error_detected' },
+  rule_id: 1,
+};
+
 // Default runStreaming: immediately calls callbacks then onComplete
 function defaultRunStreaming(_pid: number, callbacks: any) {
   callbacks.onRuleMatch(mockRuleMatch);
   callbacks.onPatternMatch(mockPatternMatch);
+  callbacks.onStateChange(mockStateChange);
   // Trigger flush via a microtask + timer to simulate the 100ms interval
   setTimeout(() => {
-    callbacks.onComplete({ total_lines: 5, total_rule_matches: 1, total_pattern_matches: 1 });
+    callbacks.onComplete({
+      total_lines: 5,
+      total_rule_matches: 1,
+      total_pattern_matches: 1,
+      total_state_changes: 1,
+    });
   }, 0);
   return { close: vi.fn() };
 }
@@ -298,6 +314,21 @@ describe('AnalysisView', () => {
     await tick();
 
     expect(screen.getByText('Re-analyzing...')).toBeInTheDocument();
+  });
+
+  it('"State Evolution" tab appears and switches view', async () => {
+    renderAnalysis();
+    await tick();
+
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await waitFor(() => {
+      expect(screen.getByText('State Evolution')).toBeInTheDocument();
+    });
+
+    await fireEvent.click(screen.getByText('State Evolution'));
+    const stateBtn = screen.getByText('State Evolution');
+    expect(stateBtn.classList.contains('active')).toBe(true);
   });
 
   // --- Snapshot ---

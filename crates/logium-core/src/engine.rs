@@ -46,6 +46,7 @@ impl std::error::Error for AnalysisError {}
 pub enum AnalysisEvent {
     RuleMatch(RuleMatch),
     PatternMatch(PatternMatch),
+    StateChange(StateChange),
     Progress {
         lines_processed: u64,
     },
@@ -53,6 +54,7 @@ pub enum AnalysisEvent {
         total_lines: u64,
         total_rule_matches: u64,
         total_pattern_matches: u64,
+        total_state_changes: u64,
     },
     Error {
         message: String,
@@ -415,22 +417,28 @@ impl StateManager {
     }
 
     /// Apply extractions to a source's state, respecting extraction rules for mode/type.
+    /// Returns a list of (key, old_value, new_value) for each actual change.
     pub fn apply_mutations(
         &mut self,
         source_id: u64,
         extractions: &HashMap<String, StateValue>,
         rules: &[ExtractionRule],
-    ) {
+    ) -> Vec<(String, Option<StateValue>, Option<StateValue>)> {
         let state = self.per_source_state.entry(source_id).or_default();
+        let mut changes = Vec::new();
 
         for rule in rules {
             match rule.extraction_type {
                 ExtractionType::Clear => {
-                    state.remove(&rule.state_key);
+                    let old = state.remove(&rule.state_key);
+                    if old.is_some() {
+                        changes.push((rule.state_key.clone(), old, None));
+                    }
                 }
                 ExtractionType::Static => {
                     if let Some(val) = &rule.static_value {
                         let new_val = StateValue::String(val.clone());
+                        let old = state.get(&rule.state_key).cloned();
                         match rule.mode {
                             ExtractionMode::Replace => {
                                 state.insert(rule.state_key.clone(), new_val);
@@ -439,10 +447,15 @@ impl StateManager {
                                 accumulate(state, &rule.state_key, new_val);
                             }
                         }
+                        let new = state.get(&rule.state_key).cloned();
+                        if old != new {
+                            changes.push((rule.state_key.clone(), old, new));
+                        }
                     }
                 }
                 ExtractionType::Parsed => {
                     if let Some(val) = extractions.get(&rule.state_key) {
+                        let old = state.get(&rule.state_key).cloned();
                         match rule.mode {
                             ExtractionMode::Replace => {
                                 state.insert(rule.state_key.clone(), val.clone());
@@ -451,10 +464,16 @@ impl StateManager {
                                 accumulate(state, &rule.state_key, val.clone());
                             }
                         }
+                        let new = state.get(&rule.state_key).cloned();
+                        if old != new {
+                            changes.push((rule.state_key.clone(), old, new));
+                        }
                     }
                 }
             }
         }
+
+        changes
     }
 
     /// Resolve the value of a source's state key by source name.
@@ -683,6 +702,7 @@ pub fn analyze(
 
     let mut all_rule_matches = Vec::new();
     let mut all_pattern_matches = Vec::new();
+    let mut all_state_changes = Vec::new();
 
     for result in stream {
         let line = result?;
@@ -690,17 +710,35 @@ pub fn analyze(
 
         // Find applicable rule ids
         if let Some(rule_ids) = template_rule_ids.get(&tmpl_id) {
+            let source_name = state_manager
+                .source_names
+                .get(&line.source_id)
+                .cloned()
+                .unwrap_or_default();
+
             for rule_id in rule_ids {
                 if let (Some(rule), Some(compiled)) =
                     (rule_map.get(rule_id), compiled_map.get(rule_id))
                     && let Some(extracted) = evaluate_rule(rule, &line, compiled)
                 {
                     // Apply state mutations
-                    state_manager.apply_mutations(
+                    let changes = state_manager.apply_mutations(
                         line.source_id,
                         &extracted,
                         &rule.extraction_rules,
                     );
+
+                    for (key, old, new) in changes {
+                        all_state_changes.push(StateChange {
+                            timestamp: line.timestamp,
+                            source_id: line.source_id,
+                            source_name: source_name.clone(),
+                            state_key: key,
+                            old_value: old,
+                            new_value: new,
+                            rule_id: *rule_id,
+                        });
+                    }
 
                     all_rule_matches.push(RuleMatch {
                         rule_id: *rule_id,
@@ -723,6 +761,7 @@ pub fn analyze(
     Ok(AnalysisResult {
         rule_matches: all_rule_matches,
         pattern_matches: all_pattern_matches,
+        state_changes: all_state_changes,
     })
 }
 
@@ -787,6 +826,7 @@ pub fn analyze_streaming(
     let mut lines_processed: u64 = 0;
     let mut total_rule_matches: u64 = 0;
     let mut total_pattern_matches: u64 = 0;
+    let mut total_state_changes: u64 = 0;
 
     for result in stream {
         let line = match result {
@@ -804,16 +844,40 @@ pub fn analyze_streaming(
         let tmpl_id = source_template.get(&line.source_id).copied().unwrap_or(0);
 
         if let Some(rule_ids) = template_rule_ids.get(&tmpl_id) {
+            let source_name = state_manager
+                .source_names
+                .get(&line.source_id)
+                .cloned()
+                .unwrap_or_default();
+
             for rule_id in rule_ids {
                 if let (Some(rule), Some(compiled)) =
                     (rule_map.get(rule_id), compiled_map.get(rule_id))
                     && let Some(extracted) = evaluate_rule(rule, &line, compiled)
                 {
-                    state_manager.apply_mutations(
+                    let changes = state_manager.apply_mutations(
                         line.source_id,
                         &extracted,
                         &rule.extraction_rules,
                     );
+
+                    for (key, old, new) in changes {
+                        total_state_changes += 1;
+                        if tx
+                            .send(AnalysisEvent::StateChange(StateChange {
+                                timestamp: line.timestamp,
+                                source_id: line.source_id,
+                                source_name: source_name.clone(),
+                                state_key: key,
+                                old_value: old,
+                                new_value: new,
+                                rule_id: *rule_id,
+                            }))
+                            .is_err()
+                        {
+                            return Ok(());
+                        }
+                    }
 
                     let rm = RuleMatch {
                         rule_id: *rule_id,
@@ -851,6 +915,7 @@ pub fn analyze_streaming(
         total_lines: lines_processed,
         total_rule_matches,
         total_pattern_matches,
+        total_state_changes,
     });
 
     Ok(())
@@ -1919,6 +1984,7 @@ mod tests {
             total_lines,
             total_rule_matches,
             total_pattern_matches,
+            total_state_changes,
         } = &complete_events[0]
         {
             assert_eq!(*total_lines, 5);
@@ -1927,8 +1993,231 @@ mod tests {
                 *total_pattern_matches,
                 sync_result.pattern_matches.len() as u64
             );
+            assert_eq!(*total_state_changes, sync_result.state_changes.len() as u64);
         } else {
             panic!("expected Complete event");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // State change tracking tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_apply_mutations_returns_changes_on_replace() {
+        let sources = vec![Source {
+            id: 1,
+            name: "src1".into(),
+            template_id: 1,
+            file_path: "".into(),
+        }];
+        let mut sm = StateManager::new(&sources);
+        sm.per_source_state
+            .entry(1)
+            .or_default()
+            .insert("key".into(), StateValue::String("old".into()));
+
+        let extractions: HashMap<String, StateValue> = HashMap::new();
+        let rules = vec![ExtractionRule {
+            id: 1,
+            extraction_type: ExtractionType::Static,
+            state_key: "key".into(),
+            pattern: None,
+            static_value: Some("new".into()),
+            mode: ExtractionMode::Replace,
+        }];
+        let changes = sm.apply_mutations(1, &extractions, &rules);
+
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].0, "key");
+        assert_eq!(changes[0].1, Some(StateValue::String("old".into())));
+        assert_eq!(changes[0].2, Some(StateValue::String("new".into())));
+    }
+
+    #[test]
+    fn test_apply_mutations_returns_changes_on_clear() {
+        let sources = vec![Source {
+            id: 1,
+            name: "src1".into(),
+            template_id: 1,
+            file_path: "".into(),
+        }];
+        let mut sm = StateManager::new(&sources);
+        sm.per_source_state
+            .entry(1)
+            .or_default()
+            .insert("key".into(), StateValue::String("val".into()));
+
+        let extractions: HashMap<String, StateValue> = HashMap::new();
+        let rules = vec![ExtractionRule {
+            id: 1,
+            extraction_type: ExtractionType::Clear,
+            state_key: "key".into(),
+            pattern: None,
+            static_value: None,
+            mode: ExtractionMode::Replace,
+        }];
+        let changes = sm.apply_mutations(1, &extractions, &rules);
+
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].0, "key");
+        assert_eq!(changes[0].1, Some(StateValue::String("val".into())));
+        assert_eq!(changes[0].2, None);
+    }
+
+    #[test]
+    fn test_apply_mutations_returns_changes_on_first_set() {
+        let sources = vec![Source {
+            id: 1,
+            name: "src1".into(),
+            template_id: 1,
+            file_path: "".into(),
+        }];
+        let mut sm = StateManager::new(&sources);
+
+        let extractions: HashMap<String, StateValue> = HashMap::new();
+        let rules = vec![ExtractionRule {
+            id: 1,
+            extraction_type: ExtractionType::Static,
+            state_key: "key".into(),
+            pattern: None,
+            static_value: Some("val".into()),
+            mode: ExtractionMode::Replace,
+        }];
+        let changes = sm.apply_mutations(1, &extractions, &rules);
+
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].0, "key");
+        assert_eq!(changes[0].1, None);
+        assert_eq!(changes[0].2, Some(StateValue::String("val".into())));
+    }
+
+    #[test]
+    fn test_apply_mutations_skips_noop() {
+        let sources = vec![Source {
+            id: 1,
+            name: "src1".into(),
+            template_id: 1,
+            file_path: "".into(),
+        }];
+        let mut sm = StateManager::new(&sources);
+        sm.per_source_state
+            .entry(1)
+            .or_default()
+            .insert("key".into(), StateValue::String("same".into()));
+
+        let extractions: HashMap<String, StateValue> = HashMap::new();
+        let rules = vec![ExtractionRule {
+            id: 1,
+            extraction_type: ExtractionType::Static,
+            state_key: "key".into(),
+            pattern: None,
+            static_value: Some("same".into()),
+            mode: ExtractionMode::Replace,
+        }];
+        let changes = sm.apply_mutations(1, &extractions, &rules);
+
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn test_streaming_emits_state_change_events() {
+        let mut server_log = NamedTempFile::new().unwrap();
+        writeln!(
+            server_log,
+            "2024-01-01 00:00:01 [INFO] Server started in region us-east"
+        )
+        .unwrap();
+        writeln!(server_log, "2024-01-01 00:00:03 [INFO] Players online: 42").unwrap();
+
+        let ts_template = make_ts_template();
+        let template = SourceTemplate {
+            id: 1,
+            name: "default".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+        };
+
+        let sources = vec![Source {
+            id: 1,
+            name: "server".into(),
+            template_id: 1,
+            file_path: server_log.path().to_str().unwrap().into(),
+        }];
+
+        let rules = vec![
+            LogRule {
+                id: 1,
+                name: "server_region".into(),
+                match_mode: MatchMode::Any,
+                match_rules: vec![MatchRule {
+                    id: 1,
+                    pattern: r"region \w+".into(),
+                }],
+                extraction_rules: vec![ExtractionRule {
+                    id: 1,
+                    extraction_type: ExtractionType::Parsed,
+                    state_key: "region".into(),
+                    pattern: Some(r"region (?P<region>\S+)".into()),
+                    static_value: None,
+                    mode: ExtractionMode::Replace,
+                }],
+            },
+            LogRule {
+                id: 2,
+                name: "player_count".into(),
+                match_mode: MatchMode::Any,
+                match_rules: vec![MatchRule {
+                    id: 2,
+                    pattern: r"Players online: \d+".into(),
+                }],
+                extraction_rules: vec![ExtractionRule {
+                    id: 2,
+                    extraction_type: ExtractionType::Parsed,
+                    state_key: "player_count".into(),
+                    pattern: Some(r"Players online: (?P<player_count>\d+)".into()),
+                    static_value: None,
+                    mode: ExtractionMode::Replace,
+                }],
+            },
+        ];
+
+        let rulesets = vec![Ruleset {
+            id: 1,
+            name: "server_rules".into(),
+            template_id: 1,
+            rule_ids: vec![1, 2],
+        }];
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        analyze_streaming(
+            &sources,
+            std::slice::from_ref(&template),
+            std::slice::from_ref(&ts_template),
+            &rules,
+            &rulesets,
+            &[],
+            tx,
+        )
+        .unwrap();
+
+        let events: Vec<AnalysisEvent> = rx.iter().collect();
+
+        let state_changes: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, AnalysisEvent::StateChange(_)))
+            .collect();
+
+        // region set + player_count set = 2 state changes
+        assert_eq!(state_changes.len(), 2);
+
+        // Verify first state change is region
+        if let AnalysisEvent::StateChange(sc) = &state_changes[0] {
+            assert_eq!(sc.state_key, "region");
+            assert_eq!(sc.source_name, "server");
+            assert!(sc.old_value.is_none());
+            assert_eq!(sc.new_value, Some(StateValue::String("us-east".into())));
         }
     }
 }
