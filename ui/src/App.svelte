@@ -10,13 +10,48 @@
 
   type View = 'projects' | 'sources' | 'templates' | 'rules' | 'rulesets' | 'patterns' | 'analysis';
 
+  interface Route {
+    projectId: number | null;
+    view: View;
+  }
+
+  function parseRoute(path: string): Route {
+    const m = path.match(
+      /^\/projects\/(\d+)(?:\/(sources|templates|rules|rulesets|patterns|analysis))?$/,
+    );
+    if (m) return { projectId: Number(m[1]), view: (m[2] as View) ?? 'sources' };
+    return { projectId: null, view: 'projects' };
+  }
+
+  function navigate(path: string, replace = false) {
+    if (replace) history.replaceState(null, '', path);
+    else history.pushState(null, '', path);
+    applyRoute(parseRoute(path));
+  }
+
+  function applyRoute(route: Route) {
+    currentProjectId = route.projectId;
+    currentView = route.view;
+  }
+
+  const initialRoute = parseRoute(window.location.pathname);
+
   let allProjects: Project[] = $state([]);
-  let currentProjectId: number | null = $state(null);
-  let currentView: View = $state('projects');
+  let currentProjectId: number | null = $state(initialRoute.projectId);
+  let currentView: View = $state(initialRoute.view);
   let loading = $state(false);
   let error: string | null = $state(null);
 
   let currentProject = $derived(allProjects.find((p) => p.id === currentProjectId) ?? null);
+
+  // Normalize URL: /projects/:id without a tab → redirect to /sources
+  if (initialRoute.projectId && !window.location.pathname.match(/\/projects\/\d+\/.+/)) {
+    history.replaceState(null, '', `/projects/${initialRoute.projectId}/sources`);
+  }
+
+  window.addEventListener('popstate', () => {
+    applyRoute(parseRoute(window.location.pathname));
+  });
 
   const navItems: { view: View; label: string; requiresProject: boolean }[] = [
     { view: 'projects', label: 'Projects', requiresProject: false },
@@ -41,8 +76,7 @@
   }
 
   function selectProject(id: number) {
-    currentProjectId = id;
-    currentView = 'sources';
+    navigate(`/projects/${id}/sources`);
   }
 
   function onProjectCreated(project: Project) {
@@ -53,8 +87,7 @@
   function onProjectDeleted(id: number) {
     allProjects = allProjects.filter((p) => p.id !== id);
     if (currentProjectId === id) {
-      currentProjectId = null;
-      currentView = 'projects';
+      navigate('/');
     }
   }
 
@@ -76,7 +109,7 @@
           value={currentProjectId ?? ''}
           onchange={(e) => {
             const val = (e.target as HTMLSelectElement).value;
-            if (val) selectProject(Number(val));
+            if (val) navigate(`/projects/${val}/sources`);
           }}
         >
           <option value="">Select project...</option>
@@ -93,7 +126,10 @@
           <button
             class="nav-item"
             class:active={currentView === item.view}
-            onclick={() => (currentView = item.view)}
+            onclick={() => {
+              if (item.view === 'projects') navigate('/');
+              else if (currentProjectId) navigate(`/projects/${currentProjectId}/${item.view}`);
+            }}
           >
             {item.label}
           </button>
@@ -107,6 +143,21 @@
   </aside>
 
   <main class="main-content">
+    {#if currentProject}
+      <div class="breadcrumbs">
+        <button class="breadcrumb-link" onclick={() => navigate('/')}>Projects</button>
+        <span class="breadcrumb-sep">/</span>
+        <button
+          class="breadcrumb-link"
+          onclick={() => navigate(`/projects/${currentProjectId}/sources`)}
+          >{currentProject.name}</button
+        >
+        <span class="breadcrumb-sep">/</span>
+        <span class="breadcrumb-current">{navItems.find((n) => n.view === currentView)?.label}</span
+        >
+      </div>
+    {/if}
+
     {#if loading && allProjects.length === 0}
       <div class="empty">Loading...</div>
     {:else if currentView === 'projects'}
@@ -216,5 +267,38 @@
     flex: 1;
     overflow-y: auto;
     padding: 24px;
+  }
+
+  .breadcrumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 16px;
+    margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .breadcrumb-link {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--text-dim);
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .breadcrumb-link:hover {
+    color: var(--accent);
+  }
+
+  .breadcrumb-sep {
+    color: var(--text-dim);
+    opacity: 0.5;
+  }
+
+  .breadcrumb-current {
+    color: var(--text);
+    font-weight: 500;
   }
 </style>
