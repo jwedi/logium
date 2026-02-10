@@ -102,7 +102,7 @@ case "${1:-dev}" in
         ok "Backend built."
 
         log "Starting backend on http://localhost:3000..."
-        (cd "$ROOT/crates/logium-server" && "$ROOT/target/debug/logium-server") &
+        (cd "$ROOT/crates/logium-server" && exec "$ROOT/target/debug/logium-server") &
         BACKEND_PID=$!
 
         # Wait for backend to start

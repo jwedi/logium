@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 mod db;
 mod routes;
@@ -54,10 +54,12 @@ async fn main() {
         .layer(cors)
         .with_state(state);
 
-    // Serve static files from ui/dist if it exists
+    // Serve static files from ui/dist if it exists, with SPA fallback to index.html
     let static_dir = PathBuf::from("../ui/dist");
     if static_dir.exists() {
-        app = app.fallback_service(ServeDir::new(static_dir));
+        app = app.fallback_service(
+            ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html"))),
+        );
     }
 
     let addr = format!("0.0.0.0:{port}");
