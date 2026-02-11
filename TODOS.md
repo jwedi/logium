@@ -87,14 +87,9 @@ Integrated into `RuleEditor` as a "Test Rule (dry run)" section. Paste a log lin
 
 ## 10. Persistent Analysis Results
 
-Keep the last analysis result in memory so switching tabs doesn't lose it.
+**Status:** Done
 
-- Store the most recent analysis result in a module-scoped `$state` (same pattern as `analysisInvalidation.svelte.ts`)
-- When `AnalysisView` remounts, restore the cached result instead of showing an empty state
-- Clear the cache on a new manual run, auto-rerun, or project change
-- Frontend only
-
-**Implementation:** Create `analysisCache.svelte.ts` exporting `getAnalysisCache()` / `setAnalysisCache()` backed by module-scoped `$state`. `AnalysisView` writes to the cache after each successful run and reads from it on mount.
+Module-scoped `$state` cache (`analysisCache.svelte.ts`) keyed by `projectId`. `AnalysisView` restores cached results on mount/remount, writes to the cache after each successful streaming run, and naturally clears stale results when the project changes (cache miss returns null).
 
 ---
 
