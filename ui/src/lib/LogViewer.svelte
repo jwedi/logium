@@ -44,12 +44,45 @@
   let currentMatchIdx = $state(0);
   let searchInput: HTMLInputElement | undefined = $state();
 
-  let totalHeight = $derived(lines.length * LINE_HEIGHT);
+  // Filter state
+  let filterQuery = $state('');
+  let filterIsRegex = $state(false);
+
+  // Filter: compiled regex
+  let filterRegex: RegExp | null = $derived.by(() => {
+    if (!filterQuery) return null;
+    try {
+      if (filterIsRegex) return new RegExp(filterQuery, 'gi');
+      return new RegExp(filterQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    } catch {
+      return null;
+    }
+  });
+
+  // Filter: indices of lines that pass the filter
+  let filteredIndices: number[] = $derived.by(() => {
+    if (!filterQuery || !filterRegex) {
+      return Array.from({ length: lines.length }, (_, i) => i);
+    }
+    const result: number[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      filterRegex.lastIndex = 0;
+      if (filterRegex.test(lines[i])) result.push(i);
+    }
+    return result;
+  });
+
+  let totalHeight = $derived(filteredIndices.length * LINE_HEIGHT);
   let startIdx = $derived(Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - OVERSCAN));
   let endIdx = $derived(
-    Math.min(lines.length, Math.ceil((scrollTop + containerHeight) / LINE_HEIGHT) + OVERSCAN),
+    Math.min(
+      filteredIndices.length,
+      Math.ceil((scrollTop + containerHeight) / LINE_HEIGHT) + OVERSCAN,
+    ),
   );
-  let visibleLines = $derived(lines.slice(startIdx, endIdx));
+  let visibleLines = $derived(
+    filteredIndices.slice(startIdx, endIdx).map((origIdx) => ({ origIdx, text: lines[origIdx] })),
+  );
   let offsetY = $derived(startIdx * LINE_HEIGHT);
 
   // Search: compiled regex for matching and highlighting
@@ -65,20 +98,18 @@
     }
   });
 
-  // Search: array of matching line indices
+  // Search: array of matching filtered positions
   let searchMatches: number[] = $derived.by(() => {
     if (!searchQuery || !searchRegex) return [];
     const result: number[] = [];
-    for (let i = 0; i < lines.length; i++) {
+    for (let fi = 0; fi < filteredIndices.length; fi++) {
       searchRegex.lastIndex = 0;
-      if (searchRegex.test(lines[i])) {
-        result.push(i);
-      }
+      if (searchRegex.test(lines[filteredIndices[fi]])) result.push(fi);
     }
     return result;
   });
 
-  let searchMatchSet = $derived(new Set(searchMatches));
+  let searchMatchSet = $derived(new Set(searchMatches.map((fi) => filteredIndices[fi])));
 
   // Build a map of line content -> rule matches for highlighting
   let lineMatchMap = $derived.by(() => {
@@ -199,9 +230,9 @@
   }
 
   function scrollToMatch() {
-    const lineIdx = searchMatches[currentMatchIdx];
-    if (container) {
-      container.scrollTop = lineIdx * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
+    const filteredPos = searchMatches[currentMatchIdx];
+    if (container && filteredPos !== undefined) {
+      container.scrollTop = filteredPos * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
     }
   }
 
@@ -211,20 +242,23 @@
     currentMatchIdx = 0;
   }
 
-  function splitLineBySearch(line: string): { text: string; isMatch: boolean }[] {
-    if (!searchRegex || !searchQuery) return [{ text: line, isMatch: false }];
+  function splitLineByRegex(
+    line: string,
+    regex: RegExp | null,
+  ): { text: string; isMatch: boolean }[] {
+    if (!regex) return [{ text: line, isMatch: false }];
     const segments: { text: string; isMatch: boolean }[] = [];
     let lastIndex = 0;
-    searchRegex.lastIndex = 0;
+    regex.lastIndex = 0;
     let m: RegExpExecArray | null;
-    while ((m = searchRegex.exec(line)) !== null) {
+    while ((m = regex.exec(line)) !== null) {
       if (m.index > lastIndex) {
         segments.push({ text: line.slice(lastIndex, m.index), isMatch: false });
       }
       segments.push({ text: m[0], isMatch: true });
-      lastIndex = searchRegex.lastIndex;
+      lastIndex = regex.lastIndex;
       if (m[0].length === 0) {
-        searchRegex.lastIndex++;
+        regex.lastIndex++;
       }
     }
     if (lastIndex < line.length) {
@@ -280,11 +314,39 @@
   // Navigate to a specific line when navigateTarget is set (from timeline click)
   $effect(() => {
     if (navigateTarget && lines.length > 0) {
-      const idx = lines.findIndex((l) => l === navigateTarget);
-      if (idx >= 0 && container) {
-        selectedLineIdx = idx;
-        container.scrollTop = idx * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
+      const origIdx = lines.findIndex((l) => l === navigateTarget);
+      if (origIdx >= 0 && container) {
+        selectedLineIdx = origIdx;
+        let filteredPos = filteredIndices.indexOf(origIdx);
+        if (filteredPos < 0 && filterQuery) {
+          filterQuery = '';
+          tick().then(() => {
+            if (container)
+              container.scrollTop = origIdx * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
+          });
+          return;
+        }
+        if (filteredPos >= 0)
+          container.scrollTop = filteredPos * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
       }
+    }
+  });
+
+  // Reset scroll on filter change
+  $effect(() => {
+    filterQuery;
+    filterIsRegex;
+    if (container) {
+      container.scrollTop = 0;
+      scrollTop = 0;
+    }
+  });
+
+  // Deselect line if filtered out
+  $effect(() => {
+    if (selectedLineIdx !== null && filterQuery) {
+      const inFiltered = filteredIndices.includes(selectedLineIdx);
+      if (!inFiltered) selectedLineIdx = null;
     }
   });
 </script>
@@ -293,6 +355,26 @@
 
 <div class="log-viewer-wrapper">
   <div class="log-viewer-column">
+    <div class="filter-bar">
+      <input bind:value={filterQuery} placeholder="Filter lines..." />
+      <button
+        class="search-toggle"
+        class:active={filterIsRegex}
+        onclick={() => (filterIsRegex = !filterIsRegex)}
+        title="Toggle filter regex">.*</button
+      >
+      <span class="filter-count">
+        {filterQuery ? `${filteredIndices.length} of ${lines.length} lines` : ''}
+      </span>
+      {#if filterQuery}
+        <button
+          onclick={() => {
+            filterQuery = '';
+          }}
+          title="Clear filter">&#x2715;</button
+        >
+      {/if}
+    </div>
     {#if searchOpen}
       <div class="search-bar">
         <input
@@ -329,15 +411,15 @@
     >
       <div class="scroll-spacer" style="height: {totalHeight}px">
         <div class="visible-lines" style="transform: translateY({offsetY}px)">
-          {#each visibleLines as line, i}
-            {@const globalIdx = startIdx + i}
+          {#each visibleLines as entry, i}
+            {@const globalIdx = entry.origIdx}
             {@const matches = lineMatchMap.get(globalIdx)}
             <div
               class="log-line"
               class:highlighted={!!matches}
               class:selected={selectedLineIdx === globalIdx}
               class:current-search-match={searchMatches.length > 0 &&
-                searchMatches[currentMatchIdx] === globalIdx}
+                filteredIndices[searchMatches[currentMatchIdx]] === globalIdx}
               style={matches
                 ? `background: var(--rule-color-${getRuleColor(matches[0].ruleId)}); border-left: 3px solid var(--rule-border-${getRuleColor(matches[0].ruleId)})`
                 : ''}
@@ -347,9 +429,14 @@
             >
               <span class="line-number">{globalIdx + 1}</span>
               <span class="line-content"
-                >{#if searchMatchSet.has(globalIdx)}{#each splitLineBySearch(line) as seg}{#if seg.isMatch}<mark
-                        class="search-highlight">{seg.text}</mark
-                      >{:else}{seg.text}{/if}{/each}{:else}{line}{/if}</span
+                >{#if filterQuery || searchMatchSet.has(globalIdx)}{#each splitLineByRegex(entry.text, filterRegex) as seg}{#if seg.isMatch}<mark
+                        class="filter-highlight"
+                        >{#if searchMatchSet.has(globalIdx)}{#each splitLineByRegex(seg.text, searchRegex) as sseg}{#if sseg.isMatch}<mark
+                                class="search-highlight">{sseg.text}</mark
+                              >{:else}{sseg.text}{/if}{/each}{:else}{seg.text}{/if}</mark
+                      >{:else if searchMatchSet.has(globalIdx)}{#each splitLineByRegex(seg.text, searchRegex) as sseg}{#if sseg.isMatch}<mark
+                            class="search-highlight">{sseg.text}</mark
+                          >{:else}{sseg.text}{/if}{/each}{:else}{seg.text}{/if}{/each}{:else}{entry.text}{/if}</span
               >
             </div>
           {/each}
@@ -535,6 +622,47 @@
     border-radius: var(--radius);
     padding: 4px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .filter-bar input {
+    flex: 1;
+    min-width: 150px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+
+  .filter-bar button {
+    padding: 2px 8px;
+    font-size: 13px;
+  }
+
+  .filter-bar button.active {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+
+  .filter-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    min-width: 80px;
+    text-align: center;
+  }
+
+  mark.filter-highlight {
+    background: rgba(125, 207, 255, 0.15);
+    border-radius: 2px;
+    padding: 0 1px;
   }
 
   .search-bar {
