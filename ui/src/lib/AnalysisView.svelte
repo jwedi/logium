@@ -17,6 +17,7 @@
   import TimelineView from './TimelineView.svelte';
   import StateEvolutionView from './StateEvolutionView.svelte';
   import { getInvalidationStamp } from './analysisInvalidation.svelte';
+  import { getCachedAnalysis, setCachedAnalysis } from './analysisCache.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -148,6 +149,7 @@
           patternMatchBuffer = [];
           stateChangeBuffer = [];
         }
+        setCachedAnalysis(projectId, result!);
         running = false;
         currentHandle = null;
       },
@@ -177,6 +179,7 @@
 
   $effect(() => {
     projectId;
+    result = getCachedAnalysis(projectId);
     load();
   });
 
