@@ -135,13 +135,9 @@ Auto-detect JSON log lines and make all top-level keys available as state fields
 
 ## 15. Context Lines Around Matches
 
-Expand a matched line in LogViewer to show N surrounding lines, similar to `grep -C`. The 5-10 lines before/after a match often contain critical context (stack traces, preceding requests, configuration logs).
+**Status:** Done
 
-- Click-to-expand on matched lines to show surrounding context
-- Configurable context size (default 5 lines)
-- Context lines visually distinct from the matched line
-
-**Inspiration:** `grep -C`, lnav's context view, Datadog's surrounding log lines.
+Click-to-expand on rule-matched lines in LogViewer to show N surrounding context lines (like `grep -C`). Expand/collapse individual matches or all at once. Context lines are visually distinct (dimmed, dashed border). Configurable context size (default 5). Filter count shows base matches, not context lines. Gap separators between non-consecutive groups.
 
 ---
 
@@ -277,3 +273,112 @@ Small histogram above LogViewer showing event/match density over time. Click a t
 - Updates live during streaming analysis
 
 **Inspiration:** Kibana Discover's histogram, Grafana's log volume chart.
+
+---
+
+## 27. CLI for AI Agents and Pipelines
+
+Add a `logium` CLI binary so AI agents and CI/CD pipelines can run ad-hoc log analysis without the web UI. The CLI is stateless and single-shot: take a JSON config with everything needed (rules, templates, sources, patterns), run analysis, return JSON results. No SQLite, no persistence — just `stdin → analyze → stdout`.
+
+**Design principles** (inspired by OpenClaw's CLI-first Skills pattern, `gh`, `ripgrep`):
+- JSON on stdout — the machine-readable contract
+- Stderr for progress, warnings, errors (never pollute stdout)
+- Non-zero exit codes with structured error JSON on failure
+- Composable with `jq` and other CLI tools
+
+**Two commands only:**
+
+```
+# Export a project's config (rules, templates, patterns) as JSON
+logium export <project-id>
+
+# Run analysis from a self-contained JSON config
+logium analyze -c config.json
+logium analyze < config.json   # or via stdin
+```
+
+**Input format** — the existing `ProjectExport` shape plus a `sources` array:
+
+```json
+{
+  "version": 1,
+  "timestamp_templates": [...],
+  "source_templates": [...],
+  "rules": [...],
+  "rulesets": [...],
+  "patterns": [...],
+  "sources": [
+    { "id": 1, "name": "app", "file_path": "/var/log/app.log", "source_template_id": 1 }
+  ]
+}
+```
+
+**Output** — `AnalysisResult` as JSON on stdout:
+
+```bash
+logium analyze -c config.json | jq '.rule_matches[] | select(.rule_id == 3)'
+```
+
+**Agent workflow:**
+1. `logium export 1 > config.json` — grab rules/templates from an existing project
+2. Edit `config.json` to add `sources` with file paths to analyze
+3. `logium analyze -c config.json` — run analysis, parse JSON output
+4. Or construct the entire config from scratch (no project needed)
+
+**Built-in help with full examples:**
+
+`logium analyze --help` should include a worked example showing the minimum JSON needed for a basic analysis, so a new user can get started without reading docs:
+
+```
+EXAMPLES:
+    # Minimal config to analyze a single log file:
+    cat <<'EOF' | logium analyze
+    {
+      "version": 1,
+      "timestamp_templates": [{
+        "id": 1,
+        "name": "syslog",
+        "format": "%b %d %H:%M:%S",
+        "default_year": 2025
+      }],
+      "source_templates": [{
+        "id": 1,
+        "name": "syslog",
+        "line_regex": "^(?P<timestamp>\\w+ \\d+ [\\d:]+) (?P<host>\\S+) (?P<message>.+)$",
+        "timestamp_template_id": 1
+      }],
+      "rules": [{
+        "id": 1,
+        "name": "OOM Killer",
+        "source_template_id": 1,
+        "match_field": "message",
+        "match_regex": "Out of memory",
+        "ruleset_id": 1
+      }],
+      "rulesets": [{ "id": 1, "name": "default" }],
+      "patterns": [],
+      "sources": [{
+        "id": 1,
+        "name": "syslog",
+        "file_path": "/var/log/syslog",
+        "source_template_id": 1
+      }]
+    }
+    EOF
+
+    # Export from an existing project, add sources, and analyze:
+    logium export 1 > config.json
+    # edit config.json to add "sources" array
+    logium analyze -c config.json
+```
+
+Use `clap`'s `after_long_help` to embed these examples so they appear in `--help` output.
+
+**Implementation:**
+- New crate: `crates/logium-cli/` with `clap` derive API
+- Depends only on `logium-core` (no HTTP, no SQLite for `analyze`)
+- `export` command connects to the server's SQLite DB read-only
+- All model types already derive `Serialize + Deserialize` — just `serde_json::to_writer(stdout)`
+- `analyze()` already takes flat slices, so JSON → deserialize → call `analyze()` → serialize result
+
+**Inspiration:** OpenClaw's CLI-first Skills pattern ("works with agents that didn't exist when we wrote the code"), `gh --json`, `ripgrep --json`, 12 Factor CLI Apps.
