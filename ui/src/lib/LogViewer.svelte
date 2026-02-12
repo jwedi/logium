@@ -48,6 +48,10 @@
   let filterQuery = $state('');
   let filterIsRegex = $state(false);
 
+  // Context expansion state
+  let expandedLines: Set<number> = $state(new Set());
+  let contextSize: number = $state(5);
+
   // Filter: compiled regex
   let filterRegex: RegExp | null = $derived.by(() => {
     if (!filterQuery) return null;
@@ -59,8 +63,8 @@
     }
   });
 
-  // Filter: indices of lines that pass the filter
-  let filteredIndices: number[] = $derived.by(() => {
+  // Base filter: indices passing the text/regex filter
+  let baseFilteredIndices: number[] = $derived.by(() => {
     if (!filterQuery || !filterRegex) {
       return Array.from({ length: lines.length }, (_, i) => i);
     }
@@ -72,6 +76,40 @@
     return result;
   });
 
+  // Final filtered indices: base + context around expanded matched lines
+  let filteredIndices: number[] = $derived.by(() => {
+    if (expandedLines.size === 0) return baseFilteredIndices;
+    const baseSet = new Set(baseFilteredIndices);
+    const additions: number[] = [];
+    for (const lineIdx of expandedLines) {
+      if (!lineMatchMap.has(lineIdx) || !baseSet.has(lineIdx)) continue;
+      const lo = Math.max(0, lineIdx - contextSize);
+      const hi = Math.min(lines.length - 1, lineIdx + contextSize);
+      for (let i = lo; i <= hi; i++) {
+        if (!baseSet.has(i)) additions.push(i);
+      }
+    }
+    if (additions.length === 0) return baseFilteredIndices;
+    const merged = [...baseFilteredIndices, ...additions];
+    merged.sort((a, b) => a - b);
+    const deduped: number[] = [merged[0]];
+    for (let i = 1; i < merged.length; i++) {
+      if (merged[i] !== merged[i - 1]) deduped.push(merged[i]);
+    }
+    return deduped;
+  });
+
+  // Lines that are context-only (for CSS styling)
+  let contextLineSet: Set<number> = $derived.by(() => {
+    if (expandedLines.size === 0) return new Set();
+    const baseSet = new Set(baseFilteredIndices);
+    const ctx = new Set<number>();
+    for (const idx of filteredIndices) {
+      if (!baseSet.has(idx)) ctx.add(idx);
+    }
+    return ctx;
+  });
+
   let totalHeight = $derived(filteredIndices.length * LINE_HEIGHT);
   let startIdx = $derived(Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - OVERSCAN));
   let endIdx = $derived(
@@ -81,7 +119,14 @@
     ),
   );
   let visibleLines = $derived(
-    filteredIndices.slice(startIdx, endIdx).map((origIdx) => ({ origIdx, text: lines[origIdx] })),
+    filteredIndices.slice(startIdx, endIdx).map((origIdx, i) => ({
+      origIdx,
+      text: lines[origIdx],
+      gapBefore:
+        i === 0
+          ? startIdx > 0 && origIdx !== filteredIndices[startIdx - 1] + 1
+          : origIdx !== filteredIndices[startIdx + i - 1] + 1,
+    })),
   );
   let offsetY = $derived(startIdx * LINE_HEIGHT);
 
@@ -242,6 +287,26 @@
     currentMatchIdx = 0;
   }
 
+  function toggleExpand(lineIdx: number, event: MouseEvent) {
+    event.stopPropagation();
+    const next = new Set(expandedLines);
+    if (next.has(lineIdx)) next.delete(lineIdx);
+    else next.add(lineIdx);
+    expandedLines = next;
+  }
+
+  function expandAll() {
+    const next = new Set(expandedLines);
+    for (const idx of baseFilteredIndices) {
+      if (lineMatchMap.has(idx)) next.add(idx);
+    }
+    expandedLines = next;
+  }
+
+  function collapseAll() {
+    expandedLines = new Set();
+  }
+
   function splitLineByRegex(
     line: string,
     regex: RegExp | null,
@@ -289,6 +354,7 @@
 
   $effect(() => {
     source;
+    expandedLines = new Set();
     loadFileContent();
     loadRules();
   });
@@ -336,6 +402,7 @@
   $effect(() => {
     filterQuery;
     filterIsRegex;
+    expandedLines = new Set();
     if (container) {
       container.scrollTop = 0;
       scrollTop = 0;
@@ -364,7 +431,7 @@
         title="Toggle filter regex">.*</button
       >
       <span class="filter-count">
-        {filterQuery ? `${filteredIndices.length} of ${lines.length} lines` : ''}
+        {filterQuery ? `${baseFilteredIndices.length} of ${lines.length} lines` : ''}
       </span>
       {#if filterQuery}
         <button
@@ -373,6 +440,22 @@
           }}
           title="Clear filter">&#x2715;</button
         >
+      {/if}
+      {#if filterQuery && lineMatchMap.size > 0}
+        <span class="context-controls">
+          <label title="Context lines around expanded matches">
+            Ctx:
+            <input
+              type="number"
+              min="1"
+              max="50"
+              bind:value={contextSize}
+              class="context-size-input"
+            />
+          </label>
+          <button onclick={expandAll} title="Expand all matches">&#x25BC; All</button>
+          <button onclick={collapseAll} title="Collapse all matches">&#x25B2; All</button>
+        </span>
       {/if}
     </div>
     {#if searchOpen}
@@ -418,6 +501,8 @@
               class="log-line"
               class:highlighted={!!matches}
               class:selected={selectedLineIdx === globalIdx}
+              class:context-line={contextLineSet.has(globalIdx)}
+              class:gap-before={entry.gapBefore}
               class:current-search-match={searchMatches.length > 0 &&
                 filteredIndices[searchMatches[currentMatchIdx]] === globalIdx}
               style={matches
@@ -427,6 +512,16 @@
               role="button"
               tabindex="0"
             >
+              {#if filterQuery && matches}
+                <button
+                  class="expand-toggle"
+                  onclick={(e) => toggleExpand(globalIdx, e)}
+                  title={expandedLines.has(globalIdx) ? 'Collapse context' : 'Expand context'}
+                  >{expandedLines.has(globalIdx) ? '\u25BC' : '\u25B6'}</button
+                >
+              {:else}
+                <span class="expand-spacer"></span>
+              {/if}
               <span class="line-number">{globalIdx + 1}</span>
               <span class="line-content"
                 >{#if filterQuery || searchMatchSet.has(globalIdx)}{#each splitLineByRegex(entry.text, filterRegex) as seg}{#if seg.isMatch}<mark
@@ -709,5 +804,62 @@
 
   .log-line.current-search-match {
     background: rgba(224, 175, 104, 0.1) !important;
+  }
+
+  .expand-toggle {
+    flex-shrink: 0;
+    width: 18px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 10px;
+    line-height: 22px;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+  }
+  .expand-toggle:hover {
+    color: var(--accent);
+  }
+
+  .expand-spacer {
+    flex-shrink: 0;
+    width: 18px;
+    display: inline-block;
+  }
+
+  .log-line.context-line {
+    opacity: 0.65;
+    border-left: 3px dashed var(--border) !important;
+    background: none !important;
+  }
+  .log-line.context-line:hover {
+    opacity: 1;
+  }
+
+  .log-line.gap-before {
+    box-shadow: 0 -1px 0 0 var(--text-muted);
+  }
+
+  .context-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+  }
+  .context-controls label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .context-size-input {
+    width: 45px;
+    padding: 2px 4px;
+    font-size: 12px;
+    text-align: center;
   }
 </style>
