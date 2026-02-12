@@ -18,6 +18,7 @@
   let newLineDelimiter = $state('\\n');
   let newContentRegex = $state('');
   let newContinuationRegex = $state('');
+  let newJsonTimestampField = $state('');
 
   function tsTemplateName(id: number): string {
     return tsTemplateList.find((t) => t.id === id)?.name ?? `#${id}`;
@@ -49,11 +50,13 @@
         line_delimiter: newLineDelimiter,
         content_regex: newContentRegex || null,
         continuation_regex: newContinuationRegex || null,
+        json_timestamp_field: newJsonTimestampField || null,
       });
       newName = '';
       newLineDelimiter = '\\n';
       newContentRegex = '';
       newContinuationRegex = '';
+      newJsonTimestampField = '';
       await load();
     } catch (e: any) {
       alert(e.message);
@@ -125,6 +128,14 @@
         placeholder="Regex for multi-line continuation..."
       />
     </div>
+    <div class="field">
+      <label>JSON Timestamp Field (optional)</label>
+      <input
+        type="text"
+        bind:value={newJsonTimestampField}
+        placeholder="e.g. timestamp, ts, @timestamp"
+      />
+    </div>
   </div>
   <div class="actions">
     <button
@@ -169,6 +180,14 @@
               <label>Continuation Regex</label>
               <input type="text" bind:value={editing.continuation_regex} />
             </div>
+            <div class="field">
+              <label>JSON Timestamp Field</label>
+              <input
+                type="text"
+                bind:value={editing.json_timestamp_field}
+                placeholder="e.g. timestamp, ts, @timestamp"
+              />
+            </div>
           </div>
           <div class="actions">
             <button class="primary" onclick={updateTemplate}>Save</button>
@@ -185,6 +204,12 @@
               {/if}
               {#if tmpl.continuation_regex}
                 <span><strong>Continuation:</strong> <code>{tmpl.continuation_regex}</code></span>
+              {/if}
+              {#if tmpl.json_timestamp_field}
+                <span
+                  ><strong>JSON Timestamp Field:</strong>
+                  <code>{tmpl.json_timestamp_field}</code></span
+                >
               {/if}
             </div>
           </div>

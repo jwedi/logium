@@ -26,6 +26,7 @@ struct CreateTemplate {
     line_delimiter: String,
     content_regex: Option<String>,
     continuation_regex: Option<String>,
+    json_timestamp_field: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -36,6 +37,7 @@ struct TemplateResponse {
     line_delimiter: String,
     content_regex: Option<String>,
     continuation_regex: Option<String>,
+    json_timestamp_field: Option<String>,
 }
 
 impl From<logium_core::model::SourceTemplate> for TemplateResponse {
@@ -47,6 +49,7 @@ impl From<logium_core::model::SourceTemplate> for TemplateResponse {
             line_delimiter: t.line_delimiter,
             content_regex: t.content_regex,
             continuation_regex: t.continuation_regex,
+            json_timestamp_field: t.json_timestamp_field,
         }
     }
 }
@@ -73,6 +76,7 @@ async fn create(
             &body.line_delimiter,
             body.content_regex.as_deref(),
             body.continuation_regex.as_deref(),
+            body.json_timestamp_field.as_deref(),
         )
         .await?;
     Ok((StatusCode::CREATED, Json(t.into())))
@@ -101,6 +105,7 @@ async fn update(
             &body.line_delimiter,
             body.content_regex.as_deref(),
             body.continuation_regex.as_deref(),
+            body.json_timestamp_field.as_deref(),
         )
         .await?;
     Ok(Json(t.into()))

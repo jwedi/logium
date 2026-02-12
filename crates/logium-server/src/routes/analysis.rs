@@ -117,6 +117,7 @@ struct DetectTemplateResponse {
     timestamp_format: Option<String>,
     line_delimiter: String,
     content_regex: Option<String>,
+    json_timestamp_field: Option<String>,
     confidence: f64,
 }
 
@@ -140,6 +141,36 @@ async fn detect_template(
         return Err(ApiError::from(DbError::InvalidData(
             "empty sample".to_string(),
         )));
+    }
+
+    // Check if majority of lines are JSON
+    let json_count = lines
+        .iter()
+        .filter(|l| l.trim_start().starts_with('{'))
+        .count();
+    if json_count > lines.len() / 2 {
+        // Try to detect JSON timestamp field
+        let candidate_fields = ["timestamp", "ts", "@timestamp", "time", "datetime"];
+        for line in &lines {
+            if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(line) {
+                for field in &candidate_fields {
+                    if let Some(serde_json::Value::String(val)) = map.get(*field) {
+                        // Try parsing against known formats
+                        for fmt in TIMESTAMP_FORMATS {
+                            if try_parse_timestamp(val, fmt) {
+                                return Ok(Json(DetectTemplateResponse {
+                                    timestamp_format: Some(fmt.to_string()),
+                                    line_delimiter: "\n".to_string(),
+                                    content_regex: None,
+                                    json_timestamp_field: Some(field.to_string()),
+                                    confidence: json_count as f64 / lines.len() as f64,
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     let mut best_format: Option<&str> = None;
@@ -174,6 +205,7 @@ async fn detect_template(
         timestamp_format: best_format.map(|s| s.to_string()),
         line_delimiter: "\n".to_string(),
         content_regex,
+        json_timestamp_field: None,
         confidence,
     }))
 }

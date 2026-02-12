@@ -1,0 +1,5 @@
+{"ts":"2024-01-15 10:00:01","metric":"cpu_usage","value":45.2,"host":"web-1"}
+{"ts":"2024-01-15 10:00:02","metric":"memory_mb","value":2048,"host":"web-1"}
+{"ts":"2024-01-15 10:00:03","metric":"cpu_usage","value":92.1,"host":"web-1"}
+{"ts":"2024-01-15 10:00:04","metric":"disk_io","value":150,"host":"web-1"}
+{"ts":"2024-01-15 10:00:05","metric":"cpu_usage","value":15.0,"host":"web-1"}

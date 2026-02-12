@@ -31,6 +31,7 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
         line_delimiter: "\n".into(),
         content_regex: None,
         continuation_regex: None,
+        json_timestamp_field: None,
     };
     let src_a = Source {
         id: 1,
@@ -133,6 +134,7 @@ fn bench_nginx_large(c: &mut Criterion) {
         line_delimiter: "\n".into(),
         content_regex: None,
         continuation_regex: None,
+        json_timestamp_field: None,
     };
     let src = Source {
         id: 1,

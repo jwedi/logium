@@ -72,6 +72,7 @@ pub struct SourceTemplate {
     pub line_delimiter: String,
     pub content_regex: Option<String>,
     pub continuation_regex: Option<String>,
+    pub json_timestamp_field: Option<String>,
 }
 
 /// Source - an actual log file.

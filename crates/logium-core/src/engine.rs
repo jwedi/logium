@@ -74,6 +74,7 @@ pub struct LogLineIterator {
     default_year: Option<i32>,
     content_regex: Option<Regex>,
     continuation_regex: Option<Regex>,
+    json_timestamp_field: Option<String>,
     pending_line: Option<String>,
     buf: String,
 }
@@ -115,6 +116,7 @@ impl LogLineIterator {
             default_year: ts_template.default_year,
             content_regex,
             continuation_regex,
+            json_timestamp_field: template.json_timestamp_field.clone(),
             pending_line: None,
             buf: String::new(),
         })
@@ -169,6 +171,54 @@ impl Iterator for LogLineIterator {
         } else {
             head_line
         };
+
+        // JSON mode: parse line as JSON, extract timestamp from configured field
+        if let Some(ref field_name) = self.json_timestamp_field {
+            let json_val: serde_json::Value = match serde_json::from_str(&merged_raw) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Some(Err(AnalysisError::ParseError(format!(
+                        "failed to parse JSON: {e}"
+                    ))));
+                }
+            };
+
+            let ts_str = match json_val.get(field_name).and_then(|v| v.as_str()) {
+                Some(s) => s.to_string(),
+                None => {
+                    return Some(Err(AnalysisError::ParseError(format!(
+                        "JSON field '{}' not found or not a string",
+                        field_name
+                    ))));
+                }
+            };
+
+            let timestamp = NaiveDateTime::parse_from_str(&ts_str, &self.timestamp_format)
+                .or_else(|_| parse_timestamp_prefix(&ts_str, &self.timestamp_format))
+                .or_else(|e| {
+                    if let Some(year) = self.default_year {
+                        let augmented_input = format!("{year} {ts_str}");
+                        let augmented_fmt = format!("%Y {}", self.timestamp_format);
+                        NaiveDateTime::parse_from_str(&augmented_input, &augmented_fmt)
+                            .or_else(|_| parse_timestamp_prefix(&augmented_input, &augmented_fmt))
+                    } else {
+                        Err(e)
+                    }
+                });
+
+            return match timestamp {
+                Ok(ts) => Some(Ok(LogLine {
+                    timestamp: ts,
+                    source_id: self.source_id,
+                    raw: merged_raw.clone(),
+                    content: merged_raw,
+                })),
+                Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
+                    "failed to parse timestamp from '{}' with format '{}': {}",
+                    ts_str, self.timestamp_format, e
+                )))),
+            };
+        }
 
         // For timestamp and content_regex, use only the first physical line.
         let first_line = merged_raw
@@ -688,6 +738,28 @@ fn evaluate_predicate(pred: &PatternPredicate, state: &StateManager) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// JSON field extraction helper
+// ---------------------------------------------------------------------------
+
+fn json_value_to_state_value(v: &serde_json::Value) -> Option<StateValue> {
+    match v {
+        serde_json::Value::String(s) => Some(StateValue::String(s.clone())),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Some(StateValue::Integer(i))
+            } else if let Some(f) = n.as_f64() {
+                Some(StateValue::Float(f))
+            } else {
+                None
+            }
+        }
+        serde_json::Value::Bool(b) => Some(StateValue::Bool(*b)),
+        serde_json::Value::Null => None,
+        other => Some(StateValue::String(other.to_string())),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Main analysis function
 // ---------------------------------------------------------------------------
 
@@ -762,6 +834,41 @@ pub fn analyze(
     for result in stream {
         let line = result?;
         let tmpl_id = source_template.get(&line.source_id).copied().unwrap_or(0);
+
+        // Auto-extract JSON fields as state before rule processing
+        if let Some(tmpl) = template_map.get(&tmpl_id)
+            && tmpl.json_timestamp_field.is_some()
+        {
+            if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content) {
+                let source_name = state_manager
+                    .source_names
+                    .get(&line.source_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let state = state_manager
+                    .per_source_state
+                    .entry(line.source_id)
+                    .or_default();
+                for (key, value) in &map {
+                    if let Some(sv) = json_value_to_state_value(value) {
+                        let old = state.get(key).cloned();
+                        let new = Some(sv.clone());
+                        state.insert(key.clone(), sv);
+                        if old != new {
+                            all_state_changes.push(StateChange {
+                                timestamp: line.timestamp,
+                                source_id: line.source_id,
+                                source_name: source_name.clone(),
+                                state_key: key.clone(),
+                                old_value: old,
+                                new_value: new,
+                                rule_id: 0,
+                            });
+                        }
+                    }
+                }
+            }
+        }
 
         // Find applicable rule ids
         if let Some(rule_ids) = template_rule_ids.get(&tmpl_id) {
@@ -897,6 +1004,47 @@ pub fn analyze_streaming(
         lines_processed += 1;
 
         let tmpl_id = source_template.get(&line.source_id).copied().unwrap_or(0);
+
+        // Auto-extract JSON fields as state before rule processing
+        if let Some(tmpl) = template_map.get(&tmpl_id)
+            && tmpl.json_timestamp_field.is_some()
+        {
+            if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content) {
+                let source_name = state_manager
+                    .source_names
+                    .get(&line.source_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let state = state_manager
+                    .per_source_state
+                    .entry(line.source_id)
+                    .or_default();
+                for (key, value) in &map {
+                    if let Some(sv) = json_value_to_state_value(value) {
+                        let old = state.get(key).cloned();
+                        let new = Some(sv.clone());
+                        state.insert(key.clone(), sv);
+                        if old != new {
+                            total_state_changes += 1;
+                            if tx
+                                .send(AnalysisEvent::StateChange(StateChange {
+                                    timestamp: line.timestamp,
+                                    source_id: line.source_id,
+                                    source_name: source_name.clone(),
+                                    state_key: key.clone(),
+                                    old_value: old,
+                                    new_value: new,
+                                    rule_id: 0,
+                                }))
+                                .is_err()
+                            {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         if let Some(rule_ids) = template_rule_ids.get(&tmpl_id) {
             let source_name = state_manager
@@ -1608,6 +1756,7 @@ mod tests {
             line_delimiter: "\n".into(),
             content_regex: None,
             continuation_regex: None,
+            json_timestamp_field: None,
         }
     }
 
@@ -1710,6 +1859,7 @@ mod tests {
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
             continuation_regex: None,
+            json_timestamp_field: None,
         };
 
         let sources = vec![
@@ -1889,6 +2039,7 @@ mod tests {
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
             continuation_regex: None,
+            json_timestamp_field: None,
         };
 
         let sources = vec![
@@ -2196,6 +2347,7 @@ mod tests {
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
             continuation_regex: None,
+            json_timestamp_field: None,
         };
 
         let sources = vec![Source {
@@ -2301,6 +2453,7 @@ mod tests {
             line_delimiter: "\n".into(),
             content_regex: None,
             continuation_regex: Some(r"^\s".to_string()),
+            json_timestamp_field: None,
         };
         let source = Source {
             id: 1,
@@ -2384,5 +2537,145 @@ mod tests {
         assert!(results[1].is_ok());
         // The continuation line will fail timestamp parsing (expected behavior)
         assert!(results[2].is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // JSON Lines tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_json_line_parsing() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, r#"{{"timestamp":"2024-01-15 10:00:01","level":"INFO","message":"Server started","port":8080}}"#).unwrap();
+        writeln!(f, r#"{{"timestamp":"2024-01-15 10:00:02","level":"ERROR","message":"Connection failed","retries":3}}"#).unwrap();
+        writeln!(f, r#"{{"timestamp":"2024-01-15 10:00:03","level":"WARN","message":"High memory","usage_pct":85.5}}"#).unwrap();
+
+        let ts_template = make_ts_template();
+        let template = SourceTemplate {
+            id: 1,
+            name: "json_test".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: None,
+            continuation_regex: None,
+            json_timestamp_field: Some("timestamp".into()),
+        };
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+
+        let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
+        let lines: Vec<LogLine> = iter.map(|r| r.unwrap()).collect();
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            lines[0].timestamp,
+            NaiveDateTime::parse_from_str("2024-01-15 10:00:01", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+        assert_eq!(
+            lines[1].timestamp,
+            NaiveDateTime::parse_from_str("2024-01-15 10:00:02", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+        // Content should be the raw JSON string
+        assert!(lines[0].content.contains("Server started"));
+        assert!(lines[0].content.starts_with('{'));
+    }
+
+    #[test]
+    fn test_json_line_invalid_json() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "this is not json").unwrap();
+
+        let ts_template = make_ts_template();
+        let template = SourceTemplate {
+            id: 1,
+            name: "json_test".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: None,
+            continuation_regex: None,
+            json_timestamp_field: Some("timestamp".into()),
+        };
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+
+        let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
+        let results: Vec<_> = iter.collect();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].is_err());
+    }
+
+    #[test]
+    fn test_json_auto_extraction() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, r#"{{"timestamp":"2024-01-15 10:00:01","level":"INFO","message":"Server started","port":8080}}"#).unwrap();
+        writeln!(f, r#"{{"timestamp":"2024-01-15 10:00:02","level":"ERROR","message":"Connection failed","retries":3}}"#).unwrap();
+        writeln!(f, r#"{{"timestamp":"2024-01-15 10:00:03","level":"WARN","message":"High memory","usage_pct":85.5}}"#).unwrap();
+        writeln!(f, r#"{{"timestamp":"2024-01-15 10:00:04","level":"INFO","message":"Done","success":true}}"#).unwrap();
+
+        let ts_template = make_ts_template();
+        let template = SourceTemplate {
+            id: 1,
+            name: "json_test".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: None,
+            continuation_regex: None,
+            json_timestamp_field: Some("timestamp".into()),
+        };
+        let source = Source {
+            id: 1,
+            name: "json_src".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+
+        let result = analyze(&[source], &[template], &[ts_template], &[], &[], &[]).unwrap();
+
+        // Should have state changes for all JSON fields across all lines
+        assert!(
+            !result.state_changes.is_empty(),
+            "expected state changes from JSON auto-extraction"
+        );
+
+        // Check specific field types by looking at state changes
+        let port_changes: Vec<_> = result
+            .state_changes
+            .iter()
+            .filter(|sc| sc.state_key == "port")
+            .collect();
+        assert!(!port_changes.is_empty(), "expected port state change");
+        assert_eq!(port_changes[0].new_value, Some(StateValue::Integer(8080)));
+
+        let usage_changes: Vec<_> = result
+            .state_changes
+            .iter()
+            .filter(|sc| sc.state_key == "usage_pct")
+            .collect();
+        assert!(!usage_changes.is_empty(), "expected usage_pct state change");
+        assert_eq!(usage_changes[0].new_value, Some(StateValue::Float(85.5)));
+
+        let success_changes: Vec<_> = result
+            .state_changes
+            .iter()
+            .filter(|sc| sc.state_key == "success")
+            .collect();
+        assert!(!success_changes.is_empty(), "expected success state change");
+        assert_eq!(success_changes[0].new_value, Some(StateValue::Bool(true)));
+
+        // rule_id should be 0 for JSON auto-extracted state changes
+        for sc in &result.state_changes {
+            assert_eq!(
+                sc.rule_id, 0,
+                "JSON auto-extracted state changes should have rule_id=0"
+            );
+        }
     }
 }

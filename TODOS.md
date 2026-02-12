@@ -121,15 +121,11 @@ A time picker that constrains both the analysis engine and the LogViewer to a st
 
 ---
 
-## 14. Structured Log Support (JSON Lines)
+## ~~14. Structured Log Support (JSON Lines)~~
 
-Auto-detect JSON log lines and make all top-level keys available as state fields without manual extraction rules. Modern services emit JSON logs — extracting fields with regex is tedious when the data is already structured.
+**Status:** Done
 
-- A JSON source template type that parses lines as JSON instead of using regex extraction
-- Auto-detect JSON lines (starts with `{`) and surface all top-level keys
-- Timestamp field configurable (e.g. `timestamp`, `ts`, `@timestamp`)
-
-**Inspiration:** Kibana auto-indexes all JSON fields, Seq preserves structured data natively, lnav detects JSON lines.
+Added `json_timestamp_field` to `SourceTemplate`. When set, `LogLineIterator` parses lines as JSON and extracts the timestamp from the configured field (bypassing `content_regex` and `extraction_regex`). The analysis loop auto-extracts all top-level JSON keys as state fields (Replace mode) before rule processing — no manual extraction rules needed. Integers, floats, booleans, and strings are auto-typed. The `detect-template` endpoint detects JSON samples and suggests common timestamp field names (`timestamp`, `ts`, `@timestamp`, `time`, `datetime`). DB schema, API, and frontend updated. 6 new tests (3 unit, 2 integration, 1 server detect-template).
 
 ---
 

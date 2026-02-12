@@ -1,0 +1,5 @@
+{"timestamp":"2024-01-15 10:00:01","level":"INFO","message":"Server started","port":8080}
+{"timestamp":"2024-01-15 10:00:02","level":"DEBUG","message":"Loading config","service":"api"}
+{"timestamp":"2024-01-15 10:00:03","level":"ERROR","message":"Connection failed","host":"db-1","retries":3}
+{"timestamp":"2024-01-15 10:00:04","level":"WARN","message":"High memory usage","usage_pct":85.5}
+{"timestamp":"2024-01-15 10:00:05","level":"INFO","message":"Request completed","status":200,"success":true}

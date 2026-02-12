@@ -49,6 +49,7 @@ fn make_source_template(
         line_delimiter: "\n".into(),
         content_regex: content_regex.map(|s| s.into()),
         continuation_regex: None,
+        json_timestamp_field: None,
     }
 }
 
@@ -414,6 +415,7 @@ fn test_timestamp_template_reuse() {
         line_delimiter: "\n".into(),
         content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ - (.+)$".into()),
         continuation_regex: None,
+        json_timestamp_field: None,
     };
     let tmpl_b = SourceTemplate {
         id: 2,
@@ -422,6 +424,7 @@ fn test_timestamp_template_reuse() {
         line_delimiter: "\n".into(),
         content_regex: None,
         continuation_regex: None,
+        json_timestamp_field: None,
     };
 
     let src_a = make_source(1, "source_a", &fixture_path("zookeeper", "source_a.log"), 1);
@@ -584,6 +587,7 @@ fn test_multiline_parsing() {
         line_delimiter: "\n".into(),
         content_regex: None,
         continuation_regex: Some(r"^\s".to_string()),
+        json_timestamp_field: None,
     };
     let src = make_source(
         1,
@@ -654,6 +658,7 @@ fn test_multiline_cross_source() {
         line_delimiter: "\n".into(),
         content_regex: None,
         continuation_regex: Some(r"^\s".to_string()),
+        json_timestamp_field: None,
     };
     let src_a = make_source(1, "source_a", &fixture_path("multiline", "source_a.log"), 1);
     let src_b = make_source(2, "source_b", &fixture_path("multiline", "source_b.log"), 1);
@@ -752,6 +757,123 @@ fn test_multiline_cross_source() {
     assert!(
         !result.pattern_matches.is_empty(),
         "expected pattern match (warn + OOM across sources)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// JSON Lines tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_json_lines_parsing() {
+    let ts = make_ts_template(1, "json_ts", "%Y-%m-%d %H:%M:%S", None, None);
+    let tmpl = SourceTemplate {
+        id: 1,
+        name: "json".into(),
+        timestamp_template_id: 1,
+        line_delimiter: "\n".into(),
+        content_regex: None,
+        continuation_regex: None,
+        json_timestamp_field: Some("timestamp".into()),
+    };
+    let src = make_source(1, "json_app", &fixture_path("json", "app.log"), 1);
+
+    let iter = LogLineIterator::new(&src, &tmpl, &ts).unwrap();
+    let lines: Vec<_> = iter.map(|r| r.expect("line should parse")).collect();
+
+    assert_eq!(lines.len(), 5);
+    assert_eq!(
+        lines[0].timestamp,
+        chrono::NaiveDateTime::parse_from_str("2024-01-15 10:00:01", "%Y-%m-%d %H:%M:%S").unwrap()
+    );
+    assert_eq!(
+        lines[4].timestamp,
+        chrono::NaiveDateTime::parse_from_str("2024-01-15 10:00:05", "%Y-%m-%d %H:%M:%S").unwrap()
+    );
+    // Content should be the raw JSON string
+    assert!(lines[0].content.starts_with('{'));
+    assert!(lines[0].content.contains("Server started"));
+}
+
+#[test]
+fn test_json_cross_source() {
+    let ts = make_ts_template(1, "json_ts", "%Y-%m-%d %H:%M:%S", None, None);
+    let tmpl_app = SourceTemplate {
+        id: 1,
+        name: "json_app".into(),
+        timestamp_template_id: 1,
+        line_delimiter: "\n".into(),
+        content_regex: None,
+        continuation_regex: None,
+        json_timestamp_field: Some("timestamp".into()),
+    };
+    let tmpl_metrics = SourceTemplate {
+        id: 2,
+        name: "json_metrics".into(),
+        timestamp_template_id: 1,
+        line_delimiter: "\n".into(),
+        content_regex: None,
+        continuation_regex: None,
+        json_timestamp_field: Some("ts".into()),
+    };
+
+    let src_app = make_source(1, "app", &fixture_path("json", "app.log"), 1);
+    let src_metrics = make_source(2, "metrics", &fixture_path("json", "metrics.log"), 2);
+
+    // Pattern: app has ERROR level AND metrics has high CPU (> 90)
+    let pattern = Pattern {
+        id: 1,
+        name: "error_and_high_cpu".into(),
+        predicates: vec![
+            PatternPredicate {
+                source_name: "app".into(),
+                state_key: "level".into(),
+                operator: Operator::Eq,
+                operand: Operand::Literal(StateValue::String("ERROR".into())),
+            },
+            PatternPredicate {
+                source_name: "metrics".into(),
+                state_key: "value".into(),
+                operator: Operator::Gt,
+                operand: Operand::Literal(StateValue::Float(90.0)),
+            },
+        ],
+    };
+
+    let result = analyze(
+        &[src_app, src_metrics],
+        &[tmpl_app, tmpl_metrics],
+        &[ts],
+        &[],
+        &[],
+        &[pattern],
+    )
+    .unwrap();
+
+    // Both sources should produce state changes from JSON auto-extraction
+    let app_changes: Vec<_> = result
+        .state_changes
+        .iter()
+        .filter(|sc| sc.source_id == 1)
+        .collect();
+    let metrics_changes: Vec<_> = result
+        .state_changes
+        .iter()
+        .filter(|sc| sc.source_id == 2)
+        .collect();
+    assert!(
+        !app_changes.is_empty(),
+        "expected state changes from app source"
+    );
+    assert!(
+        !metrics_changes.is_empty(),
+        "expected state changes from metrics source"
+    );
+
+    // Pattern should match: app has ERROR (line 3), metrics has cpu_usage 92.1 > 90 (line 3)
+    assert!(
+        !result.pattern_matches.is_empty(),
+        "expected pattern match (ERROR + high CPU)"
     );
 }
 
