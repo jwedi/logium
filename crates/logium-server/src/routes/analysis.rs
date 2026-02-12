@@ -1,13 +1,34 @@
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
 use super::{ApiError, ApiResult};
 use crate::AppState;
 use crate::db::DbError;
+
+#[derive(Deserialize, Default)]
+struct TimeRangeQuery {
+    start: Option<String>,
+    end: Option<String>,
+}
+
+impl TimeRangeQuery {
+    fn to_time_range(&self) -> Result<logium_core::engine::TimeRange, String> {
+        let parse = |s: &str| -> Result<NaiveDateTime, String> {
+            NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+                .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S"))
+                .map_err(|e| format!("invalid datetime '{}': {}", s, e))
+        };
+        Ok(logium_core::engine::TimeRange {
+            start: self.start.as_deref().map(parse).transpose()?,
+            end: self.end.as_deref().map(parse).transpose()?,
+        })
+    }
+}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -26,7 +47,12 @@ pub fn router() -> Router<AppState> {
 async fn analyze(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
+    Query(time_query): Query<TimeRangeQuery>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    let time_range = time_query
+        .to_time_range()
+        .map_err(|e| ApiError::from(DbError::InvalidData(e)))?;
+
     let data = state.db.load_project_data(project_id).await?;
 
     let result = tokio::task::spawn_blocking(move || {
@@ -37,6 +63,7 @@ async fn analyze(
             &data.rules,
             &data.rulesets,
             &data.patterns,
+            &time_range,
         )
     })
     .await
@@ -49,12 +76,21 @@ async fn analyze(
 async fn analyze_ws(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
+    Query(time_query): Query<TimeRangeQuery>,
     ws: WebSocketUpgrade,
-) -> Response {
-    ws.on_upgrade(move |socket| handle_analysis_ws(socket, state, project_id))
+) -> Result<Response, ApiError> {
+    let time_range = time_query
+        .to_time_range()
+        .map_err(|e| ApiError::from(DbError::InvalidData(e)))?;
+    Ok(ws.on_upgrade(move |socket| handle_analysis_ws(socket, state, project_id, time_range)))
 }
 
-async fn handle_analysis_ws(mut socket: WebSocket, state: AppState, project_id: i64) {
+async fn handle_analysis_ws(
+    mut socket: WebSocket,
+    state: AppState,
+    project_id: i64,
+    time_range: logium_core::engine::TimeRange,
+) {
     let data = match state.db.load_project_data(project_id).await {
         Ok(d) => d,
         Err(e) => {
@@ -86,6 +122,7 @@ async fn handle_analysis_ws(mut socket: WebSocket, state: AppState, project_id: 
             &data.rulesets,
             &data.patterns,
             std_tx,
+            &time_range,
         );
     });
 
@@ -358,5 +395,39 @@ mod tests {
             "%Y-%m-%d %H:%M:%S"
         ));
         assert!(!try_parse_timestamp("not a timestamp", "%Y-%m-%d %H:%M:%S"));
+    }
+
+    #[test]
+    fn test_time_range_query_parsing() {
+        let q = TimeRangeQuery {
+            start: Some("2024-01-01T10:00:00".into()),
+            end: Some("2024-01-01 12:00:00".into()),
+        };
+        let tr = q.to_time_range().unwrap();
+        assert_eq!(
+            tr.start.unwrap(),
+            NaiveDateTime::parse_from_str("2024-01-01 10:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+        assert_eq!(
+            tr.end.unwrap(),
+            NaiveDateTime::parse_from_str("2024-01-01 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_time_range_query_invalid() {
+        let q = TimeRangeQuery {
+            start: Some("not-a-date".into()),
+            end: None,
+        };
+        assert!(q.to_time_range().is_err());
+    }
+
+    #[test]
+    fn test_time_range_query_empty() {
+        let q = TimeRangeQuery::default();
+        let tr = q.to_time_range().unwrap();
+        assert!(tr.start.is_none());
+        assert!(tr.end.is_none());
     }
 }

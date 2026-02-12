@@ -111,13 +111,9 @@ A filter bar in LogViewer that hides non-matching lines without creating a persi
 
 ## 13. Time-Range Filtering
 
-A time picker that constrains both the analysis engine and the LogViewer to a start/end timestamp window. When debugging, you usually know approximately when the issue occurred — currently you must process the entire file.
+**Status:** Done
 
-- Time picker UI (manual entry or click-to-select from timeline)
-- Pass time bounds to `analyze_streaming()` on the backend to skip lines outside the window
-- LogViewer also respects the time range when browsing raw content
-
-**Inspiration:** Kibana's time picker, Datadog's time selector, Grafana's dashboard time range.
+Optional `TimeRange { start, end }` struct in `logium-core::engine` filters lines in both `analyze()` and `analyze_streaming()` — lines before `start` are skipped, lines after `end` break early (leveraging chronological K-way merge order). Server routes accept `?start=...&end=...` query parameters on both POST and WebSocket analysis endpoints. Frontend `AnalysisView` adds `datetime-local` pickers with a Clear button. LogViewer is not filtered (shows full file, only engine-matched lines are highlighted). 4 engine unit tests + 3 server parsing tests added.
 
 ---
 

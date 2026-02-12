@@ -10,6 +10,19 @@ use serde::{Deserialize, Serialize};
 use crate::model::*;
 
 // ---------------------------------------------------------------------------
+// Time-range filtering
+// ---------------------------------------------------------------------------
+
+/// Optional start/end bounds for time-range filtering.
+/// Lines before `start` are skipped; lines after `end` cause an early break
+/// (the merged stream is chronological).
+#[derive(Debug, Clone, Default)]
+pub struct TimeRange {
+    pub start: Option<NaiveDateTime>,
+    pub end: Option<NaiveDateTime>,
+}
+
+// ---------------------------------------------------------------------------
 // Error types
 // ---------------------------------------------------------------------------
 
@@ -769,6 +782,7 @@ pub fn analyze(
     rules: &[LogRule],
     rulesets: &[Ruleset],
     patterns: &[Pattern],
+    time_range: &TimeRange,
 ) -> Result<AnalysisResult, AnalysisError> {
     // Build template lookup
     let template_map: HashMap<u64, &SourceTemplate> = templates.iter().map(|t| (t.id, t)).collect();
@@ -831,6 +845,19 @@ pub fn analyze(
 
     for result in stream {
         let line = result?;
+
+        // Time-range filtering (stream is chronological)
+        if let Some(start) = time_range.start
+            && line.timestamp < start
+        {
+            continue;
+        }
+        if let Some(end) = time_range.end
+            && line.timestamp > end
+        {
+            break;
+        }
+
         let tmpl_id = source_template.get(&line.source_id).copied().unwrap_or(0);
 
         // Auto-extract JSON fields as state before rule processing
@@ -928,6 +955,7 @@ pub fn analyze(
 ///
 /// Mirrors `analyze()` but sends each match as it occurs rather than collecting.
 /// Returns early if the receiver is dropped (client disconnected).
+#[allow(clippy::too_many_arguments)]
 pub fn analyze_streaming(
     sources: &[Source],
     templates: &[SourceTemplate],
@@ -936,6 +964,7 @@ pub fn analyze_streaming(
     rulesets: &[Ruleset],
     patterns: &[Pattern],
     tx: std::sync::mpsc::Sender<AnalysisEvent>,
+    time_range: &TimeRange,
 ) -> Result<(), AnalysisError> {
     // Build template lookup
     let template_map: HashMap<u64, &SourceTemplate> = templates.iter().map(|t| (t.id, t)).collect();
@@ -997,6 +1026,18 @@ pub fn analyze_streaming(
                 return Err(e);
             }
         };
+
+        // Time-range filtering (stream is chronological)
+        if let Some(start) = time_range.start
+            && line.timestamp < start
+        {
+            continue;
+        }
+        if let Some(end) = time_range.end
+            && line.timestamp > end
+        {
+            break;
+        }
 
         lines_processed += 1;
 
@@ -1969,6 +2010,7 @@ mod tests {
             &rules,
             &rulesets,
             &[pattern],
+            &TimeRange::default(),
         )
         .unwrap();
 
@@ -2146,6 +2188,7 @@ mod tests {
             &rulesets,
             std::slice::from_ref(&pattern),
             tx,
+            &TimeRange::default(),
         )
         .unwrap();
 
@@ -2157,6 +2200,7 @@ mod tests {
             &rules,
             &rulesets,
             std::slice::from_ref(&pattern),
+            &TimeRange::default(),
         )
         .unwrap();
 
@@ -2406,6 +2450,7 @@ mod tests {
             &rulesets,
             &[],
             tx,
+            &TimeRange::default(),
         )
         .unwrap();
 
@@ -2633,7 +2678,16 @@ mod tests {
             file_path: f.path().to_str().unwrap().into(),
         };
 
-        let result = analyze(&[source], &[template], &[ts_template], &[], &[], &[]).unwrap();
+        let result = analyze(
+            &[source],
+            &[template],
+            &[ts_template],
+            &[],
+            &[],
+            &[],
+            &TimeRange::default(),
+        )
+        .unwrap();
 
         // Should have state changes for all JSON fields across all lines
         assert!(
@@ -2673,5 +2727,165 @@ mod tests {
                 "JSON auto-extracted state changes should have rule_id=0"
             );
         }
+    }
+
+    // -------------------------------------------------------------------
+    // Time-range filtering tests
+    // -------------------------------------------------------------------
+
+    fn make_time_range_test_data() -> (
+        NamedTempFile,
+        Source,
+        SourceTemplate,
+        TimestampTemplate,
+        Vec<LogRule>,
+        Vec<Ruleset>,
+    ) {
+        let mut f = NamedTempFile::new().unwrap();
+        // Lines at 00:01 through 00:05
+        for min in 1..=5 {
+            writeln!(f, "2024-01-01 00:{min:02}:00 event_{min}").unwrap();
+        }
+        f.flush().unwrap();
+
+        let ts_template = TimestampTemplate {
+            id: 1,
+            name: "ts".into(),
+            format: "%Y-%m-%d %H:%M:%S".into(),
+            extraction_regex: None,
+            default_year: None,
+        };
+        let template = SourceTemplate {
+            id: 1,
+            name: "tmpl".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
+            json_timestamp_field: None,
+        };
+        let source = Source {
+            id: 1,
+            name: "src".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+        let rules = vec![LogRule {
+            id: 1,
+            name: "match_event".into(),
+            match_mode: MatchMode::Any,
+            match_rules: vec![MatchRule {
+                id: 1,
+                pattern: r"event_\d+".into(),
+            }],
+            extraction_rules: vec![],
+        }];
+        let rulesets = vec![Ruleset {
+            id: 1,
+            name: "rs".into(),
+            template_id: 1,
+            rule_ids: vec![1],
+        }];
+        (f, source, template, ts_template, rules, rulesets)
+    }
+
+    #[test]
+    fn test_time_range_filtering() {
+        let (_f, source, template, ts_template, rules, rulesets) = make_time_range_test_data();
+        let time_range = TimeRange {
+            start: Some(
+                NaiveDateTime::parse_from_str("2024-01-01 00:02:00", "%Y-%m-%d %H:%M:%S").unwrap(),
+            ),
+            end: Some(
+                NaiveDateTime::parse_from_str("2024-01-01 00:04:00", "%Y-%m-%d %H:%M:%S").unwrap(),
+            ),
+        };
+        let result = analyze(
+            &[source],
+            &[template],
+            &[ts_template],
+            &rules,
+            &rulesets,
+            &[],
+            &time_range,
+        )
+        .unwrap();
+        assert_eq!(
+            result.rule_matches.len(),
+            3,
+            "expected matches for events 2, 3, 4"
+        );
+    }
+
+    #[test]
+    fn test_time_range_start_only() {
+        let (_f, source, template, ts_template, rules, rulesets) = make_time_range_test_data();
+        let time_range = TimeRange {
+            start: Some(
+                NaiveDateTime::parse_from_str("2024-01-01 00:04:00", "%Y-%m-%d %H:%M:%S").unwrap(),
+            ),
+            end: None,
+        };
+        let result = analyze(
+            &[source],
+            &[template],
+            &[ts_template],
+            &rules,
+            &rulesets,
+            &[],
+            &time_range,
+        )
+        .unwrap();
+        assert_eq!(
+            result.rule_matches.len(),
+            2,
+            "expected matches for events 4, 5"
+        );
+    }
+
+    #[test]
+    fn test_time_range_end_only() {
+        let (_f, source, template, ts_template, rules, rulesets) = make_time_range_test_data();
+        let time_range = TimeRange {
+            start: None,
+            end: Some(
+                NaiveDateTime::parse_from_str("2024-01-01 00:02:00", "%Y-%m-%d %H:%M:%S").unwrap(),
+            ),
+        };
+        let result = analyze(
+            &[source],
+            &[template],
+            &[ts_template],
+            &rules,
+            &rulesets,
+            &[],
+            &time_range,
+        )
+        .unwrap();
+        assert_eq!(
+            result.rule_matches.len(),
+            2,
+            "expected matches for events 1, 2"
+        );
+    }
+
+    #[test]
+    fn test_time_range_default() {
+        let (_f, source, template, ts_template, rules, rulesets) = make_time_range_test_data();
+        let result = analyze(
+            &[source],
+            &[template],
+            &[ts_template],
+            &rules,
+            &rulesets,
+            &[],
+            &TimeRange::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            result.rule_matches.len(),
+            5,
+            "default TimeRange should return all matches"
+        );
     }
 }

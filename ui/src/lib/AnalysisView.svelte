@@ -12,6 +12,7 @@
     type LogRule,
     type Pattern,
     type StateValue,
+    type TimeRange,
   } from './api';
   import LogViewer from './LogViewer.svelte';
   import TimelineView from './TimelineView.svelte';
@@ -33,6 +34,9 @@
   let autoTriggered = $state(false);
   let currentHandle: { close: () => void } | null = $state(null);
   let lastRunStamp = $state(0);
+
+  let timeStart: string = $state('');
+  let timeEnd: string = $state('');
 
   let navigateTarget: string | null = $state(null);
 
@@ -119,59 +123,68 @@
       }
     }, 100);
 
-    const handle = analysisApi.runStreaming(projectId, {
-      onRuleMatch: (rm) => {
-        ruleMatchBuffer.push(rm);
+    const timeRange: TimeRange = {
+      start: timeStart || null,
+      end: timeEnd || null,
+    };
+
+    const handle = analysisApi.runStreaming(
+      projectId,
+      {
+        onRuleMatch: (rm) => {
+          ruleMatchBuffer.push(rm);
+        },
+        onPatternMatch: (pm) => {
+          patternMatchBuffer.push(pm);
+        },
+        onStateChange: (sc) => {
+          stateChangeBuffer.push(sc);
+        },
+        onProgress: (lines) => {
+          linesProcessed = lines;
+        },
+        onComplete: () => {
+          clearInterval(flushInterval);
+          // Final flush
+          if (
+            ruleMatchBuffer.length > 0 ||
+            patternMatchBuffer.length > 0 ||
+            stateChangeBuffer.length > 0
+          ) {
+            result = {
+              rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
+              pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
+              state_changes: [...result!.state_changes, ...stateChangeBuffer],
+            };
+            ruleMatchBuffer = [];
+            patternMatchBuffer = [];
+            stateChangeBuffer = [];
+          }
+          setCachedAnalysis(projectId, result!);
+          running = false;
+          currentHandle = null;
+        },
+        onError: (message) => {
+          clearInterval(flushInterval);
+          // Final flush
+          if (
+            ruleMatchBuffer.length > 0 ||
+            patternMatchBuffer.length > 0 ||
+            stateChangeBuffer.length > 0
+          ) {
+            result = {
+              rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
+              pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
+              state_changes: [...result!.state_changes, ...stateChangeBuffer],
+            };
+          }
+          error = message;
+          running = false;
+          currentHandle = null;
+        },
       },
-      onPatternMatch: (pm) => {
-        patternMatchBuffer.push(pm);
-      },
-      onStateChange: (sc) => {
-        stateChangeBuffer.push(sc);
-      },
-      onProgress: (lines) => {
-        linesProcessed = lines;
-      },
-      onComplete: () => {
-        clearInterval(flushInterval);
-        // Final flush
-        if (
-          ruleMatchBuffer.length > 0 ||
-          patternMatchBuffer.length > 0 ||
-          stateChangeBuffer.length > 0
-        ) {
-          result = {
-            rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
-            pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
-            state_changes: [...result!.state_changes, ...stateChangeBuffer],
-          };
-          ruleMatchBuffer = [];
-          patternMatchBuffer = [];
-          stateChangeBuffer = [];
-        }
-        setCachedAnalysis(projectId, result!);
-        running = false;
-        currentHandle = null;
-      },
-      onError: (message) => {
-        clearInterval(flushInterval);
-        // Final flush
-        if (
-          ruleMatchBuffer.length > 0 ||
-          patternMatchBuffer.length > 0 ||
-          stateChangeBuffer.length > 0
-        ) {
-          result = {
-            rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
-            pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
-            state_changes: [...result!.state_changes, ...stateChangeBuffer],
-          };
-        }
-        error = message;
-        running = false;
-        currentHandle = null;
-      },
-    });
+      timeRange,
+    );
 
     currentHandle = handle;
     return handle;
@@ -206,6 +219,19 @@
           : 'Running...'
       : 'Run Analysis'}
   </button>
+</div>
+
+<div class="time-range-row">
+  <label>From <input type="datetime-local" bind:value={timeStart} step="1" /></label>
+  <label>To <input type="datetime-local" bind:value={timeEnd} step="1" /></label>
+  {#if timeStart || timeEnd}
+    <button
+      onclick={() => {
+        timeStart = '';
+        timeEnd = '';
+      }}>Clear</button
+    >
+  {/if}
 </div>
 
 {#if error}
@@ -357,6 +383,21 @@
 
   .header-row h2 {
     margin: 0;
+  }
+
+  .time-range-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+
+  .time-range-row input {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 4px 8px;
+    margin-left: 4px;
   }
 
   .error-banner {
