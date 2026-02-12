@@ -188,7 +188,7 @@ A `SourceTemplate` references a `TimestampTemplate` via `timestamp_template_id`,
 ### Streaming Architecture
 
 The engine never loads entire log files into memory. It uses:
-- **`LogLineIterator`**: Reads lines lazily via `BufReader`, parsing timestamps on the fly using the associated `TimestampTemplate`. Supports multi-line log entries via `continuation_regex` — lines matching the regex are merged into the preceding logical entry
+- **`LogLineIterator`**: Reads lines lazily via `BufReader`, parsing timestamps on the fly using the associated `TimestampTemplate`. Supports multi-line log entries via `continuation_regex` — lines matching the regex are merged into the preceding logical entry. Supports JSON Lines via `json_timestamp_field` — when set, each line is parsed as JSON and the timestamp is extracted from the named field
 - **`MergedLogStream`**: K-way merge via `BinaryHeap` (min-heap) — merges K source iterators in chronological order in O(N log K) time
 - **`RegexSet`**: All match rules for a rule are compiled into a single regex automaton. One pass over the text tests all patterns simultaneously, instead of running regexes sequentially
 
@@ -477,7 +477,7 @@ Project
   ├── TimestampTemplate[]        "how to parse timestamps"
   │     └── (format, extraction_regex?, default_year?)
   ├── SourceTemplate[]           "how to read this type of log"
-  │     └── (timestamp_template_id, line_delimiter, content_regex, continuation_regex?)
+  │     └── (timestamp_template_id, line_delimiter, content_regex, continuation_regex?, json_timestamp_field?)
   ├── Source[]                   "an actual log file"
   │     └── (name, template_id, file_path)
   ├── LogRule[]                  "what to look for, what state to produce"

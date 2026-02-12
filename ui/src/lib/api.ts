@@ -21,6 +21,7 @@ export interface SourceTemplate {
   line_delimiter: string;
   content_regex: string | null;
   continuation_regex: string | null;
+  json_timestamp_field: string | null;
 }
 
 export interface Source {

@@ -81,7 +81,8 @@ impl Database {
                 timestamp_template_id INTEGER NOT NULL REFERENCES timestamp_templates(id),
                 line_delimiter TEXT NOT NULL,
                 content_regex TEXT,
-                continuation_regex TEXT
+                continuation_regex TEXT,
+                json_timestamp_field TEXT
             )",
         )
         .execute(&self.pool)
@@ -397,7 +398,7 @@ impl Database {
 
     pub async fn list_templates(&self, project_id: i64) -> Result<Vec<SourceTemplate>, DbError> {
         let rows = sqlx::query(
-            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex
+            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex, json_timestamp_field
              FROM source_templates WHERE project_id = ? ORDER BY id",
         )
         .bind(project_id)
@@ -409,7 +410,7 @@ impl Database {
 
     pub async fn get_template(&self, project_id: i64, id: i64) -> Result<SourceTemplate, DbError> {
         let row = sqlx::query(
-            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex
+            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex, json_timestamp_field
              FROM source_templates WHERE id = ? AND project_id = ?",
         )
         .bind(id)
@@ -430,10 +431,11 @@ impl Database {
         line_delimiter: &str,
         content_regex: Option<&str>,
         continuation_regex: Option<&str>,
+        json_timestamp_field: Option<&str>,
     ) -> Result<SourceTemplate, DbError> {
         let id = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO source_templates (project_id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex)
-             VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO source_templates (project_id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex, json_timestamp_field)
+             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(project_id)
         .bind(name)
@@ -441,6 +443,7 @@ impl Database {
         .bind(line_delimiter)
         .bind(content_regex)
         .bind(continuation_regex)
+        .bind(json_timestamp_field)
         .fetch_one(&self.pool)
         .await?;
 
@@ -451,6 +454,7 @@ impl Database {
             line_delimiter: line_delimiter.to_string(),
             content_regex: content_regex.map(|s| s.to_string()),
             continuation_regex: continuation_regex.map(|s| s.to_string()),
+            json_timestamp_field: json_timestamp_field.map(|s| s.to_string()),
         })
     }
 
@@ -464,9 +468,10 @@ impl Database {
         line_delimiter: &str,
         content_regex: Option<&str>,
         continuation_regex: Option<&str>,
+        json_timestamp_field: Option<&str>,
     ) -> Result<SourceTemplate, DbError> {
         let result = sqlx::query(
-            "UPDATE source_templates SET name = ?, timestamp_template_id = ?, line_delimiter = ?, content_regex = ?, continuation_regex = ?
+            "UPDATE source_templates SET name = ?, timestamp_template_id = ?, line_delimiter = ?, content_regex = ?, continuation_regex = ?, json_timestamp_field = ?
              WHERE id = ? AND project_id = ?",
         )
         .bind(name)
@@ -474,6 +479,7 @@ impl Database {
         .bind(line_delimiter)
         .bind(content_regex)
         .bind(continuation_regex)
+        .bind(json_timestamp_field)
         .bind(id)
         .bind(project_id)
         .execute(&self.pool)
@@ -1168,6 +1174,7 @@ impl Database {
                     &st.line_delimiter,
                     st.content_regex.as_deref(),
                     st.continuation_regex.as_deref(),
+                    st.json_timestamp_field.as_deref(),
                 )
                 .await?;
             st_id_map.insert(st.id, new_st.id);
@@ -1342,6 +1349,7 @@ fn row_to_template(row: &sqlx::sqlite::SqliteRow) -> SourceTemplate {
         line_delimiter: row.get("line_delimiter"),
         content_regex: row.get("content_regex"),
         continuation_regex: row.get("continuation_regex"),
+        json_timestamp_field: row.get("json_timestamp_field"),
     }
 }
 
@@ -1597,6 +1605,7 @@ mod tests {
                 "\n",
                 Some(r"^\d{4}.+$"),
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1619,6 +1628,7 @@ mod tests {
                 "\r\n",
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -1638,7 +1648,7 @@ mod tests {
             .await
             .unwrap();
         let t = db
-            .create_template(p.id, "tmpl", tt.id as i64, "\n", None, None)
+            .create_template(p.id, "tmpl", tt.id as i64, "\n", None, None, None)
             .await
             .unwrap();
 
@@ -1720,7 +1730,7 @@ mod tests {
             .await
             .unwrap();
         let t = db
-            .create_template(p.id, "tmpl", tt.id as i64, "\n", None, None)
+            .create_template(p.id, "tmpl", tt.id as i64, "\n", None, None, None)
             .await
             .unwrap();
         let r1 = db
@@ -1844,7 +1854,7 @@ mod tests {
             .create_timestamp_template(p.id, "ts", "%Y", None, None)
             .await
             .unwrap();
-        db.create_template(p.id, "tmpl", tt.id as i64, "\n", None, None)
+        db.create_template(p.id, "tmpl", tt.id as i64, "\n", None, None, None)
             .await
             .unwrap();
         db.create_rule(p.id, "r1", &MatchMode::Any, &[], &[])
@@ -1886,6 +1896,7 @@ mod tests {
                 tt.id as i64,
                 "\n",
                 Some(r"^\d+"),
+                None,
                 None,
             )
             .await
