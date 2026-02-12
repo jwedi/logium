@@ -331,6 +331,185 @@ describe('AnalysisView', () => {
     expect(stateBtn.classList.contains('active')).toBe(true);
   });
 
+  // --- Facet Filtering ---
+
+  it('renders rule and source facet chips after analysis', async () => {
+    renderAnalysis();
+    await tick();
+
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await waitFor(() => {
+      expect(screen.getByText('Results')).toBeInTheDocument();
+    });
+
+    // Rule chip and badge both show "Error Rule"
+    expect(screen.getAllByText('Error Rule').length).toBeGreaterThanOrEqual(1);
+    // Source chip: "app.log" — may appear multiple times (source button + facet chip)
+    expect(screen.getAllByText('app.log').length).toBeGreaterThanOrEqual(1);
+    // Facet chips should have count badges
+    const chipCounts = screen.getAllByText('1', { selector: '.chip-count' });
+    expect(chipCounts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('clicking a rule facet chip filters results', async () => {
+    // Set up 2 rules with matches
+    const multiRunStreaming = (_pid: number, callbacks: any) => {
+      callbacks.onRuleMatch({
+        rule_id: 1,
+        source_id: 1,
+        log_line: {
+          timestamp: '2024-01-15T10:30:00.000',
+          source_id: 1,
+          raw: 'ERROR test',
+          content: 'test',
+        },
+        extracted_state: {},
+      });
+      callbacks.onRuleMatch({
+        rule_id: 2,
+        source_id: 1,
+        log_line: {
+          timestamp: '2024-01-15T10:30:01.000',
+          source_id: 1,
+          raw: 'WARN test',
+          content: 'warn test',
+        },
+        extracted_state: {},
+      });
+      setTimeout(() => {
+        callbacks.onComplete({
+          total_lines: 10,
+          total_rule_matches: 2,
+          total_pattern_matches: 0,
+          total_state_changes: 0,
+        });
+      }, 0);
+      return { close: vi.fn() };
+    };
+
+    runStreamingImpl = multiRunStreaming;
+    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) =>
+      runStreamingImpl(args[0], args[1]),
+    );
+
+    // Mock rules to include a second rule
+    vi.mocked(rulesApi.list).mockResolvedValue([
+      { id: 1, name: 'Error Rule', match_mode: 'Any', match_rules: [], extraction_rules: [] },
+      { id: 2, name: 'Warn Rule', match_mode: 'Any', match_rules: [], extraction_rules: [] },
+    ]);
+
+    renderAnalysis();
+    await tick();
+
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await tick();
+    await vi.waitFor(() => {
+      expect(screen.getAllByText('Error Rule').length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Click the "Error Rule" facet chip (the one inside .facet-chips)
+    const errorChip = screen
+      .getAllByText('Error Rule')
+      .find((el) => el.closest('.facet-chip'))!
+      .closest('button')!;
+    await fireEvent.click(errorChip);
+    await tick();
+
+    // Should show filter status
+    expect(screen.getByText(/Showing 1 of 2 matches/)).toBeInTheDocument();
+  });
+
+  it('clicking the same chip again clears the filter', async () => {
+    renderAnalysis();
+    await tick();
+
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await tick();
+    await vi.waitFor(() => {
+      expect(screen.getAllByText('Error Rule').length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Click to activate — find the facet chip specifically
+    const chip = screen
+      .getAllByText('Error Rule')
+      .find((el) => el.closest('.facet-chip'))!
+      .closest('button')!;
+    await fireEvent.click(chip);
+    await tick();
+
+    expect(screen.getByText(/Showing/)).toBeInTheDocument();
+
+    // Click again to deactivate
+    await fireEvent.click(chip);
+    await tick();
+
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+  });
+
+  it('Clear filters button resets all filters', async () => {
+    renderAnalysis();
+    await tick();
+
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await tick();
+    await vi.waitFor(() => {
+      expect(screen.getAllByText('Error Rule').length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Activate a rule filter
+    const chip = screen
+      .getAllByText('Error Rule')
+      .find((el) => el.closest('.facet-chip'))!
+      .closest('button')!;
+    await fireEvent.click(chip);
+    await tick();
+
+    expect(screen.getByText(/Showing/)).toBeInTheDocument();
+
+    // Click "Clear filters"
+    await fireEvent.click(screen.getByText('Clear filters'));
+    await tick();
+
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+  });
+
+  it('filters reset on new analysis run', async () => {
+    renderAnalysis();
+    await tick();
+
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await tick();
+    await vi.waitFor(() => {
+      expect(screen.getAllByText('Error Rule').length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Activate filter
+    const chip = screen
+      .getAllByText('Error Rule')
+      .find((el) => el.closest('.facet-chip'))!
+      .closest('button')!;
+    await fireEvent.click(chip);
+    await tick();
+
+    expect(screen.getByText(/Showing/)).toBeInTheDocument();
+
+    // Run analysis again
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await tick();
+    await vi.waitFor(() => {
+      expect(screen.getByText('Results')).toBeInTheDocument();
+    });
+
+    // Filter should be cleared
+    expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+  });
+
   // --- Snapshot ---
 
   it('matches snapshot with results in table mode', async () => {

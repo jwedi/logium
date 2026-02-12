@@ -40,10 +40,49 @@
 
   let navigateTarget: string | null = $state(null);
 
+  let filterRuleId: number | null = $state(null);
+  let filterSourceId: number | null = $state(null);
+
   let selectedSource = $derived(sourceList.find((s) => s.id === selectedSourceId) ?? null);
 
+  const emptyResult: AnalysisResult = { rule_matches: [], pattern_matches: [], state_changes: [] };
+
+  let filteredResult: AnalysisResult = $derived.by(() => {
+    if (!result) return emptyResult;
+    let rm = result.rule_matches;
+    let sc = result.state_changes;
+    if (filterRuleId !== null) {
+      rm = rm.filter((m) => m.rule_id === filterRuleId);
+      sc = sc.filter((c) => c.rule_id === filterRuleId);
+    }
+    if (filterSourceId !== null) {
+      rm = rm.filter((m) => m.source_id === filterSourceId);
+      sc = sc.filter((c) => c.source_id === filterSourceId);
+    }
+    return { rule_matches: rm, pattern_matches: result.pattern_matches, state_changes: sc };
+  });
+
+  let ruleBreakdown = $derived.by(() => {
+    if (!result) return [];
+    const counts = new Map<number, number>();
+    for (const rm of result.rule_matches) counts.set(rm.rule_id, (counts.get(rm.rule_id) ?? 0) + 1);
+    return Array.from(counts.entries())
+      .map(([id, count]) => ({ id, name: getRuleName(id), count }))
+      .sort((a, b) => b.count - a.count);
+  });
+
+  let sourceBreakdown = $derived.by(() => {
+    if (!result) return [];
+    const counts = new Map<number, number>();
+    for (const rm of result.rule_matches)
+      counts.set(rm.source_id, (counts.get(rm.source_id) ?? 0) + 1);
+    return Array.from(counts.entries())
+      .map(([id, count]) => ({ id, name: getSourceName(id), count }))
+      .sort((a, b) => b.count - a.count);
+  });
+
   let sourceRuleMatches = $derived(
-    result?.rule_matches.filter((m) => m.source_id === selectedSourceId) ?? [],
+    filteredResult?.rule_matches.filter((m) => m.source_id === selectedSourceId) ?? [],
   );
 
   function getRuleName(id: number): string {
@@ -96,6 +135,8 @@
     error = null;
     linesProcessed = 0;
     lastRunStamp = getInvalidationStamp();
+    filterRuleId = null;
+    filterSourceId = null;
     result = { rule_matches: [], pattern_matches: [], state_changes: [] };
 
     // Re-fetch rules/patterns/sources for auto-reruns
@@ -255,6 +296,55 @@
         <span class="stat-label">State Changes</span>
       </div>
     </div>
+    {#if result.rule_matches.length > 0}
+      <div class="filter-facets">
+        <div class="facet-group">
+          <span class="facet-label">Rules</span>
+          <div class="facet-chips">
+            {#each ruleBreakdown as rb}
+              <button
+                class="facet-chip"
+                class:active={filterRuleId === rb.id}
+                onclick={() => {
+                  filterRuleId = filterRuleId === rb.id ? null : rb.id;
+                }}
+              >
+                {rb.name} <span class="chip-count">{rb.count}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+        <div class="facet-group">
+          <span class="facet-label">Sources</span>
+          <div class="facet-chips">
+            {#each sourceBreakdown as sb}
+              <button
+                class="facet-chip"
+                class:active={filterSourceId === sb.id}
+                onclick={() => {
+                  filterSourceId = filterSourceId === sb.id ? null : sb.id;
+                }}
+              >
+                {sb.name} <span class="chip-count">{sb.count}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+        {#if filterRuleId !== null || filterSourceId !== null}
+          <div class="filter-status">
+            <span
+              >Showing {filteredResult.rule_matches.length} of {result.rule_matches.length} matches</span
+            >
+            <button
+              onclick={() => {
+                filterRuleId = null;
+                filterSourceId = null;
+              }}>Clear filters</button
+            >
+          </div>
+        {/if}
+      </div>
+    {/if}
   </div>
 
   <div class="view-tabs">
@@ -295,9 +385,9 @@
               }}
             >
               {src.name}
-              {#if result.rule_matches.filter((m) => m.source_id === src.id).length > 0}
+              {#if filteredResult.rule_matches.filter((m) => m.source_id === src.id).length > 0}
                 <span class="match-count"
-                  >{result.rule_matches.filter((m) => m.source_id === src.id).length}</span
+                  >{filteredResult.rule_matches.filter((m) => m.source_id === src.id).length}</span
                 >
               {/if}
             </button>
@@ -312,16 +402,16 @@
           source={selectedSource}
           {projectId}
           ruleMatches={sourceRuleMatches}
-          patternMatches={result.pattern_matches}
+          patternMatches={filteredResult.pattern_matches}
           {navigateTarget}
         />
       </div>
     {/if}
 
-    {#if result.pattern_matches.length > 0}
+    {#if filteredResult.pattern_matches.length > 0}
       <div class="pattern-matches-section">
         <h3>Pattern Matches</h3>
-        {#each result.pattern_matches as pm}
+        {#each filteredResult.pattern_matches as pm}
           <div class="pattern-match card">
             <div class="pm-header">
               <span class="pm-name">{getPatternName(pm.pattern_id)}</span>
@@ -345,27 +435,35 @@
       </div>
     {/if}
 
-    {#if result.rule_matches.length > 0 && !selectedSource}
+    {#if filteredResult.rule_matches.length > 0 && !selectedSource}
       <div class="rule-matches-section">
         <h3>Rule Matches</h3>
         <div class="match-table">
-          {#each result.rule_matches.slice(0, 100) as rm}
+          {#each filteredResult.rule_matches.slice(0, 100) as rm}
             <div class="match-row">
               <span class="badge">{getRuleName(rm.rule_id)}</span>
               <span class="badge">{getSourceName(rm.source_id)}</span>
               <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
             </div>
           {/each}
-          {#if result.rule_matches.length > 100}
-            <div class="text-muted">...and {result.rule_matches.length - 100} more matches</div>
+          {#if filteredResult.rule_matches.length > 100}
+            <div class="text-muted">
+              ...and {filteredResult.rule_matches.length - 100} more matches
+            </div>
           {/if}
         </div>
       </div>
     {/if}
   {:else if viewMode === 'timeline'}
-    <TimelineView {result} {sourceList} {ruleList} {patternList} onNavigate={handleNavigate} />
+    <TimelineView
+      result={filteredResult}
+      {sourceList}
+      {ruleList}
+      {patternList}
+      onNavigate={handleNavigate}
+    />
   {:else if viewMode === 'state'}
-    <StateEvolutionView stateChanges={result.state_changes} {sourceList} {ruleList} />
+    <StateEvolutionView stateChanges={filteredResult.state_changes} {sourceList} {ruleList} />
   {/if}
 {:else if !running}
   <div class="empty">
@@ -573,5 +671,63 @@
     color: var(--text-muted);
     font-size: 12px;
     padding: 8px;
+  }
+
+  .filter-facets {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+
+  .facet-group {
+    margin-bottom: 8px;
+  }
+
+  .facet-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+    display: block;
+  }
+
+  .facet-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .facet-chip {
+    padding: 3px 10px;
+    font-size: 12px;
+    border-radius: 12px;
+  }
+
+  .facet-chip.active {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+
+  .chip-count {
+    font-size: 10px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.15);
+    margin-left: 4px;
+  }
+
+  .facet-chip.active .chip-count {
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .filter-status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
   }
 </style>

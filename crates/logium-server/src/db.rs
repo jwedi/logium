@@ -186,6 +186,36 @@ impl Database {
             .execute(&self.pool)
             .await?;
 
+        // Migrations for columns added after initial schema
+        self.migrate_add_column("source_templates", "continuation_regex", "TEXT")
+            .await?;
+        self.migrate_add_column("source_templates", "json_timestamp_field", "TEXT")
+            .await?;
+
+        Ok(())
+    }
+
+    /// Add a column to an existing table if it doesn't already exist.
+    async fn migrate_add_column(
+        &self,
+        table: &str,
+        column: &str,
+        col_type: &str,
+    ) -> Result<(), DbError> {
+        // PRAGMA table_info returns one row per column; check if ours is present.
+        let rows = sqlx::query(&format!("PRAGMA table_info({table})"))
+            .fetch_all(&self.pool)
+            .await?;
+        let exists = rows
+            .iter()
+            .any(|r| sqlx::Row::get::<String, _>(r, "name") == column);
+        if !exists {
+            sqlx::query(&format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {col_type}"
+            ))
+            .execute(&self.pool)
+            .await?;
+        }
         Ok(())
     }
 
