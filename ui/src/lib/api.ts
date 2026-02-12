@@ -120,6 +120,11 @@ export interface SuggestRuleResponse {
   capture_groups: string[];
 }
 
+export interface TimeRange {
+  start: string | null;
+  end: string | null;
+}
+
 // ---- API Client ----
 
 const BASE = '/api';
@@ -300,12 +305,31 @@ export interface StreamingCallbacks {
   onError: (message: string) => void;
 }
 
+function buildTimeRangeParams(timeRange?: TimeRange): string {
+  if (!timeRange) return '';
+  const params = new URLSearchParams();
+  if (timeRange.start) params.set('start', timeRange.start);
+  if (timeRange.end) params.set('end', timeRange.end);
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
 // Analysis
 export const analysis = {
-  run: (pid: number) => request<AnalysisResult>(`/projects/${pid}/analyze`, { method: 'POST' }),
-  runStreaming: (pid: number, callbacks: StreamingCallbacks): { close: () => void } => {
+  run: (pid: number, timeRange?: TimeRange) =>
+    request<AnalysisResult>(`/projects/${pid}/analyze${buildTimeRangeParams(timeRange)}`, {
+      method: 'POST',
+    }),
+  runStreaming: (
+    pid: number,
+    callbacks: StreamingCallbacks,
+    timeRange?: TimeRange,
+  ): { close: () => void } => {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${proto}//${window.location.host}/api/projects/${pid}/analyze/ws`);
+    const qs = buildTimeRangeParams(timeRange);
+    const ws = new WebSocket(
+      `${proto}//${window.location.host}/api/projects/${pid}/analyze/ws${qs}`,
+    );
 
     ws.onmessage = (ev) => {
       const event: AnalysisEvent = JSON.parse(ev.data);

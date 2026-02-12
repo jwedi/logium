@@ -1,4 +1,4 @@
-use logium_core::engine::{LogLineIterator, analyze};
+use logium_core::engine::{LogLineIterator, TimeRange, analyze};
 use logium_core::model::*;
 
 use std::path::PathBuf;
@@ -215,6 +215,7 @@ fn test_zookeeper_cross_source() {
         &[warn_rule, connection_rule],
         &[ruleset],
         &[pattern],
+        &TimeRange::default(),
     )
     .unwrap();
 
@@ -293,6 +294,7 @@ fn test_nginx_cross_source() {
         &[status_rule],
         &[ruleset],
         &[pattern],
+        &TimeRange::default(),
     )
     .unwrap();
 
@@ -387,6 +389,7 @@ fn test_syslog_cross_source() {
         &[auth_rule, rhost_rule],
         &[ruleset],
         &[pattern],
+        &TimeRange::default(),
     )
     .unwrap();
 
@@ -487,6 +490,7 @@ fn test_timestamp_template_reuse() {
         &[rule],
         &[rs_a, rs_b],
         &[pattern],
+        &TimeRange::default(),
     )
     .unwrap();
 
@@ -560,6 +564,7 @@ fn test_cross_source_state_ref() {
         &[level_rule],
         &[ruleset],
         &[pattern],
+        &TimeRange::default(),
     )
     .unwrap();
 
@@ -735,6 +740,7 @@ fn test_multiline_cross_source() {
         &[oom_rule, warn_rule],
         &[ruleset],
         &[pattern],
+        &TimeRange::default(),
     )
     .unwrap();
 
@@ -847,6 +853,7 @@ fn test_json_cross_source() {
         &[],
         &[],
         &[pattern],
+        &TimeRange::default(),
     )
     .unwrap();
 

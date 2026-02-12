@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use logium_core::engine::analyze;
+use logium_core::engine::{TimeRange, analyze};
 use logium_core::model::*;
 use std::path::PathBuf;
 
@@ -113,6 +113,7 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
                 &[status_rule.clone(), method_rule.clone()],
                 std::slice::from_ref(&ruleset),
                 std::slice::from_ref(&pattern),
+                &TimeRange::default(),
             )
             .unwrap()
         });
@@ -185,6 +186,7 @@ fn bench_nginx_large(c: &mut Criterion) {
                 std::slice::from_ref(&status_rule),
                 std::slice::from_ref(&ruleset),
                 std::slice::from_ref(&pattern),
+                &TimeRange::default(),
             )
             .unwrap()
         });
