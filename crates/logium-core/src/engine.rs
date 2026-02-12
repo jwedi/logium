@@ -747,10 +747,8 @@ fn json_value_to_state_value(v: &serde_json::Value) -> Option<StateValue> {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Some(StateValue::Integer(i))
-            } else if let Some(f) = n.as_f64() {
-                Some(StateValue::Float(f))
             } else {
-                None
+                n.as_f64().map(StateValue::Float)
             }
         }
         serde_json::Value::Bool(b) => Some(StateValue::Bool(*b)),
@@ -838,33 +836,32 @@ pub fn analyze(
         // Auto-extract JSON fields as state before rule processing
         if let Some(tmpl) = template_map.get(&tmpl_id)
             && tmpl.json_timestamp_field.is_some()
+            && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content)
         {
-            if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content) {
-                let source_name = state_manager
-                    .source_names
-                    .get(&line.source_id)
-                    .cloned()
-                    .unwrap_or_default();
-                let state = state_manager
-                    .per_source_state
-                    .entry(line.source_id)
-                    .or_default();
-                for (key, value) in &map {
-                    if let Some(sv) = json_value_to_state_value(value) {
-                        let old = state.get(key).cloned();
-                        let new = Some(sv.clone());
-                        state.insert(key.clone(), sv);
-                        if old != new {
-                            all_state_changes.push(StateChange {
-                                timestamp: line.timestamp,
-                                source_id: line.source_id,
-                                source_name: source_name.clone(),
-                                state_key: key.clone(),
-                                old_value: old,
-                                new_value: new,
-                                rule_id: 0,
-                            });
-                        }
+            let source_name = state_manager
+                .source_names
+                .get(&line.source_id)
+                .cloned()
+                .unwrap_or_default();
+            let state = state_manager
+                .per_source_state
+                .entry(line.source_id)
+                .or_default();
+            for (key, value) in &map {
+                if let Some(sv) = json_value_to_state_value(value) {
+                    let old = state.get(key).cloned();
+                    let new = Some(sv.clone());
+                    state.insert(key.clone(), sv);
+                    if old != new {
+                        all_state_changes.push(StateChange {
+                            timestamp: line.timestamp,
+                            source_id: line.source_id,
+                            source_name: source_name.clone(),
+                            state_key: key.clone(),
+                            old_value: old,
+                            new_value: new,
+                            rule_id: 0,
+                        });
                     }
                 }
             }
@@ -1008,38 +1005,37 @@ pub fn analyze_streaming(
         // Auto-extract JSON fields as state before rule processing
         if let Some(tmpl) = template_map.get(&tmpl_id)
             && tmpl.json_timestamp_field.is_some()
+            && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content)
         {
-            if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content) {
-                let source_name = state_manager
-                    .source_names
-                    .get(&line.source_id)
-                    .cloned()
-                    .unwrap_or_default();
-                let state = state_manager
-                    .per_source_state
-                    .entry(line.source_id)
-                    .or_default();
-                for (key, value) in &map {
-                    if let Some(sv) = json_value_to_state_value(value) {
-                        let old = state.get(key).cloned();
-                        let new = Some(sv.clone());
-                        state.insert(key.clone(), sv);
-                        if old != new {
-                            total_state_changes += 1;
-                            if tx
-                                .send(AnalysisEvent::StateChange(StateChange {
-                                    timestamp: line.timestamp,
-                                    source_id: line.source_id,
-                                    source_name: source_name.clone(),
-                                    state_key: key.clone(),
-                                    old_value: old,
-                                    new_value: new,
-                                    rule_id: 0,
-                                }))
-                                .is_err()
-                            {
-                                return Ok(());
-                            }
+            let source_name = state_manager
+                .source_names
+                .get(&line.source_id)
+                .cloned()
+                .unwrap_or_default();
+            let state = state_manager
+                .per_source_state
+                .entry(line.source_id)
+                .or_default();
+            for (key, value) in &map {
+                if let Some(sv) = json_value_to_state_value(value) {
+                    let old = state.get(key).cloned();
+                    let new = Some(sv.clone());
+                    state.insert(key.clone(), sv);
+                    if old != new {
+                        total_state_changes += 1;
+                        if tx
+                            .send(AnalysisEvent::StateChange(StateChange {
+                                timestamp: line.timestamp,
+                                source_id: line.source_id,
+                                source_name: source_name.clone(),
+                                state_key: key.clone(),
+                                old_value: old,
+                                new_value: new,
+                                rule_id: 0,
+                            }))
+                            .is_err()
+                        {
+                            return Ok(());
                         }
                     }
                 }
