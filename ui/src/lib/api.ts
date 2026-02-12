@@ -20,6 +20,7 @@ export interface SourceTemplate {
   timestamp_template_id: number;
   line_delimiter: string;
   content_regex: string | null;
+  continuation_regex: string | null;
 }
 
 export interface Source {

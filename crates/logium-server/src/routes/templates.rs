@@ -25,6 +25,7 @@ struct CreateTemplate {
     timestamp_template_id: u64,
     line_delimiter: String,
     content_regex: Option<String>,
+    continuation_regex: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -34,6 +35,7 @@ struct TemplateResponse {
     timestamp_template_id: u64,
     line_delimiter: String,
     content_regex: Option<String>,
+    continuation_regex: Option<String>,
 }
 
 impl From<logium_core::model::SourceTemplate> for TemplateResponse {
@@ -44,6 +46,7 @@ impl From<logium_core::model::SourceTemplate> for TemplateResponse {
             timestamp_template_id: t.timestamp_template_id,
             line_delimiter: t.line_delimiter,
             content_regex: t.content_regex,
+            continuation_regex: t.continuation_regex,
         }
     }
 }
@@ -69,6 +72,7 @@ async fn create(
             body.timestamp_template_id as i64,
             &body.line_delimiter,
             body.content_regex.as_deref(),
+            body.continuation_regex.as_deref(),
         )
         .await?;
     Ok((StatusCode::CREATED, Json(t.into())))
@@ -96,6 +100,7 @@ async fn update(
             body.timestamp_template_id as i64,
             &body.line_delimiter,
             body.content_regex.as_deref(),
+            body.continuation_regex.as_deref(),
         )
         .await?;
     Ok(Json(t.into()))

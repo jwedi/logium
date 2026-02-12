@@ -141,15 +141,11 @@ Click-to-expand on rule-matched lines in LogViewer to show N surrounding context
 
 ---
 
-## 16. Multi-line Log Entry Support
+## ~~16. Multi-line Log Entry Support~~
 
-Stack traces, JSON payloads, and multi-line messages span multiple lines. The current line-by-line model splits these into separate entries, breaking timestamp parsing and rule matching.
+**Status:** Done
 
-- A `continuation_regex` on SourceTemplate — lines not matching the timestamp pattern are appended to the previous entry
-- Common heuristic: if a line doesn't start with a timestamp, it's a continuation
-- Merged entries are treated as a single LogLine for rule matching
-
-**Inspiration:** Filebeat's `multiline` config, lnav's multi-line detection, Logstash's multiline codec.
+Added `continuation_regex` field to `SourceTemplate`. When set, `LogLineIterator` merges physical lines matching the regex into the preceding logical entry. Timestamps are parsed from the head line only. Content and raw fields span all merged lines (joined by `\n`). Continuation-aware iteration uses a `pending_line` buffer for lookahead. DB schema, API, and frontend updated. 4 new tests (2 unit, 2 integration) covering multi-line parsing, cross-source matching on merged entries, and passthrough behavior when `continuation_regex` is `None`.
 
 ---
 

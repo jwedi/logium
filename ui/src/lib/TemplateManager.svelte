@@ -17,6 +17,7 @@
   let newTimestampTemplateId: number | null = $state(null);
   let newLineDelimiter = $state('\\n');
   let newContentRegex = $state('');
+  let newContinuationRegex = $state('');
 
   function tsTemplateName(id: number): string {
     return tsTemplateList.find((t) => t.id === id)?.name ?? `#${id}`;
@@ -47,10 +48,12 @@
         timestamp_template_id: newTimestampTemplateId,
         line_delimiter: newLineDelimiter,
         content_regex: newContentRegex || null,
+        continuation_regex: newContinuationRegex || null,
       });
       newName = '';
       newLineDelimiter = '\\n';
       newContentRegex = '';
+      newContinuationRegex = '';
       await load();
     } catch (e: any) {
       alert(e.message);
@@ -114,6 +117,14 @@
       <label>Content Regex (optional)</label>
       <input type="text" bind:value={newContentRegex} placeholder="Regex to extract content..." />
     </div>
+    <div class="field">
+      <label>Continuation Regex (optional)</label>
+      <input
+        type="text"
+        bind:value={newContinuationRegex}
+        placeholder="Regex for multi-line continuation..."
+      />
+    </div>
   </div>
   <div class="actions">
     <button
@@ -154,6 +165,10 @@
               <label>Content Regex</label>
               <input type="text" bind:value={editing.content_regex} />
             </div>
+            <div class="field">
+              <label>Continuation Regex</label>
+              <input type="text" bind:value={editing.continuation_regex} />
+            </div>
           </div>
           <div class="actions">
             <button class="primary" onclick={updateTemplate}>Save</button>
@@ -167,6 +182,9 @@
               <span><strong>Delimiter:</strong> {tmpl.line_delimiter}</span>
               {#if tmpl.content_regex}
                 <span><strong>Regex:</strong> <code>{tmpl.content_regex}</code></span>
+              {/if}
+              {#if tmpl.continuation_regex}
+                <span><strong>Continuation:</strong> <code>{tmpl.continuation_regex}</code></span>
               {/if}
             </div>
           </div>

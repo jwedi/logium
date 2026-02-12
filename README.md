@@ -43,7 +43,7 @@ cd ui && npm run dev
 ### Running Tests
 
 ```bash
-cargo test --workspace    # 48 tests: 23 core unit + 8 integration + 17 server
+cargo test --workspace
 ```
 
 ---
@@ -133,7 +133,7 @@ logium/
 
 ### Why This Layering
 
-**logium-core** is a pure library with zero framework dependencies. It takes data structures in, returns results out. This makes it trivially testable (18 unit tests + 8 integration tests run in ~1s), reusable in other contexts (CLI, batch processing), and keeps the complex logic isolated from web/IO concerns.
+**logium-core** is a pure library with zero framework dependencies. It takes data structures in, returns results out. This makes it trivially testable, reusable in other contexts (CLI, batch processing), and keeps the complex logic isolated from web/IO concerns.
 
 **logium-server** handles the "real world": HTTP, SQLite persistence, file uploads, CORS. It converts between database rows and core model types, delegates analysis to the core engine via `tokio::task::spawn_blocking`, and serves the frontend.
 
@@ -188,7 +188,7 @@ A `SourceTemplate` references a `TimestampTemplate` via `timestamp_template_id`,
 ### Streaming Architecture
 
 The engine never loads entire log files into memory. It uses:
-- **`LogLineIterator`**: Reads lines lazily via `BufReader`, parsing timestamps on the fly using the associated `TimestampTemplate`
+- **`LogLineIterator`**: Reads lines lazily via `BufReader`, parsing timestamps on the fly using the associated `TimestampTemplate`. Supports multi-line log entries via `continuation_regex` — lines matching the regex are merged into the preceding logical entry
 - **`MergedLogStream`**: K-way merge via `BinaryHeap` (min-heap) — merges K source iterators in chronological order in O(N log K) time
 - **`RegexSet`**: All match rules for a rule are compiled into a single regex automaton. One pass over the text tests all patterns simultaneously, instead of running regexes sequentially
 
@@ -477,7 +477,7 @@ Project
   ├── TimestampTemplate[]        "how to parse timestamps"
   │     └── (format, extraction_regex?, default_year?)
   ├── SourceTemplate[]           "how to read this type of log"
-  │     └── (timestamp_template_id, line_delimiter, content_regex)
+  │     └── (timestamp_template_id, line_delimiter, content_regex, continuation_regex?)
   ├── Source[]                   "an actual log file"
   │     └── (name, template_id, file_path)
   ├── LogRule[]                  "what to look for, what state to produce"
@@ -514,69 +514,13 @@ Supports cross-type numeric comparison (`Integer(10) == Float(10.0)`) and type-a
 
 ## Test Suite
 
-**48 tests total** across two crates:
+Tests are spread across three layers:
 
-### logium-core: Unit Tests (23 tests)
+- **logium-core unit tests**: Rule matching, state mutations, pattern evaluation, K-way merge, multi-line continuation, streaming analysis
+- **logium-core integration tests**: Per-format parsing (Zookeeper, Nginx, Syslog), cross-source analysis, template reuse, state references, multi-line log entries
+- **logium-server tests**: Database CRUD, import/export round-trips, analysis helpers, seed data
 
-| Category | Tests | What's Covered |
-|----------|-------|----------------|
-| Rule matching | 4 | Single/multiple match rules, Any/All modes, no-match case |
-| State mutations | 6 | Replace, Accumulate (strings, integers), Clear, Static assignment, Parsed extraction with named capture groups |
-| State change tracking | 5 | Replace returns (old, new), Clear returns (old, None), First set returns (None, new), Noop skipped, Streaming emits StateChange events |
-| Pattern evaluation | 5 | Two-predicate sequential match, predicate invalidation (resets progress), re-firing after match, cross-source state references, all 8 operators |
-| K-way merge | 1 | Three sources with interleaved timestamps, verifies chronological order and correct interleaving |
-| Integration | 1 | Full server+client scenario: region extraction, player count parsing, cross-source pattern detection |
-
-### logium-core: Integration Tests (8 tests)
-
-Tests against real-world log data in `crates/logium-core/tests/fixtures/`:
-
-| Category | Tests | What's Covered |
-|----------|-------|----------------|
-| Per-format parsing | 3 | Zookeeper (standard `%Y-%m-%d %H:%M:%S`), Nginx (mid-line timestamps via `extraction_regex`), Syslog (yearless `%b %d %H:%M:%S` with `default_year`) |
-| Cross-source analysis | 3 | Zookeeper WARN + connection events, Nginx HTTP status extraction + 404 pattern, Syslog auth failure detection across split sources |
-| Template reuse | 1 | One TimestampTemplate shared by two SourceTemplates with different content_regex |
-| State references | 1 | Cross-source StateRef operand (source_a.level == source_b.level) |
-
-Test fixtures are downloaded from [LogHub](https://github.com/logpai/loghub) and [Elastic examples](https://github.com/elastic/examples) via `scripts/setup_test_data.sh`, then split into A/B (odd/even lines) for cross-source testing.
-
-### logium-server (17 tests)
-
-| Category | Tests | What's Covered |
-|----------|-------|----------------|
-| Database CRUD | 8 | Projects, timestamp templates, source templates, sources, rules (with sub-rules), rulesets (many-to-many), patterns (with predicates, including StateRef operands), bulk project data loading |
-| Import/Export | 2 | Full round-trip import with ID remapping, empty config import |
-| Analysis helpers | 6 | Regex suggestion (numbers, quoted strings, special chars), timestamp format detection, timestamp length estimation |
-| Seed data | 1 | Demo project seeding with templates, sources, rules, and patterns |
-
-All server tests use in-memory SQLite (`:memory:`) for isolation and speed.
-
-### Frontend (144 tests)
-
-Vitest tests using `@testing-library/svelte`:
-
-| Component | Tests | What's Covered |
-|-----------|-------|----------------|
-| analysisInvalidation | 3 | Stamp starts at 0, increment, sequential increments |
-| regexUtils | 14 | detectGroups (JS/Rust/unnamed/mixed), toJsRegex conversion, testPattern (match/no-match/error/groups) |
-| RuleCreator | 9 | Suggest-rule API integration, fallback on API failure, ruleset filtering by template, auto-selection, rule creation with ruleset assignment, save validation, invalidation on save |
-| RuleEditor | 25 | Pre-populated fields, edit & save, add/remove patterns & extractions, type toggle visibility, dry-run match/no-match/error indicators, overall verdict (Any/All), extraction preview (Parsed/Static/Clear), invalidation, (?P<>) handling |
-| AnalysisView | 13 | Run button, table/timeline/state tab switching, result stats, streaming error banner, in-progress state, auto-rerun on invalidation, debounce, cancellation, re-analyzing text, snapshot |
-| StateEvolutionView | 8 | Empty state, table rendering, source filter, key filter, null value display, rule name display, snapshot |
-| LogViewerSearch | 19 | Search bar, regex/plain-text modes, match navigation, highlighting |
-| TimelineView | 11 | Render with data, empty state, zoom controls, swimlane display, detail panel interaction, onNavigate callback |
-| TimelineDetailPanel | 21 | Rule match display, pattern match display, state snapshot rendering, empty states, "Go to line" button (render/hide/click) |
-| TimelineSwimlane | 14 | Event rendering, color coding, click handling, tooltip display, state annotation labels, zoom-dependent label visibility |
-| TimelineAxis | 7 | Time label rendering, tick marks, zoom-level formatting |
-
-### Benchmarks
-
-Criterion benchmarks in `crates/logium-core/benches/analysis_benchmark.rs`:
-
-| Benchmark | Data | Typical Time |
-|-----------|------|--------------|
-| `nginx_cross_source_1k_each` | 2 sources x 1K lines, 2 rules, 1 pattern | ~7 ms |
-| `nginx_large_51k_lines` | 1 source x 51K lines, 1 rule, 1 pattern | ~90 ms |
+Test fixtures include real-world log formats in `crates/logium-core/tests/fixtures/` (downloaded via `scripts/setup_test_data.sh`). All server tests use in-memory SQLite for isolation.
 
 Run benchmarks with `./scripts/run_benchmark.sh` — results are saved with timestamps to `benchmark/results/`.
 
