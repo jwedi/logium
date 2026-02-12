@@ -421,6 +421,7 @@ impl Database {
         Ok(row_to_template(&row))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_template(
         &self,
         project_id: i64,
@@ -453,6 +454,7 @@ impl Database {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_template(
         &self,
         project_id: i64,
