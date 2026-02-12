@@ -45,8 +45,10 @@
 
   let selectedSource = $derived(sourceList.find((s) => s.id === selectedSourceId) ?? null);
 
-  let filteredResult = $derived.by(() => {
-    if (!result) return null;
+  const emptyResult: AnalysisResult = { rule_matches: [], pattern_matches: [], state_changes: [] };
+
+  let filteredResult: AnalysisResult = $derived.by(() => {
+    if (!result) return emptyResult;
     let rm = result.rule_matches;
     let sc = result.state_changes;
     if (filterRuleId !== null) {
@@ -331,7 +333,7 @@
         {#if filterRuleId !== null || filterSourceId !== null}
           <div class="filter-status">
             <span
-              >Showing {filteredResult?.rule_matches.length} of {result.rule_matches.length} matches</span
+              >Showing {filteredResult.rule_matches.length} of {result.rule_matches.length} matches</span
             >
             <button
               onclick={() => {
