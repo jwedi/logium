@@ -143,14 +143,9 @@ Added `continuation_regex` field to `SourceTemplate`. When set, `LogLineIterator
 
 ## 17. Result Filtering / Faceted Browsing
 
-Filter controls on analysis results: by rule, by source, by state key, by time range. After analysis produces hundreds of matches, there's no way to slice them.
+**Status:** Done
 
-- Click a rule name in the summary to filter to those matches
-- Filter dropdowns for source, rule, state key
-- Time-range sub-filter on results
-- Applies across table view, timeline, and state evolution
-
-**Inspiration:** Kibana's faceted filtering, Datadog's facets panel, Splunk's field sidebar.
+Clickable facet chips in the results summary card for filtering by rule and source. Single-select toggle (click to filter, click again to clear). A centralized `filteredResult` derived value filters `result` by active filters and is passed to all child views (table, timeline, state evolution). Summary stats show unfiltered totals; source button match counts reflect filtered results. "Showing X of Y matches" status with "Clear filters" button when filters are active. Filters reset automatically on new analysis runs.
 
 ---
 
