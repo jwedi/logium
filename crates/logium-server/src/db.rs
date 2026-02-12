@@ -80,7 +80,8 @@ impl Database {
                 name TEXT NOT NULL,
                 timestamp_template_id INTEGER NOT NULL REFERENCES timestamp_templates(id),
                 line_delimiter TEXT NOT NULL,
-                content_regex TEXT
+                content_regex TEXT,
+                continuation_regex TEXT
             )",
         )
         .execute(&self.pool)
@@ -396,7 +397,7 @@ impl Database {
 
     pub async fn list_templates(&self, project_id: i64) -> Result<Vec<SourceTemplate>, DbError> {
         let rows = sqlx::query(
-            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex
+            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex
              FROM source_templates WHERE project_id = ? ORDER BY id",
         )
         .bind(project_id)
@@ -408,7 +409,7 @@ impl Database {
 
     pub async fn get_template(&self, project_id: i64, id: i64) -> Result<SourceTemplate, DbError> {
         let row = sqlx::query(
-            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex
+            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex
              FROM source_templates WHERE id = ? AND project_id = ?",
         )
         .bind(id)
@@ -427,16 +428,18 @@ impl Database {
         timestamp_template_id: i64,
         line_delimiter: &str,
         content_regex: Option<&str>,
+        continuation_regex: Option<&str>,
     ) -> Result<SourceTemplate, DbError> {
         let id = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO source_templates (project_id, name, timestamp_template_id, line_delimiter, content_regex)
-             VALUES (?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO source_templates (project_id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex)
+             VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(project_id)
         .bind(name)
         .bind(timestamp_template_id)
         .bind(line_delimiter)
         .bind(content_regex)
+        .bind(continuation_regex)
         .fetch_one(&self.pool)
         .await?;
 
@@ -446,6 +449,7 @@ impl Database {
             timestamp_template_id: timestamp_template_id as u64,
             line_delimiter: line_delimiter.to_string(),
             content_regex: content_regex.map(|s| s.to_string()),
+            continuation_regex: continuation_regex.map(|s| s.to_string()),
         })
     }
 
@@ -457,15 +461,17 @@ impl Database {
         timestamp_template_id: i64,
         line_delimiter: &str,
         content_regex: Option<&str>,
+        continuation_regex: Option<&str>,
     ) -> Result<SourceTemplate, DbError> {
         let result = sqlx::query(
-            "UPDATE source_templates SET name = ?, timestamp_template_id = ?, line_delimiter = ?, content_regex = ?
+            "UPDATE source_templates SET name = ?, timestamp_template_id = ?, line_delimiter = ?, content_regex = ?, continuation_regex = ?
              WHERE id = ? AND project_id = ?",
         )
         .bind(name)
         .bind(timestamp_template_id)
         .bind(line_delimiter)
         .bind(content_regex)
+        .bind(continuation_regex)
         .bind(id)
         .bind(project_id)
         .execute(&self.pool)
@@ -1159,6 +1165,7 @@ impl Database {
                     *new_tt_id as i64,
                     &st.line_delimiter,
                     st.content_regex.as_deref(),
+                    st.continuation_regex.as_deref(),
                 )
                 .await?;
             st_id_map.insert(st.id, new_st.id);
@@ -1332,6 +1339,7 @@ fn row_to_template(row: &sqlx::sqlite::SqliteRow) -> SourceTemplate {
         timestamp_template_id: row.get::<i64, _>("timestamp_template_id") as u64,
         line_delimiter: row.get("line_delimiter"),
         content_regex: row.get("content_regex"),
+        continuation_regex: row.get("continuation_regex"),
     }
 }
 
@@ -1580,7 +1588,14 @@ mod tests {
             .unwrap();
 
         let t = db
-            .create_template(p.id, "default", tt.id as i64, "\n", Some(r"^\d{4}.+$"))
+            .create_template(
+                p.id,
+                "default",
+                tt.id as i64,
+                "\n",
+                Some(r"^\d{4}.+$"),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(t.name, "default");
@@ -1594,7 +1609,15 @@ mod tests {
         assert_eq!(fetched.timestamp_template_id, tt.id);
 
         let updated = db
-            .update_template(p.id, t.id as i64, "updated", tt.id as i64, "\r\n", None)
+            .update_template(
+                p.id,
+                t.id as i64,
+                "updated",
+                tt.id as i64,
+                "\r\n",
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(updated.name, "updated");
@@ -1613,7 +1636,7 @@ mod tests {
             .await
             .unwrap();
         let t = db
-            .create_template(p.id, "tmpl", tt.id as i64, "\n", None)
+            .create_template(p.id, "tmpl", tt.id as i64, "\n", None, None)
             .await
             .unwrap();
 
@@ -1695,7 +1718,7 @@ mod tests {
             .await
             .unwrap();
         let t = db
-            .create_template(p.id, "tmpl", tt.id as i64, "\n", None)
+            .create_template(p.id, "tmpl", tt.id as i64, "\n", None, None)
             .await
             .unwrap();
         let r1 = db
@@ -1819,7 +1842,7 @@ mod tests {
             .create_timestamp_template(p.id, "ts", "%Y", None, None)
             .await
             .unwrap();
-        db.create_template(p.id, "tmpl", tt.id as i64, "\n", None)
+        db.create_template(p.id, "tmpl", tt.id as i64, "\n", None, None)
             .await
             .unwrap();
         db.create_rule(p.id, "r1", &MatchMode::Any, &[], &[])
@@ -1855,7 +1878,14 @@ mod tests {
             .await
             .unwrap();
         let st = db
-            .create_template(src.id, "server_log", tt.id as i64, "\n", Some(r"^\d+"))
+            .create_template(
+                src.id,
+                "server_log",
+                tt.id as i64,
+                "\n",
+                Some(r"^\d+"),
+                None,
+            )
             .await
             .unwrap();
         let rule = db

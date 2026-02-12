@@ -71,6 +71,7 @@ pub struct SourceTemplate {
     pub timestamp_template_id: u64,
     pub line_delimiter: String,
     pub content_regex: Option<String>,
+    pub continuation_regex: Option<String>,
 }
 
 /// Source - an actual log file.

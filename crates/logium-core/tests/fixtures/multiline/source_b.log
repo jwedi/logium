@@ -1,0 +1,7 @@
+2024-01-15 10:00:05 ERROR NullPointerException in RequestHandler
+  at com.example.RequestHandler.process(RequestHandler.java:42)
+  at com.example.Server.handle(Server.java:128)
+  at java.lang.Thread.run(Thread.java:829)
+2024-01-15 10:00:10 ERROR OutOfMemoryError during request processing
+  at java.util.Arrays.copyOf(Arrays.java:3210)
+  at com.example.BufferManager.allocate(BufferManager.java:55)

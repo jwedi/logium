@@ -48,6 +48,7 @@ fn make_source_template(
         timestamp_template_id: ts_template_id,
         line_delimiter: "\n".into(),
         content_regex: content_regex.map(|s| s.into()),
+        continuation_regex: None,
     }
 }
 
@@ -412,6 +413,7 @@ fn test_timestamp_template_reuse() {
         timestamp_template_id: 1,
         line_delimiter: "\n".into(),
         content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ - (.+)$".into()),
+        continuation_regex: None,
     };
     let tmpl_b = SourceTemplate {
         id: 2,
@@ -419,6 +421,7 @@ fn test_timestamp_template_reuse() {
         timestamp_template_id: 1,
         line_delimiter: "\n".into(),
         content_regex: None,
+        continuation_regex: None,
     };
 
     let src_a = make_source(1, "source_a", &fixture_path("zookeeper", "source_a.log"), 1);
@@ -564,6 +567,191 @@ fn test_cross_source_state_ref() {
     assert!(
         !result.pattern_matches.is_empty(),
         "expected pattern matches when both sources have same level"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Multi-line log entry tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_multiline_parsing() {
+    let ts = make_ts_template(1, "multiline_ts", "%Y-%m-%d %H:%M:%S", None, None);
+    let tmpl = SourceTemplate {
+        id: 1,
+        name: "multiline".into(),
+        timestamp_template_id: 1,
+        line_delimiter: "\n".into(),
+        content_regex: None,
+        continuation_regex: Some(r"^\s".to_string()),
+    };
+    let src = make_source(
+        1,
+        "multiline_full",
+        &fixture_path("multiline", "full.log"),
+        1,
+    );
+
+    let iter = LogLineIterator::new(&src, &tmpl, &ts).unwrap();
+    let lines: Vec<_> = iter.map(|r| r.expect("line should parse")).collect();
+
+    // full.log has 5 logical entries (2 have stack traces merged)
+    assert_eq!(
+        lines.len(),
+        5,
+        "expected 5 logical entries, got {}",
+        lines.len()
+    );
+
+    // Entry 2 (NullPointerException) should have continuation lines merged
+    assert!(
+        lines[1].raw.contains("NullPointerException"),
+        "second entry should contain NullPointerException"
+    );
+    assert!(
+        lines[1]
+            .raw
+            .contains("at com.example.RequestHandler.process"),
+        "second entry should contain stack trace"
+    );
+    assert!(
+        lines[1]
+            .content
+            .contains("at com.example.RequestHandler.process"),
+        "content should include continuation lines"
+    );
+
+    // Entry 4 (OutOfMemoryError) should also have continuation lines merged
+    assert!(
+        lines[3].raw.contains("OutOfMemoryError"),
+        "fourth entry should contain OutOfMemoryError"
+    );
+    assert!(
+        lines[3]
+            .raw
+            .contains("at com.example.BufferManager.allocate"),
+        "fourth entry should contain stack trace"
+    );
+
+    // All timestamps should be valid
+    for line in &lines {
+        assert_eq!(
+            line.timestamp.and_utc().year(),
+            2024,
+            "expected year 2024, got {}",
+            line.timestamp.and_utc().year()
+        );
+    }
+}
+
+#[test]
+fn test_multiline_cross_source() {
+    let ts = make_ts_template(1, "multiline_ts", "%Y-%m-%d %H:%M:%S", None, None);
+    let tmpl = SourceTemplate {
+        id: 1,
+        name: "multiline".into(),
+        timestamp_template_id: 1,
+        line_delimiter: "\n".into(),
+        content_regex: None,
+        continuation_regex: Some(r"^\s".to_string()),
+    };
+    let src_a = make_source(1, "source_a", &fixture_path("multiline", "source_a.log"), 1);
+    let src_b = make_source(2, "source_b", &fixture_path("multiline", "source_b.log"), 1);
+
+    // Rule: detect OutOfMemoryError in merged content
+    let oom_rule = LogRule {
+        id: 1,
+        name: "detect_oom".into(),
+        match_mode: MatchMode::Any,
+        match_rules: vec![MatchRule {
+            id: 1,
+            pattern: r"OutOfMemoryError".into(),
+        }],
+        extraction_rules: vec![ExtractionRule {
+            id: 1,
+            extraction_type: ExtractionType::Static,
+            state_key: "oom".into(),
+            pattern: None,
+            static_value: Some("true".into()),
+            mode: ExtractionMode::Replace,
+        }],
+    };
+
+    // Rule: detect WARN
+    let warn_rule = LogRule {
+        id: 2,
+        name: "detect_warn".into(),
+        match_mode: MatchMode::Any,
+        match_rules: vec![MatchRule {
+            id: 2,
+            pattern: r"WARN".into(),
+        }],
+        extraction_rules: vec![ExtractionRule {
+            id: 2,
+            extraction_type: ExtractionType::Static,
+            state_key: "warned".into(),
+            pattern: None,
+            static_value: Some("true".into()),
+            mode: ExtractionMode::Replace,
+        }],
+    };
+
+    let ruleset = Ruleset {
+        id: 1,
+        name: "multiline_rules".into(),
+        template_id: 1,
+        rule_ids: vec![1, 2],
+    };
+
+    // Pattern: source_a has a warning AND source_b has OOM
+    let pattern = Pattern {
+        id: 1,
+        name: "warn_and_oom".into(),
+        predicates: vec![
+            PatternPredicate {
+                source_name: "source_a".into(),
+                state_key: "warned".into(),
+                operator: Operator::Eq,
+                operand: Operand::Literal(StateValue::String("true".into())),
+            },
+            PatternPredicate {
+                source_name: "source_b".into(),
+                state_key: "oom".into(),
+                operator: Operator::Eq,
+                operand: Operand::Literal(StateValue::String("true".into())),
+            },
+        ],
+    };
+
+    let result = analyze(
+        &[src_a, src_b],
+        &[tmpl],
+        &[ts],
+        &[oom_rule, warn_rule],
+        &[ruleset],
+        &[pattern],
+    )
+    .unwrap();
+
+    // OOM should match on source_b (in merged multi-line entry)
+    let oom_matches: Vec<_> = result
+        .rule_matches
+        .iter()
+        .filter(|m| m.rule_id == 1)
+        .collect();
+    assert!(
+        !oom_matches.is_empty(),
+        "expected OOM rule matches from multi-line entries"
+    );
+    assert!(
+        oom_matches.iter().all(|m| m.source_id == 2),
+        "OOM matches should come from source_b"
+    );
+
+    // Pattern should match: source_a warned + source_b OOM
+    assert!(
+        !result.pattern_matches.is_empty(),
+        "expected pattern match (warn + OOM across sources)"
     );
 }
 

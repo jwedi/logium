@@ -73,6 +73,8 @@ pub struct LogLineIterator {
     extraction_regex: Option<Regex>,
     default_year: Option<i32>,
     content_regex: Option<Regex>,
+    continuation_regex: Option<Regex>,
+    pending_line: Option<String>,
     buf: String,
 }
 
@@ -98,6 +100,13 @@ impl LogLineIterator {
             }
             None => None,
         };
+        let continuation_regex = match &template.continuation_regex {
+            Some(pat) => {
+                let re = Regex::new(pat).map_err(|e| AnalysisError::InvalidRegex(e.to_string()))?;
+                Some(re)
+            }
+            None => None,
+        };
         Ok(Self {
             reader: BufReader::new(file),
             source_id: source.id,
@@ -105,6 +114,8 @@ impl LogLineIterator {
             extraction_regex,
             default_year: ts_template.default_year,
             content_regex,
+            continuation_regex,
+            pending_line: None,
             buf: String::new(),
         })
     }
@@ -114,67 +125,111 @@ impl Iterator for LogLineIterator {
     type Item = Result<LogLine, AnalysisError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.buf.clear();
-        match self.reader.read_line(&mut self.buf) {
-            Ok(0) => None,
-            Ok(_) => {
-                let raw = self
+        // Get the head line: either from pending_line or by reading from the reader.
+        let head_line = if let Some(pending) = self.pending_line.take() {
+            pending
+        } else {
+            self.buf.clear();
+            match self.reader.read_line(&mut self.buf) {
+                Ok(0) => return None,
+                Ok(_) => self
                     .buf
                     .trim_end_matches('\n')
                     .trim_end_matches('\r')
-                    .to_string();
-                let content = if let Some(re) = &self.content_regex {
-                    if let Some(caps) = re.captures(&raw) {
-                        caps.get(1).map_or(raw.clone(), |m| m.as_str().to_string())
-                    } else {
-                        raw.clone()
-                    }
-                } else {
-                    raw.clone()
-                };
+                    .to_string(),
+                Err(e) => return Some(Err(AnalysisError::ParseError(e.to_string()))),
+            }
+        };
 
-                // Extract timestamp substring: use extraction_regex if set, otherwise raw line
-                let ts_input = if let Some(re) = &self.extraction_regex {
-                    if let Some(caps) = re.captures(&raw) {
-                        caps.get(1)
-                            .map(|m| m.as_str().to_string())
-                            .unwrap_or_else(|| raw.clone())
-                    } else {
-                        raw.clone()
-                    }
-                } else {
-                    raw.clone()
-                };
-
-                let timestamp = NaiveDateTime::parse_from_str(&ts_input, &self.timestamp_format)
-                    .or_else(|_| parse_timestamp_prefix(&ts_input, &self.timestamp_format))
-                    .or_else(|e| {
-                        // For yearless formats, prepend default_year and try again
-                        if let Some(year) = self.default_year {
-                            let augmented_input = format!("{year} {ts_input}");
-                            let augmented_fmt = format!("%Y {}", self.timestamp_format);
-                            NaiveDateTime::parse_from_str(&augmented_input, &augmented_fmt).or_else(
-                                |_| parse_timestamp_prefix(&augmented_input, &augmented_fmt),
-                            )
+        // If continuation_regex is set, merge continuation lines.
+        let merged_raw = if let Some(cont_re) = &self.continuation_regex {
+            let mut merged = head_line;
+            loop {
+                self.buf.clear();
+                match self.reader.read_line(&mut self.buf) {
+                    Ok(0) => break, // EOF
+                    Ok(_) => {
+                        let line = self
+                            .buf
+                            .trim_end_matches('\n')
+                            .trim_end_matches('\r')
+                            .to_string();
+                        if cont_re.is_match(&line) {
+                            merged.push('\n');
+                            merged.push_str(&line);
                         } else {
-                            Err(e)
+                            self.pending_line = Some(line);
+                            break;
                         }
-                    });
-
-                match timestamp {
-                    Ok(ts) => Some(Ok(LogLine {
-                        timestamp: ts,
-                        source_id: self.source_id,
-                        raw,
-                        content,
-                    })),
-                    Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
-                        "failed to parse timestamp from '{}' with format '{}': {}",
-                        raw, self.timestamp_format, e
-                    )))),
+                    }
+                    Err(e) => return Some(Err(AnalysisError::ParseError(e.to_string()))),
                 }
             }
-            Err(e) => Some(Err(AnalysisError::ParseError(e.to_string()))),
+            merged
+        } else {
+            head_line
+        };
+
+        // For timestamp and content_regex, use only the first physical line.
+        let first_line = merged_raw
+            .split_once('\n')
+            .map_or(merged_raw.as_str(), |(first, _)| first);
+
+        let content = if let Some(re) = &self.content_regex {
+            if let Some(caps) = re.captures(first_line) {
+                let head_content = caps
+                    .get(1)
+                    .map_or(first_line.to_string(), |m| m.as_str().to_string());
+                // Append continuation lines to content
+                if let Some((_first, rest)) = merged_raw.split_once('\n') {
+                    format!("{head_content}\n{rest}")
+                } else {
+                    head_content
+                }
+            } else {
+                merged_raw.clone()
+            }
+        } else {
+            merged_raw.clone()
+        };
+
+        // Extract timestamp substring: use extraction_regex if set, otherwise first line
+        let ts_input = if let Some(re) = &self.extraction_regex {
+            if let Some(caps) = re.captures(first_line) {
+                caps.get(1)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_else(|| first_line.to_string())
+            } else {
+                first_line.to_string()
+            }
+        } else {
+            first_line.to_string()
+        };
+
+        let timestamp = NaiveDateTime::parse_from_str(&ts_input, &self.timestamp_format)
+            .or_else(|_| parse_timestamp_prefix(&ts_input, &self.timestamp_format))
+            .or_else(|e| {
+                if let Some(year) = self.default_year {
+                    let augmented_input = format!("{year} {ts_input}");
+                    let augmented_fmt = format!("%Y {}", self.timestamp_format);
+                    NaiveDateTime::parse_from_str(&augmented_input, &augmented_fmt)
+                        .or_else(|_| parse_timestamp_prefix(&augmented_input, &augmented_fmt))
+                } else {
+                    Err(e)
+                }
+            });
+
+        match timestamp {
+            Ok(ts) => Some(Ok(LogLine {
+                timestamp: ts,
+                source_id: self.source_id,
+                raw: merged_raw,
+                content,
+            })),
+            Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
+                "failed to parse timestamp from '{}' with format '{}': {}",
+                first_line, self.timestamp_format, e
+            )))),
         }
     }
 }
@@ -1552,6 +1607,7 @@ mod tests {
             timestamp_template_id: 1,
             line_delimiter: "\n".into(),
             content_regex: None,
+            continuation_regex: None,
         }
     }
 
@@ -1653,6 +1709,7 @@ mod tests {
             timestamp_template_id: 1,
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
         };
 
         let sources = vec![
@@ -1831,6 +1888,7 @@ mod tests {
             timestamp_template_id: 1,
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
         };
 
         let sources = vec![
@@ -2137,6 +2195,7 @@ mod tests {
             timestamp_template_id: 1,
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
         };
 
         let sources = vec![Source {
@@ -2219,5 +2278,111 @@ mod tests {
             assert!(sc.old_value.is_none());
             assert_eq!(sc.new_value, Some(StateValue::String("us-east".into())));
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Multi-line continuation tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_multiline_continuation() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "2024-01-15 10:00:01 INFO Server started").unwrap();
+        writeln!(f, "2024-01-15 10:00:05 ERROR NullPointerException").unwrap();
+        writeln!(f, "  at com.example.Handler.process(Handler.java:42)").unwrap();
+        writeln!(f, "  at com.example.Server.handle(Server.java:128)").unwrap();
+        writeln!(f, "2024-01-15 10:00:06 WARN Pool low: 3 remaining").unwrap();
+
+        let ts_template = make_ts_template();
+        let template = SourceTemplate {
+            id: 1,
+            name: "test".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: None,
+            continuation_regex: Some(r"^\s".to_string()),
+        };
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+
+        let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
+        let lines: Vec<LogLine> = iter.map(|r| r.unwrap()).collect();
+
+        // Should be 3 logical entries, not 5 physical lines
+        assert_eq!(
+            lines.len(),
+            3,
+            "expected 3 logical entries, got {}",
+            lines.len()
+        );
+
+        // First entry: single line
+        assert_eq!(lines[0].raw, "2024-01-15 10:00:01 INFO Server started");
+        assert!(!lines[0].raw.contains('\n'));
+
+        // Second entry: merged with continuation lines
+        assert!(
+            lines[1].raw.contains('\n'),
+            "multi-line entry should contain newlines"
+        );
+        assert!(lines[1].raw.contains("NullPointerException"));
+        assert!(lines[1].raw.contains("at com.example.Handler.process"));
+        assert!(lines[1].raw.contains("at com.example.Server.handle"));
+
+        // Third entry: single line
+        assert_eq!(
+            lines[2].raw,
+            "2024-01-15 10:00:06 WARN Pool low: 3 remaining"
+        );
+
+        // Timestamps should be from head lines only
+        assert_eq!(
+            lines[0].timestamp,
+            NaiveDateTime::parse_from_str("2024-01-15 10:00:01", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+        assert_eq!(
+            lines[1].timestamp,
+            NaiveDateTime::parse_from_str("2024-01-15 10:00:05", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+        assert_eq!(
+            lines[2].timestamp,
+            NaiveDateTime::parse_from_str("2024-01-15 10:00:06", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_multiline_continuation_none_is_passthrough() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "2024-01-15 10:00:01 INFO Server started").unwrap();
+        writeln!(f, "2024-01-15 10:00:05 ERROR NullPointerException").unwrap();
+        writeln!(f, "  at com.example.Handler.process(Handler.java:42)").unwrap();
+
+        let ts_template = make_ts_template();
+        // No continuation_regex — should treat each line independently
+        let template = make_template();
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+
+        let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
+        let results: Vec<_> = iter.collect();
+
+        // First two lines parse fine; third line ("  at ...") will fail timestamp parsing
+        assert_eq!(
+            results.len(),
+            3,
+            "without continuation_regex, each physical line is separate"
+        );
+        assert!(results[0].is_ok());
+        assert!(results[1].is_ok());
+        // The continuation line will fail timestamp parsing (expected behavior)
+        assert!(results[2].is_err());
     }
 }
