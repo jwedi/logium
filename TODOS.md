@@ -403,11 +403,8 @@ Two-phase parallel architecture: Phase 1 uses `rayon::par_iter` to read and eval
 
 ### High Priority
 
-#### P6. Avoid JSON double-parse
-**File:** `crates/logium-core/src/engine.rs` ~line 863/1046
-**Issue:** JSON lines parsed by the iterator then re-parsed for auto-extraction.
-**Fix:** Cache the parsed `serde_json::Value` and reuse it.
-**Est. impact:** ~2x for JSON-heavy workloads.
+#### P6. Avoid JSON double-parse — Done
+Added `cached_json: Option<serde_json::Value>` field to `LogLine`. The JSON branch of `LogLineIterator::next()` now stores the parsed value, and `process_source()` uses `take()` instead of re-parsing.
 
 #### P7. Optimize parse_timestamp_prefix
 **Status:** Done
