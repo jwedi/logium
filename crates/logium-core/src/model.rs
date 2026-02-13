@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -97,8 +98,8 @@ pub struct Source {
 pub struct LogLine {
     pub timestamp: NaiveDateTime,
     pub source_id: u64,
-    pub raw: String,
-    pub content: String,
+    pub raw: Arc<str>,
+    pub content: Arc<str>,
 }
 
 /// Match modes for log rules.

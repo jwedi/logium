@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::sync::Arc;
 
 use chrono::NaiveDateTime;
 use regex::{Regex, RegexSet};
@@ -220,12 +221,15 @@ impl Iterator for LogLineIterator {
                 });
 
             return match timestamp {
-                Ok(ts) => Some(Ok(LogLine {
-                    timestamp: ts,
-                    source_id: self.source_id,
-                    raw: merged_raw.clone(),
-                    content: merged_raw,
-                })),
+                Ok(ts) => {
+                    let raw: Arc<str> = Arc::from(merged_raw);
+                    Some(Ok(LogLine {
+                        timestamp: ts,
+                        source_id: self.source_id,
+                        content: Arc::clone(&raw),
+                        raw,
+                    }))
+                }
                 Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
                     "failed to parse timestamp from '{}' with format '{}': {}",
                     ts_str, self.timestamp_format, e
@@ -238,22 +242,22 @@ impl Iterator for LogLineIterator {
             .split_once('\n')
             .map_or(merged_raw.as_str(), |(first, _)| first);
 
-        let content = if let Some(re) = &self.content_regex {
+        let content_override: Option<String> = if let Some(re) = &self.content_regex {
             if let Some(caps) = re.captures(first_line) {
                 let head_content = caps
                     .get(1)
                     .map_or(first_line.to_string(), |m| m.as_str().to_string());
                 // Append continuation lines to content
-                if let Some((_first, rest)) = merged_raw.split_once('\n') {
+                Some(if let Some((_first, rest)) = merged_raw.split_once('\n') {
                     format!("{head_content}\n{rest}")
                 } else {
                     head_content
-                }
+                })
             } else {
-                merged_raw.clone()
+                None
             }
         } else {
-            merged_raw.clone()
+            None
         };
 
         // Extract timestamp substring: use extraction_regex if set, otherwise first line
@@ -283,12 +287,19 @@ impl Iterator for LogLineIterator {
             });
 
         match timestamp {
-            Ok(ts) => Some(Ok(LogLine {
-                timestamp: ts,
-                source_id: self.source_id,
-                raw: merged_raw,
-                content,
-            })),
+            Ok(ts) => {
+                let raw: Arc<str> = Arc::from(merged_raw);
+                let content = match content_override {
+                    Some(s) => Arc::from(s),
+                    None => Arc::clone(&raw),
+                };
+                Some(Ok(LogLine {
+                    timestamp: ts,
+                    source_id: self.source_id,
+                    raw,
+                    content,
+                }))
+            }
             Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
                 "failed to parse timestamp from '{}' with format '{}': {}",
                 first_line, self.timestamp_format, e
@@ -1318,7 +1329,7 @@ pub fn cluster_logs(
         entry.count += 1;
         entry.source_ids.insert(line.source_id);
         if entry.sample_lines.len() < 3 {
-            entry.sample_lines.push(line.raw);
+            entry.sample_lines.push(line.raw.to_string());
         }
     }
 
@@ -1368,8 +1379,8 @@ mod tests {
             timestamp: NaiveDateTime::parse_from_str("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
                 .unwrap(),
             source_id: 1,
-            raw: content.to_string(),
-            content: content.to_string(),
+            raw: Arc::from(content),
+            content: Arc::from(content),
         }
     }
 
@@ -2759,7 +2770,7 @@ mod tests {
         );
 
         // First entry: single line
-        assert_eq!(lines[0].raw, "2024-01-15 10:00:01 INFO Server started");
+        assert_eq!(&*lines[0].raw, "2024-01-15 10:00:01 INFO Server started");
         assert!(!lines[0].raw.contains('\n'));
 
         // Second entry: merged with continuation lines
@@ -2773,7 +2784,7 @@ mod tests {
 
         // Third entry: single line
         assert_eq!(
-            lines[2].raw,
+            &*lines[2].raw,
             "2024-01-15 10:00:06 WARN Pool low: 3 remaining"
         );
 

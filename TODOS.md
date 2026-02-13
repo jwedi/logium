@@ -371,16 +371,14 @@ Prioritized optimizations for handling large log files (hundreds of MB).
 ### Critical Priority
 
 #### P1. Increase BufReader buffer size
-**File:** `crates/logium-core/src/engine.rs` ~line 125
-**Issue:** Default 8KB buffer is too small for sequential large-file reads.
-**Fix:** Use 64–128KB via `BufReader::with_capacity(64 * 1024, file)`.
-**Est. impact:** 20-40% I/O throughput improvement.
+**Status:** Done
+
+`BufReader::with_capacity(64 * 1024, file)` replaces the default 8KB buffer in `LogLineIterator::new()`.
 
 #### P2. Eliminate LogLine cloning in hot loop
-**File:** `crates/logium-core/src/engine.rs`
-**Issue:** `LogLine` has two `String` fields (`content`, `raw`) cloned per line during processing.
-**Fix:** Use `Cow<str>` or `Arc<str>` to avoid copying.
-**Est. impact:** 15-30% fewer allocations for large files.
+**Status:** Done
+
+`LogLine.raw` and `LogLine.content` changed from `String` to `Arc<str>`. Iterator construction shares a single `Arc` when `raw == content` (common case — no `content_regex`). Hot-loop `line.clone()` into `RuleMatch` is now two atomic ref bumps instead of two heap allocations+copies. Benchmarks: ~9% faster on cross-source workload, ~1% on single-source 51k lines.
 
 #### P3. Lazy state snapshot cloning
 **File:** `crates/logium-core/src/engine.rs` — `snapshot()`
