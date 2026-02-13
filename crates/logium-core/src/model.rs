@@ -53,6 +53,14 @@ impl PartialOrd for StateValue {
     }
 }
 
+/// A state value paired with the timestamp of the log line that last set it.
+/// TODO: Add `line_number: Option<u64>` for source-line provenance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackedValue {
+    pub value: StateValue,
+    pub set_at: NaiveDateTime,
+}
+
 /// Timestamp template - describes how to parse timestamps from log lines.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimestampTemplate {
@@ -206,7 +214,7 @@ pub struct RuleMatch {
 pub struct PatternMatch {
     pub pattern_id: u64,
     pub timestamp: NaiveDateTime,
-    pub state_snapshot: HashMap<String, HashMap<String, StateValue>>,
+    pub state_snapshot: HashMap<String, HashMap<String, TrackedValue>>,
 }
 
 /// A state change event emitted when a mutation modifies per-source state.

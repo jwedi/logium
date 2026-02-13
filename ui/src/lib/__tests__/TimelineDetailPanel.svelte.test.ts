@@ -113,8 +113,8 @@ describe('TimelineDetailPanel', () => {
       event: makePatternTimelineEvent({
         patternMatch: makePatternMatch({
           state_snapshot: {
-            'nginx.log': { status: { Integer: 500 } },
-            'app.log': { error: { String: 'timeout' } },
+            'nginx.log': { status: { value: { Integer: 500 }, set_at: '2024-01-15T10:30:00' } },
+            'app.log': { error: { value: { String: 'timeout' }, set_at: '2024-01-15T10:30:00' } },
           },
         }),
       }),
@@ -226,7 +226,7 @@ describe('TimelineDetailPanel', () => {
       event: makePatternTimelineEvent({
         patternMatch: makePatternMatch({
           state_snapshot: {
-            src1: { key1: { String: 'val1' } },
+            src1: { key1: { value: { String: 'val1' }, set_at: '2024-01-15T10:30:00' } },
           },
         }),
       }),

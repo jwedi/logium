@@ -115,7 +115,8 @@
           {#each Object.entries(stateMap) as [key, val]}
             <div class="state-entry">
               <span class="state-key">{key}</span>
-              <span class="state-value">{formatStateValue(val)}</span>
+              <span class="state-value">{formatStateValue(val.value)}</span>
+              <span class="state-set-at">{val.set_at}</span>
             </div>
           {/each}
         </div>
@@ -220,6 +221,12 @@
   .state-value {
     font-family: var(--font-mono);
     color: var(--text);
+  }
+
+  .state-set-at {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
   }
 
   .pm-source {

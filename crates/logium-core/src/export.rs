@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::{
     AnalysisResult, LogRule, Pattern, PatternMatch, RuleMatch, Source, StateChange, StateValue,
+    TrackedValue,
 };
 
 // ---- Export options ----
@@ -60,7 +61,7 @@ struct ExportRuleMatch {
 struct ExportPatternMatch {
     timestamp: NaiveDateTime,
     pattern_name: String,
-    state_snapshot: HashMap<String, HashMap<String, StateValue>>,
+    state_snapshot: HashMap<String, HashMap<String, TrackedValue>>,
 }
 
 #[derive(Serialize)]
@@ -359,7 +360,13 @@ mod tests {
 
         let mut snapshot = HashMap::new();
         let mut inner = HashMap::new();
-        inner.insert("key".to_string(), StateValue::String("val".to_string()));
+        inner.insert(
+            "key".to_string(),
+            TrackedValue {
+                value: StateValue::String("val".to_string()),
+                set_at: test_ts(),
+            },
+        );
         snapshot.insert("app.log".to_string(), inner);
 
         AnalysisResult {
