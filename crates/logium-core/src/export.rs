@@ -380,6 +380,7 @@ mod tests {
                     source_id: 10,
                     raw: Arc::from("ERROR broke"),
                     content: Arc::from("broke"),
+                    cached_json: None,
                 },
                 extracted_state: extracted,
             }],

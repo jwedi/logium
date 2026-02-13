@@ -229,6 +229,7 @@ impl Iterator for LogLineIterator {
                         source_id: self.source_id,
                         content: Arc::clone(&raw),
                         raw,
+                        cached_json: Some(json_val),
                     }))
                 }
                 Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
@@ -299,6 +300,7 @@ impl Iterator for LogLineIterator {
                     source_id: self.source_id,
                     raw,
                     content,
+                    cached_json: None,
                 }))
             }
             Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
@@ -741,7 +743,7 @@ fn process_source(
     // Step 2: parallel rule evaluation (rayon)
     let processed: Vec<ProcessedLine> = lines
         .into_par_iter()
-        .map(|line| {
+        .map(|mut line| {
             let mut rule_matches = Vec::new();
             for rule_id in rule_ids {
                 if let (Some(rule), Some(compiled)) =
@@ -752,7 +754,7 @@ fn process_source(
                 }
             }
             let json_fields = if is_json {
-                if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content) {
+                if let Some(serde_json::Value::Object(map)) = line.cached_json.take() {
                     let mut fields = HashMap::new();
                     for (key, value) in &map {
                         if let Some(sv) = json_value_to_state_value(value) {
@@ -1631,6 +1633,7 @@ mod tests {
             source_id: 1,
             raw: Arc::from(content),
             content: Arc::from(content),
+            cached_json: None,
         }
     }
 
