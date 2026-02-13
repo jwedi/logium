@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -61,7 +62,7 @@ struct ExportRuleMatch {
 struct ExportPatternMatch {
     timestamp: NaiveDateTime,
     pattern_name: String,
-    state_snapshot: HashMap<String, HashMap<String, TrackedValue>>,
+    state_snapshot: HashMap<String, Arc<HashMap<String, TrackedValue>>>,
 }
 
 #[derive(Serialize)]
@@ -108,7 +109,7 @@ fn enrich_rule_match(rm: &RuleMatch, lookups: &Lookups) -> ExportRuleMatch {
         timestamp: rm.log_line.timestamp,
         rule_name: lookup_name(&lookups.rules, rm.rule_id),
         source_name: lookup_name(&lookups.sources, rm.source_id),
-        content: rm.log_line.content.clone(),
+        content: rm.log_line.content.to_string(),
         extracted_state: rm.extracted_state.clone(),
     }
 }
@@ -319,6 +320,7 @@ mod tests {
     use super::*;
     use crate::model::*;
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     fn test_rules() -> Vec<LogRule> {
         vec![LogRule {
@@ -367,7 +369,7 @@ mod tests {
                 set_at: test_ts(),
             },
         );
-        snapshot.insert("app.log".to_string(), inner);
+        snapshot.insert("app.log".to_string(), Arc::new(inner));
 
         AnalysisResult {
             rule_matches: vec![RuleMatch {
@@ -376,8 +378,8 @@ mod tests {
                 log_line: LogLine {
                     timestamp: test_ts(),
                     source_id: 10,
-                    raw: "ERROR broke".to_string(),
-                    content: "broke".to_string(),
+                    raw: Arc::from("ERROR broke"),
+                    content: Arc::from("broke"),
                 },
                 extracted_state: extracted,
             }],
@@ -560,7 +562,7 @@ mod tests {
     fn test_csv_round_trips_through_reader() {
         let mut result = test_result();
         result.rule_matches[0].log_line.content =
-            "connection from 1.2.3.4, status=\"failed\"".to_string();
+            Arc::from("connection from 1.2.3.4, status=\"failed\"");
 
         let csv_out = to_csv(
             &result,

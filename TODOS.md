@@ -361,3 +361,106 @@ Use `clap`'s `after_long_help` to embed these examples so they appear in `--help
 - `analyze()` already takes flat slices, so JSON → deserialize → call `analyze()` → serialize result
 
 **Inspiration:** OpenClaw's CLI-first Skills pattern ("works with agents that didn't exist when we wrote the code"), `gh --json`, `ripgrep --json`, 12 Factor CLI Apps.
+
+---
+
+## Performance Optimizations
+
+Prioritized optimizations for handling large log files (hundreds of MB).
+
+### Critical Priority
+
+#### P1. Increase BufReader buffer size
+**Status:** Done
+
+`BufReader::with_capacity(64 * 1024, file)` replaces the default 8KB buffer in `LogLineIterator::new()`.
+
+#### P2. Eliminate LogLine cloning in hot loop
+**Status:** Done
+
+`LogLine.raw` and `LogLine.content` changed from `String` to `Arc<str>`. Iterator construction shares a single `Arc` when `raw == content` (common case — no `content_regex`). Hot-loop `line.clone()` into `RuleMatch` is now two atomic ref bumps instead of two heap allocations+copies. Benchmarks: ~9% faster on cross-source workload, ~1% on single-source 51k lines.
+
+#### P3. Lazy state snapshot cloning — Done
+**File:** `crates/logium-core/src/engine.rs` — `StateManager`
+**Change:** Wrapped per-source inner state maps in `Arc` for COW semantics. `snapshot()` now clones `Arc` pointers (O(1) per source) instead of deep-cloning inner maps. Mutations use `Arc::make_mut()` — only clones the single source's map when a snapshot holds a reference.
+**Result:** Large benchmark (51k lines) improved from 93.6ms → 88.8ms (~5% faster). Cross-source within noise.
+
+#### P4. Frontend: replace array spread with push on flush
+**File:** `ui/src/lib/AnalysisView.svelte`
+**Issue:** `[...result.rule_matches, ...buffer]` copies the growing array every 100ms, creating O(n²) growth.
+**Fix:** Use `Array.push(...buffer)` instead.
+**Est. impact:** Eliminates O(n²) array growth; critical for 100k+ matches.
+
+#### P5. Batch DB queries in load_project_data
+**File:** `crates/logium-server/src/db.rs`
+**Issue:** N+1 query pattern — `build_log_rule` called per rule, `get_predicates` called per pattern.
+**Fix:** Use `WHERE id IN (...)` batch queries.
+**Est. impact:** 30-50+ queries → 3-5; sub-second project load.
+
+#### P4b. Parallel analysis engine (rayon)
+**Status:** Done
+
+Two-phase parallel architecture: Phase 1 uses `rayon::par_iter` to read and evaluate rules across sources in parallel (nested `par_iter` for per-line rule evaluation within each source). Phase 2 merges results via `ProcessedLineMerger` (K-way merge over pre-processed Vecs) and applies state mutations + pattern evaluation sequentially. Benchmarks: cross-source 6.3ms → 4.4ms (1.43×), single-source 51k lines 88.8ms → 79.2ms (1.12×).
+
+### High Priority
+
+#### P6. Avoid JSON double-parse
+**File:** `crates/logium-core/src/engine.rs` ~line 863/1046
+**Issue:** JSON lines parsed by the iterator then re-parsed for auto-extraction.
+**Fix:** Cache the parsed `serde_json::Value` and reuse it.
+**Est. impact:** ~2x for JSON-heavy workloads.
+
+#### P7. Optimize parse_timestamp_prefix
+**Status:** Done
+
+Added `estimate_timestamp_len(fmt)` that computes the expected (min, max) output length of a chrono format string from its specifiers (e.g., `%Y-%m-%d %H:%M:%S` → exactly 19 chars). `parse_timestamp_prefix` now tries a narrow window around the estimate (~3-5 positions) before falling back to a full scan. For formats without `extraction_regex` (zookeeper, syslog), this reduces per-line parse attempts from O(line_length) to O(1). No impact on nginx benchmarks (which use extraction_regex and never call `parse_timestamp_prefix`). 8 new tests: 6 for estimate accuracy across common formats, 2 for prefix parsing correctness.
+
+#### P8. Virtualize pattern matches section
+**File:** `ui/src/lib/AnalysisView.svelte`
+**Issue:** Pattern matches with full state snapshots are rendered without virtualization.
+**Fix:** Use a virtual list (e.g. `svelte-virtual-list` or custom) for the matches list.
+**Est. impact:** Prevents DOM thrashing with 1000+ matches.
+
+#### P9. Fix O(n*m) findIndex in LogViewer
+**File:** `ui/src/lib/LogViewer.svelte` ~line 165
+**Issue:** Linear scan per highlighted line using `findIndex`.
+**Fix:** Build a `Set` for O(1) lookup.
+**Est. impact:** Large improvement with many highlights.
+
+#### P10. Streaming export endpoint
+**File:** `crates/logium-server/src/routes/analysis.rs`
+**Issue:** Export materializes the full result in memory before sending.
+**Fix:** Stream results directly using Axum's streaming body.
+**Est. impact:** Enables arbitrarily large exports without OOM.
+
+### Medium Priority
+
+#### P11. Cache source_name in hot loop
+**File:** `crates/logium-core/src/engine.rs`
+**Issue:** `source_name` looked up and cloned from HashMap per line.
+**Fix:** Cache per-source outside the inner loop.
+**Est. impact:** Minor — fewer HashMap lookups.
+
+#### P12. Deduplicate derived filter chains
+**File:** `ui/src/lib/AnalysisView.svelte`
+**Issue:** `filteredResult`, `ruleBreakdown`, `sourceBreakdown` each independently filter the full result.
+**Fix:** Compute the filtered result once and derive breakdowns from it.
+**Est. impact:** 2-3x fewer iterations over large arrays.
+
+#### P13. Viewport-filter timeline events
+**File:** `ui/src/lib/TimelineView.svelte`
+**Issue:** `allEvents` creates objects for ALL matches regardless of visible range.
+**Fix:** Filter to the visible time range before creating event objects.
+**Est. impact:** Less GC pressure for large analyses.
+
+#### P14. Virtualize StateEvolutionView
+**File:** `ui/src/lib/StateEvolutionView.svelte`
+**Issue:** All state change rows rendered without virtualization.
+**Fix:** Add virtual scrolling for the state changes list.
+**Est. impact:** Prevents lag with 10k+ changes.
+
+#### P15. WebSocket backpressure tuning
+**File:** `crates/logium-server/src/routes/analysis.rs`
+**Issue:** 256-item channel with `blocking_send` can stall on slow clients.
+**Fix:** Consider adaptive channel capacity or dropping stale messages.
+**Est. impact:** Prevents stalling on slow clients.

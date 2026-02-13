@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -97,8 +98,8 @@ pub struct Source {
 pub struct LogLine {
     pub timestamp: NaiveDateTime,
     pub source_id: u64,
-    pub raw: String,
-    pub content: String,
+    pub raw: Arc<str>,
+    pub content: Arc<str>,
 }
 
 /// Match modes for log rules.
@@ -214,7 +215,7 @@ pub struct RuleMatch {
 pub struct PatternMatch {
     pub pattern_id: u64,
     pub timestamp: NaiveDateTime,
-    pub state_snapshot: HashMap<String, HashMap<String, TrackedValue>>,
+    pub state_snapshot: HashMap<String, Arc<HashMap<String, TrackedValue>>>,
 }
 
 /// A state change event emitted when a mutation modifies per-source state.
