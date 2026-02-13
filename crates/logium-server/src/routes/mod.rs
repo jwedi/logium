@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod clustering;
 pub mod import_export;
 pub mod patterns;
 pub mod projects;

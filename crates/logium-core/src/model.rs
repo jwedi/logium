@@ -228,3 +228,19 @@ pub struct AnalysisResult {
     pub pattern_matches: Vec<PatternMatch>,
     pub state_changes: Vec<StateChange>,
 }
+
+/// A cluster of log lines sharing the same structural template.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogCluster {
+    pub template: String,
+    pub count: u64,
+    pub source_ids: Vec<u64>,
+    pub sample_lines: Vec<String>,
+}
+
+/// Result of clustering all log lines.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterResult {
+    pub clusters: Vec<LogCluster>,
+    pub total_lines: u64,
+}

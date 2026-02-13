@@ -120,6 +120,18 @@ export interface SuggestRuleResponse {
   capture_groups: string[];
 }
 
+export interface LogCluster {
+  template: string;
+  count: number;
+  source_ids: number[];
+  sample_lines: string[];
+}
+
+export interface ClusterResult {
+  clusters: LogCluster[];
+  total_lines: number;
+}
+
 export interface TimeRange {
   start: string | null;
   end: string | null;
@@ -372,5 +384,13 @@ export const analysis = {
     request<SuggestRuleResponse>(`/projects/${pid}/suggest-rule`, {
       method: 'POST',
       body: JSON.stringify(data),
+    }),
+};
+
+// Clustering
+export const clustering = {
+  run: (pid: number, timeRange?: TimeRange) =>
+    request<ClusterResult>(`/projects/${pid}/cluster${buildTimeRangeParams(timeRange)}`, {
+      method: 'POST',
     }),
 };

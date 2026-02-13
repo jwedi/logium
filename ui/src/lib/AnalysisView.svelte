@@ -17,6 +17,7 @@
   import LogViewer from './LogViewer.svelte';
   import TimelineView from './TimelineView.svelte';
   import StateEvolutionView from './StateEvolutionView.svelte';
+  import ErrorClusteringView from './ErrorClusteringView.svelte';
   import { getInvalidationStamp } from './analysisInvalidation.svelte';
   import { getCachedAnalysis, setCachedAnalysis } from './analysisCache.svelte';
 
@@ -29,7 +30,7 @@
   let running = $state(false);
   let error: string | null = $state(null);
   let selectedSourceId: number | null = $state(null);
-  let viewMode: 'table' | 'timeline' | 'state' = $state('table');
+  let viewMode: 'table' | 'timeline' | 'state' | 'clusters' = $state('table');
   let linesProcessed: number = $state(0);
   let autoTriggered = $state(false);
   let currentHandle: { close: () => void } | null = $state(null);
@@ -369,6 +370,13 @@
         navigateTarget = null;
       }}>State Evolution</button
     >
+    <button
+      class:active={viewMode === 'clusters'}
+      onclick={() => {
+        viewMode = 'clusters';
+        navigateTarget = null;
+      }}>Clusters</button
+    >
   </div>
 
   {#if viewMode === 'table'}
@@ -464,6 +472,8 @@
     />
   {:else if viewMode === 'state'}
     <StateEvolutionView stateChanges={filteredResult.state_changes} {sourceList} {ruleList} />
+  {:else if viewMode === 'clusters'}
+    <ErrorClusteringView {projectId} {sourceList} />
   {/if}
 {:else if !running}
   <div class="empty">
