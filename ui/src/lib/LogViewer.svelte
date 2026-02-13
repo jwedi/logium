@@ -110,6 +110,15 @@
     return ctx;
   });
 
+  // Reverse lookup: line content -> first occurrence index (O(M) build, O(1) lookup)
+  let lineContentIndex = $derived.by(() => {
+    const map = new Map<string, number>();
+    for (let i = 0; i < lines.length; i++) {
+      if (!map.has(lines[i])) map.set(lines[i], i);
+    }
+    return map;
+  });
+
   let totalHeight = $derived(filteredIndices.length * LINE_HEIGHT);
   let startIdx = $derived(Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - OVERSCAN));
   let endIdx = $derived(
@@ -162,7 +171,7 @@
     for (const m of ruleMatches) {
       if (m.source_id !== source.id) continue;
       // Try to find the line index by raw content match
-      const idx = lines.findIndex((l) => l === m.log_line.raw);
+      const idx = lineContentIndex.get(m.log_line.raw) ?? -1;
       if (idx >= 0) {
         if (!map.has(idx)) map.set(idx, []);
         map.get(idx)!.push({ ruleId: m.rule_id, match: m });
@@ -380,7 +389,7 @@
   // Navigate to a specific line when navigateTarget is set (from timeline click)
   $effect(() => {
     if (navigateTarget && lines.length > 0) {
-      const origIdx = lines.findIndex((l) => l === navigateTarget);
+      const origIdx = lineContentIndex.get(navigateTarget) ?? -1;
       if (origIdx >= 0 && container) {
         selectedLineIdx = origIdx;
         let filteredPos = filteredIndices.indexOf(origIdx);
@@ -410,9 +419,10 @@
   });
 
   // Deselect line if filtered out
+  let filteredIndexSet = $derived(new Set(filteredIndices));
   $effect(() => {
     if (selectedLineIdx !== null && filterQuery) {
-      const inFiltered = filteredIndices.includes(selectedLineIdx);
+      const inFiltered = filteredIndexSet.has(selectedLineIdx);
       if (!inFiltered) selectedLineIdx = null;
     }
   });
