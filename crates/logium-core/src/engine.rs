@@ -309,25 +309,143 @@ impl Iterator for LogLineIterator {
     }
 }
 
+/// Estimate the (min, max) output length of a chrono format string.
+/// Used to narrow the search window in `parse_timestamp_prefix`.
+fn estimate_timestamp_len(fmt: &str) -> (usize, usize) {
+    let bytes = fmt.as_bytes();
+    let mut min_len = 0usize;
+    let mut max_len = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 1 < bytes.len() {
+            i += 1;
+            match bytes[i] {
+                // Width-prefixed subsecond: %3f, %6f, %9f
+                b'3' | b'6' | b'9' if i + 1 < bytes.len() && bytes[i + 1] == b'f' => {
+                    let w = (bytes[i] - b'0') as usize;
+                    min_len += w;
+                    max_len += w;
+                    i += 1;
+                }
+                // Timezone offset with colon: %:z → "+00:00" (6 chars)
+                b':' if i + 1 < bytes.len() && bytes[i + 1] == b'z' => {
+                    min_len += 6;
+                    max_len += 6;
+                    i += 1;
+                }
+                b'Y' => {
+                    min_len += 4;
+                    max_len += 4;
+                }
+                b'C' | b'y' | b'm' | b'd' | b'e' | b'H' | b'I' | b'M' | b'S' => {
+                    min_len += 2;
+                    max_len += 2;
+                }
+                b'b' | b'h' | b'a' | b'j' => {
+                    min_len += 3;
+                    max_len += 3;
+                }
+                b'B' | b'A' => {
+                    min_len += 3;
+                    max_len += 9;
+                }
+                b'p' | b'P' => {
+                    min_len += 2;
+                    max_len += 2;
+                }
+                b'z' => {
+                    min_len += 5;
+                    max_len += 5;
+                } // "+0000"
+                b'Z' => {
+                    min_len += 3;
+                    max_len += 5;
+                } // timezone abbreviation
+                b'u' | b'w' => {
+                    min_len += 1;
+                    max_len += 1;
+                }
+                b'f' => {
+                    min_len += 1;
+                    max_len += 9;
+                } // nanoseconds, variable
+                b'%' => {
+                    min_len += 1;
+                    max_len += 1;
+                } // literal %
+                _ => {
+                    min_len += 1;
+                    max_len += 6;
+                } // unknown specifier
+            }
+        } else {
+            min_len += 1;
+            max_len += 1;
+        }
+        i += 1;
+    }
+    (min_len, max_len)
+}
+
 /// Parse a timestamp from the beginning of a line by trying progressively
 /// shorter prefixes until chrono can parse it without "trailing input" errors.
+///
+/// Estimates the expected timestamp length from the format string to try a
+/// narrow window first (typically 1-5 attempts), falling back to a full scan
+/// only for exotic format strings where the estimate is wrong.
 fn parse_timestamp_prefix(line: &str, fmt: &str) -> Result<NaiveDateTime, chrono::ParseError> {
-    // Try substrings from the full line down to a minimum length.
-    // This handles the common case where the timestamp is at the start of the line
-    // and is followed by arbitrary content.
-    let mut last_err = NaiveDateTime::parse_from_str(line, fmt).unwrap_err();
-    let min_len = fmt.len().min(line.len());
-    for end in (min_len..=line.len()).rev() {
-        // Only try at character boundaries
+    let (min_ts, max_ts) = estimate_timestamp_len(fmt);
+
+    // Narrow window: [min_ts - 1, max_ts + 1], clamped to valid range.
+    // Covers the expected timestamp length with a small margin for edge cases.
+    let lo = min_ts.saturating_sub(1).max(1).min(line.len());
+    let hi = (max_ts + 1).min(line.len());
+
+    let mut last_err = None;
+    for end in (lo..=hi).rev() {
         if !line.is_char_boundary(end) {
             continue;
         }
         match NaiveDateTime::parse_from_str(&line[..end], fmt) {
             Ok(ts) => return Ok(ts),
-            Err(e) => last_err = e,
+            Err(e) => {
+                if last_err.is_none() {
+                    last_err = Some(e);
+                }
+            }
         }
     }
-    Err(last_err)
+
+    // Fallback: full scan for exotic formats where the estimate was wrong.
+    let min_len = fmt.len().min(line.len());
+    for end in (min_len..lo).rev() {
+        if !line.is_char_boundary(end) {
+            continue;
+        }
+        match NaiveDateTime::parse_from_str(&line[..end], fmt) {
+            Ok(ts) => return Ok(ts),
+            Err(e) => {
+                if last_err.is_none() {
+                    last_err = Some(e);
+                }
+            }
+        }
+    }
+    for end in ((hi + 1)..=line.len()).rev() {
+        if !line.is_char_boundary(end) {
+            continue;
+        }
+        match NaiveDateTime::parse_from_str(&line[..end], fmt) {
+            Ok(ts) => return Ok(ts),
+            Err(e) => {
+                if last_err.is_none() {
+                    last_err = Some(e);
+                }
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| NaiveDateTime::parse_from_str(line, fmt).unwrap_err()))
 }
 
 // ---------------------------------------------------------------------------
@@ -3439,5 +3557,73 @@ mod tests {
         assert_eq!(result.total_lines, 4);
         assert_eq!(result.clusters.len(), 1); // singleton filtered out
         assert_eq!(result.clusters[0].count, 3);
+    }
+
+    #[test]
+    fn test_estimate_timestamp_len_iso() {
+        // %Y-%m-%d %H:%M:%S → "2015-07-29 17:41:44" = 19 chars
+        let (min, max) = estimate_timestamp_len("%Y-%m-%d %H:%M:%S");
+        assert_eq!(min, 19);
+        assert_eq!(max, 19);
+    }
+
+    #[test]
+    fn test_estimate_timestamp_len_nginx() {
+        // %d/%b/%Y:%H:%M:%S → "17/May/2015:08:05:32" = 20 chars
+        let (min, max) = estimate_timestamp_len("%d/%b/%Y:%H:%M:%S");
+        assert_eq!(min, 20);
+        assert_eq!(max, 20);
+    }
+
+    #[test]
+    fn test_estimate_timestamp_len_syslog() {
+        // %b %d %H:%M:%S → "Jan  3 04:03:33" = 15 chars
+        let (min, max) = estimate_timestamp_len("%b %d %H:%M:%S");
+        assert_eq!(min, 15);
+        assert_eq!(max, 15);
+    }
+
+    #[test]
+    fn test_estimate_timestamp_len_with_subsecond() {
+        // %Y-%m-%dT%H:%M:%S.%3f → "2015-07-29T17:41:44.747" = 23 chars
+        let (min, max) = estimate_timestamp_len("%Y-%m-%dT%H:%M:%S.%3f");
+        assert_eq!(min, 23);
+        assert_eq!(max, 23);
+    }
+
+    #[test]
+    fn test_estimate_timestamp_len_with_timezone() {
+        // %Y-%m-%d %H:%M:%S %z → "2015-07-29 17:41:44 +0000" = 25 chars
+        let (min, max) = estimate_timestamp_len("%Y-%m-%d %H:%M:%S %z");
+        assert_eq!(min, 25);
+        assert_eq!(max, 25);
+    }
+
+    #[test]
+    fn test_estimate_timestamp_len_yearless_augmented() {
+        // Augmented: %Y %b %d %H:%M:%S → "2005 Jan  3 04:03:33" = 20 chars
+        let (min, max) = estimate_timestamp_len("%Y %b %d %H:%M:%S");
+        assert_eq!(min, 20);
+        assert_eq!(max, 20);
+    }
+
+    #[test]
+    fn test_parse_timestamp_prefix_zookeeper() {
+        let line = "2015-07-29 17:41:44,747 - INFO  [QuorumPeer]";
+        let ts = parse_timestamp_prefix(line, "%Y-%m-%d %H:%M:%S").unwrap();
+        assert_eq!(
+            ts,
+            NaiveDateTime::parse_from_str("2015-07-29 17:41:44", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_parse_timestamp_prefix_syslog_augmented() {
+        let line = "2005 Jan  3 04:03:33 combo sshd[5765]: pam_unix";
+        let ts = parse_timestamp_prefix(line, "%Y %b %d %H:%M:%S").unwrap();
+        assert_eq!(
+            ts,
+            NaiveDateTime::parse_from_str("2005-01-03 04:03:33", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
     }
 }

@@ -411,10 +411,9 @@ Two-phase parallel architecture: Phase 1 uses `rayon::par_iter` to read and eval
 **Est. impact:** ~2x for JSON-heavy workloads.
 
 #### P7. Optimize parse_timestamp_prefix
-**File:** `crates/logium-core/src/engine.rs`
-**Issue:** Tries every substring length 10..min(35, len) on each line.
-**Fix:** Add quick pre-checks (e.g. first char is digit, known delimiters) to reduce attempts.
-**Est. impact:** 10-20% for non-JSON formats.
+**Status:** Done
+
+Added `estimate_timestamp_len(fmt)` that computes the expected (min, max) output length of a chrono format string from its specifiers (e.g., `%Y-%m-%d %H:%M:%S` → exactly 19 chars). `parse_timestamp_prefix` now tries a narrow window around the estimate (~3-5 positions) before falling back to a full scan. For formats without `extraction_regex` (zookeeper, syslog), this reduces per-line parse attempts from O(line_length) to O(1). No impact on nginx benchmarks (which use extraction_regex and never call `parse_timestamp_prefix`). 8 new tests: 6 for estimate accuracy across common formats, 2 for prefix parsing correctness.
 
 #### P8. Virtualize pattern matches section
 **File:** `ui/src/lib/AnalysisView.svelte`
