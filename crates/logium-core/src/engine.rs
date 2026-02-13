@@ -746,10 +746,9 @@ fn process_source(
             for rule_id in rule_ids {
                 if let (Some(rule), Some(compiled)) =
                     (rule_map.get(rule_id), compiled_map.get(rule_id))
+                    && let Some(extracted) = evaluate_rule(rule, &line, compiled)
                 {
-                    if let Some(extracted) = evaluate_rule(rule, &line, compiled) {
-                        rule_matches.push((*rule_id, extracted));
-                    }
+                    rule_matches.push((*rule_id, extracted));
                 }
             }
             let json_fields = if is_json {
