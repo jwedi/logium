@@ -514,7 +514,7 @@ pub fn evaluate_rule(
 
 /// Manages per-source state.
 pub struct StateManager {
-    pub per_source_state: HashMap<u64, HashMap<String, StateValue>>,
+    pub per_source_state: HashMap<u64, HashMap<String, TrackedValue>>,
     pub source_names: HashMap<u64, String>,
     name_to_id: HashMap<String, u64>,
 }
@@ -541,6 +541,7 @@ impl StateManager {
         source_id: u64,
         extractions: &HashMap<String, StateValue>,
         rules: &[ExtractionRule],
+        timestamp: NaiveDateTime,
     ) -> Vec<(String, Option<StateValue>, Option<StateValue>)> {
         let state = self.per_source_state.entry(source_id).or_default();
         let mut changes = Vec::new();
@@ -548,7 +549,7 @@ impl StateManager {
         for rule in rules {
             match rule.extraction_type {
                 ExtractionType::Clear => {
-                    let old = state.remove(&rule.state_key);
+                    let old = state.remove(&rule.state_key).map(|t| t.value);
                     if old.is_some() {
                         changes.push((rule.state_key.clone(), old, None));
                     }
@@ -556,16 +557,22 @@ impl StateManager {
                 ExtractionType::Static => {
                     if let Some(val) = &rule.static_value {
                         let new_val = StateValue::String(val.clone());
-                        let old = state.get(&rule.state_key).cloned();
+                        let old = state.get(&rule.state_key).map(|t| t.value.clone());
                         match rule.mode {
                             ExtractionMode::Replace => {
-                                state.insert(rule.state_key.clone(), new_val);
+                                state.insert(
+                                    rule.state_key.clone(),
+                                    TrackedValue {
+                                        value: new_val,
+                                        set_at: timestamp,
+                                    },
+                                );
                             }
                             ExtractionMode::Accumulate => {
-                                accumulate(state, &rule.state_key, new_val);
+                                accumulate(state, &rule.state_key, new_val, timestamp);
                             }
                         }
-                        let new = state.get(&rule.state_key).cloned();
+                        let new = state.get(&rule.state_key).map(|t| t.value.clone());
                         if old != new {
                             changes.push((rule.state_key.clone(), old, new));
                         }
@@ -573,16 +580,22 @@ impl StateManager {
                 }
                 ExtractionType::Parsed => {
                     if let Some(val) = extractions.get(&rule.state_key) {
-                        let old = state.get(&rule.state_key).cloned();
+                        let old = state.get(&rule.state_key).map(|t| t.value.clone());
                         match rule.mode {
                             ExtractionMode::Replace => {
-                                state.insert(rule.state_key.clone(), val.clone());
+                                state.insert(
+                                    rule.state_key.clone(),
+                                    TrackedValue {
+                                        value: val.clone(),
+                                        set_at: timestamp,
+                                    },
+                                );
                             }
                             ExtractionMode::Accumulate => {
-                                accumulate(state, &rule.state_key, val.clone());
+                                accumulate(state, &rule.state_key, val.clone(), timestamp);
                             }
                         }
-                        let new = state.get(&rule.state_key).cloned();
+                        let new = state.get(&rule.state_key).map(|t| t.value.clone());
                         if old != new {
                             changes.push((rule.state_key.clone(), old, new));
                         }
@@ -597,11 +610,11 @@ impl StateManager {
     /// Resolve the value of a source's state key by source name.
     pub fn get_state_by_name(&self, source_name: &str, key: &str) -> Option<&StateValue> {
         let id = self.name_to_id.get(source_name)?;
-        self.per_source_state.get(id)?.get(key)
+        self.per_source_state.get(id)?.get(key).map(|t| &t.value)
     }
 
     /// Snapshot all state, keyed by source name.
-    pub fn snapshot(&self) -> HashMap<String, HashMap<String, StateValue>> {
+    pub fn snapshot(&self) -> HashMap<String, HashMap<String, TrackedValue>> {
         let mut snap = HashMap::new();
         for (id, state) in &self.per_source_state {
             if let Some(name) = self.source_names.get(id) {
@@ -613,9 +626,14 @@ impl StateManager {
 }
 
 /// Accumulate a value into existing state.
-fn accumulate(state: &mut HashMap<String, StateValue>, key: &str, new_val: StateValue) {
+fn accumulate(
+    state: &mut HashMap<String, TrackedValue>,
+    key: &str,
+    new_val: StateValue,
+    timestamp: NaiveDateTime,
+) {
     if let Some(existing) = state.get(key) {
-        let merged = match (existing, &new_val) {
+        let merged = match (&existing.value, &new_val) {
             (StateValue::String(a), StateValue::String(b)) => {
                 StateValue::String(format!("{a},{b}"))
             }
@@ -625,9 +643,21 @@ fn accumulate(state: &mut HashMap<String, StateValue>, key: &str, new_val: State
             (StateValue::Float(a), StateValue::Integer(b)) => StateValue::Float(a + *b as f64),
             _ => new_val,
         };
-        state.insert(key.to_string(), merged);
+        state.insert(
+            key.to_string(),
+            TrackedValue {
+                value: merged,
+                set_at: timestamp,
+            },
+        );
     } else {
-        state.insert(key.to_string(), new_val);
+        state.insert(
+            key.to_string(),
+            TrackedValue {
+                value: new_val,
+                set_at: timestamp,
+            },
+        );
     }
 }
 
@@ -876,9 +906,15 @@ pub fn analyze(
                 .or_default();
             for (key, value) in &map {
                 if let Some(sv) = json_value_to_state_value(value) {
-                    let old = state.get(key).cloned();
+                    let old = state.get(key).map(|t| t.value.clone());
                     let new = Some(sv.clone());
-                    state.insert(key.clone(), sv);
+                    state.insert(
+                        key.clone(),
+                        TrackedValue {
+                            value: sv,
+                            set_at: line.timestamp,
+                        },
+                    );
                     if old != new {
                         all_state_changes.push(StateChange {
                             timestamp: line.timestamp,
@@ -912,6 +948,7 @@ pub fn analyze(
                         line.source_id,
                         &extracted,
                         &rule.extraction_rules,
+                        line.timestamp,
                     );
 
                     for (key, old, new) in changes {
@@ -1059,9 +1096,15 @@ pub fn analyze_streaming(
                 .or_default();
             for (key, value) in &map {
                 if let Some(sv) = json_value_to_state_value(value) {
-                    let old = state.get(key).cloned();
+                    let old = state.get(key).map(|t| t.value.clone());
                     let new = Some(sv.clone());
-                    state.insert(key.clone(), sv);
+                    state.insert(
+                        key.clone(),
+                        TrackedValue {
+                            value: sv,
+                            set_at: line.timestamp,
+                        },
+                    );
                     if old != new {
                         total_state_changes += 1;
                         if tx
@@ -1099,6 +1142,7 @@ pub fn analyze_streaming(
                         line.source_id,
                         &extracted,
                         &rule.extraction_rules,
+                        line.timestamp,
                     );
 
                     for (key, old, new) in changes {
@@ -1315,6 +1359,10 @@ mod tests {
         compile_rules(std::slice::from_ref(rule)).unwrap().remove(0)
     }
 
+    fn test_ts() -> NaiveDateTime {
+        NaiveDateTime::parse_from_str("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+    }
+
     fn make_log_line(content: &str) -> LogLine {
         LogLine {
             timestamp: NaiveDateTime::parse_from_str("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
@@ -1438,10 +1486,13 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("key".into(), StateValue::String("old".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "key".into(),
+            TrackedValue {
+                value: StateValue::String("old".into()),
+                set_at: test_ts(),
+            },
+        );
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -1452,10 +1503,10 @@ mod tests {
             static_value: Some("new".into()),
             mode: ExtractionMode::Replace,
         }];
-        sm.apply_mutations(1, &extractions, &rules);
+        sm.apply_mutations(1, &extractions, &rules, test_ts());
 
         assert_eq!(
-            sm.per_source_state[&1]["key"],
+            sm.per_source_state[&1]["key"].value,
             StateValue::String("new".into())
         );
     }
@@ -1469,10 +1520,13 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("tags".into(), StateValue::String("a".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "tags".into(),
+            TrackedValue {
+                value: StateValue::String("a".into()),
+                set_at: test_ts(),
+            },
+        );
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -1483,10 +1537,10 @@ mod tests {
             static_value: Some("b".into()),
             mode: ExtractionMode::Accumulate,
         }];
-        sm.apply_mutations(1, &extractions, &rules);
+        sm.apply_mutations(1, &extractions, &rules, test_ts());
 
         assert_eq!(
-            sm.per_source_state[&1]["tags"],
+            sm.per_source_state[&1]["tags"].value,
             StateValue::String("a,b".into())
         );
     }
@@ -1500,10 +1554,13 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("count".into(), StateValue::Integer(10));
+        sm.per_source_state.entry(1).or_default().insert(
+            "count".into(),
+            TrackedValue {
+                value: StateValue::Integer(10),
+                set_at: test_ts(),
+            },
+        );
 
         let mut extractions: HashMap<String, StateValue> = HashMap::new();
         extractions.insert("count".into(), StateValue::Integer(5));
@@ -1516,9 +1573,12 @@ mod tests {
             static_value: None,
             mode: ExtractionMode::Accumulate,
         }];
-        sm.apply_mutations(1, &extractions, &rules);
+        sm.apply_mutations(1, &extractions, &rules, test_ts());
 
-        assert_eq!(sm.per_source_state[&1]["count"], StateValue::Integer(15));
+        assert_eq!(
+            sm.per_source_state[&1]["count"].value,
+            StateValue::Integer(15)
+        );
     }
 
     #[test]
@@ -1530,10 +1590,13 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("key".into(), StateValue::String("val".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "key".into(),
+            TrackedValue {
+                value: StateValue::String("val".into()),
+                set_at: test_ts(),
+            },
+        );
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -1544,7 +1607,7 @@ mod tests {
             static_value: None,
             mode: ExtractionMode::Replace,
         }];
-        sm.apply_mutations(1, &extractions, &rules);
+        sm.apply_mutations(1, &extractions, &rules, test_ts());
 
         assert!(!sm.per_source_state[&1].contains_key("key"));
     }
@@ -1655,18 +1718,24 @@ mod tests {
         assert!(matches.is_empty());
 
         // Set status = running -> pred 1 satisfied
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("status".into(), StateValue::String("running".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "status".into(),
+            TrackedValue {
+                value: StateValue::String("running".into()),
+                set_at: test_ts(),
+            },
+        );
         let matches = eval.evaluate_patterns(&patterns, &sm);
         assert!(matches.is_empty()); // only 1 of 2 done
 
         // Set players = 5 -> pred 2 satisfied
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("players".into(), StateValue::Integer(5));
+        sm.per_source_state.entry(1).or_default().insert(
+            "players".into(),
+            TrackedValue {
+                value: StateValue::Integer(5),
+                set_at: test_ts(),
+            },
+        );
         let matches = eval.evaluate_patterns(&patterns, &sm);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].pattern_id, 1);
@@ -1699,22 +1768,31 @@ mod tests {
         let mut eval = PatternEvaluator::new(&patterns);
 
         // Satisfy pred 1
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("status".into(), StateValue::String("running".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "status".into(),
+            TrackedValue {
+                value: StateValue::String("running".into()),
+                set_at: test_ts(),
+            },
+        );
         eval.evaluate_patterns(&patterns, &sm);
         assert_eq!(eval.progress[0], 1);
 
         // Now invalidate pred 1 (change status away from "running") and try pred 2
-        sm.per_source_state
-            .get_mut(&1)
-            .unwrap()
-            .insert("status".into(), StateValue::String("stopped".into()));
-        sm.per_source_state
-            .get_mut(&1)
-            .unwrap()
-            .insert("count".into(), StateValue::Integer(20));
+        sm.per_source_state.get_mut(&1).unwrap().insert(
+            "status".into(),
+            TrackedValue {
+                value: StateValue::String("stopped".into()),
+                set_at: test_ts(),
+            },
+        );
+        sm.per_source_state.get_mut(&1).unwrap().insert(
+            "count".into(),
+            TrackedValue {
+                value: StateValue::Integer(20),
+                set_at: test_ts(),
+            },
+        );
         let matches = eval.evaluate_patterns(&patterns, &sm);
         assert!(matches.is_empty());
         // Progress should be reset to 0
@@ -1740,10 +1818,13 @@ mod tests {
         let mut eval = PatternEvaluator::new(&patterns);
 
         // Set flag=true -> should match
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("flag".into(), StateValue::Bool(true));
+        sm.per_source_state.entry(1).or_default().insert(
+            "flag".into(),
+            TrackedValue {
+                value: StateValue::Bool(true),
+                set_at: test_ts(),
+            },
+        );
         let matches = eval.evaluate_patterns(&patterns, &sm);
         assert_eq!(matches.len(), 1);
 
@@ -1777,22 +1858,31 @@ mod tests {
         let mut eval = PatternEvaluator::new(&patterns);
 
         // Different regions -> no match
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("region".into(), StateValue::String("us-east".into()));
-        sm.per_source_state
-            .entry(2)
-            .or_default()
-            .insert("region".into(), StateValue::String("eu-west".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "region".into(),
+            TrackedValue {
+                value: StateValue::String("us-east".into()),
+                set_at: test_ts(),
+            },
+        );
+        sm.per_source_state.entry(2).or_default().insert(
+            "region".into(),
+            TrackedValue {
+                value: StateValue::String("eu-west".into()),
+                set_at: test_ts(),
+            },
+        );
         let matches = eval.evaluate_patterns(&patterns, &sm);
         assert!(matches.is_empty());
 
         // Same regions -> match
-        sm.per_source_state
-            .get_mut(&2)
-            .unwrap()
-            .insert("region".into(), StateValue::String("us-east".into()));
+        sm.per_source_state.get_mut(&2).unwrap().insert(
+            "region".into(),
+            TrackedValue {
+                value: StateValue::String("us-east".into()),
+                set_at: test_ts(),
+            },
+        );
         let matches = eval.evaluate_patterns(&patterns, &sm);
         assert_eq!(matches.len(), 1);
     }
@@ -1801,14 +1891,20 @@ mod tests {
     fn test_all_operators() {
         let sources = make_sources();
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("val".into(), StateValue::Integer(10));
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("name".into(), StateValue::String("hello world".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "val".into(),
+            TrackedValue {
+                value: StateValue::Integer(10),
+                set_at: test_ts(),
+            },
+        );
+        sm.per_source_state.entry(1).or_default().insert(
+            "name".into(),
+            TrackedValue {
+                value: StateValue::String("hello world".into()),
+                set_at: test_ts(),
+            },
+        );
 
         // Eq
         assert!(evaluate_predicate(
@@ -2174,7 +2270,7 @@ mod tests {
         assert!(snap.contains_key("server"));
         assert!(snap.contains_key("client"));
         assert_eq!(
-            snap["server"]["region"],
+            snap["server"]["region"].value,
             StateValue::String("us-east".into())
         );
     }
@@ -2400,10 +2496,13 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("key".into(), StateValue::String("old".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "key".into(),
+            TrackedValue {
+                value: StateValue::String("old".into()),
+                set_at: test_ts(),
+            },
+        );
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -2414,7 +2513,7 @@ mod tests {
             static_value: Some("new".into()),
             mode: ExtractionMode::Replace,
         }];
-        let changes = sm.apply_mutations(1, &extractions, &rules);
+        let changes = sm.apply_mutations(1, &extractions, &rules, test_ts());
 
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].0, "key");
@@ -2431,10 +2530,13 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("key".into(), StateValue::String("val".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "key".into(),
+            TrackedValue {
+                value: StateValue::String("val".into()),
+                set_at: test_ts(),
+            },
+        );
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -2445,7 +2547,7 @@ mod tests {
             static_value: None,
             mode: ExtractionMode::Replace,
         }];
-        let changes = sm.apply_mutations(1, &extractions, &rules);
+        let changes = sm.apply_mutations(1, &extractions, &rules, test_ts());
 
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].0, "key");
@@ -2472,7 +2574,7 @@ mod tests {
             static_value: Some("val".into()),
             mode: ExtractionMode::Replace,
         }];
-        let changes = sm.apply_mutations(1, &extractions, &rules);
+        let changes = sm.apply_mutations(1, &extractions, &rules, test_ts());
 
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].0, "key");
@@ -2489,10 +2591,13 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state
-            .entry(1)
-            .or_default()
-            .insert("key".into(), StateValue::String("same".into()));
+        sm.per_source_state.entry(1).or_default().insert(
+            "key".into(),
+            TrackedValue {
+                value: StateValue::String("same".into()),
+                set_at: test_ts(),
+            },
+        );
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -2503,7 +2608,7 @@ mod tests {
             static_value: Some("same".into()),
             mode: ExtractionMode::Replace,
         }];
-        let changes = sm.apply_mutations(1, &extractions, &rules);
+        let changes = sm.apply_mutations(1, &extractions, &rules, test_ts());
 
         assert!(changes.is_empty());
     }

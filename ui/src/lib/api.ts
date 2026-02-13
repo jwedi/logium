@@ -66,6 +66,11 @@ export type StateValue =
   | { Float: number }
   | { Bool: boolean };
 
+export interface TrackedValue {
+  value: StateValue;
+  set_at: string;
+}
+
 export interface PatternPredicate {
   source_name: string;
   state_key: string;
@@ -96,7 +101,7 @@ export interface RuleMatch {
 export interface PatternMatch {
   pattern_id: number;
   timestamp: string;
-  state_snapshot: Record<string, Record<string, StateValue>>;
+  state_snapshot: Record<string, Record<string, TrackedValue>>;
 }
 
 export interface StateChange {
