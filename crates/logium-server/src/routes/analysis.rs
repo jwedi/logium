@@ -11,13 +11,13 @@ use crate::AppState;
 use crate::db::DbError;
 
 #[derive(Deserialize, Default)]
-struct TimeRangeQuery {
-    start: Option<String>,
-    end: Option<String>,
+pub struct TimeRangeQuery {
+    pub start: Option<String>,
+    pub end: Option<String>,
 }
 
 impl TimeRangeQuery {
-    fn to_time_range(&self) -> Result<logium_core::engine::TimeRange, String> {
+    pub fn to_time_range(&self) -> Result<logium_core::engine::TimeRange, String> {
         let parse = |s: &str| -> Result<NaiveDateTime, String> {
             NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
                 .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S"))

@@ -1162,6 +1162,145 @@ pub fn analyze_streaming(
 }
 
 // ---------------------------------------------------------------------------
+// Log clustering (Drain-inspired tokenization)
+// ---------------------------------------------------------------------------
+
+use regex::Regex as Re;
+use std::sync::LazyLock;
+
+static VARIABLE_PATTERNS: LazyLock<Vec<Re>> = LazyLock::new(|| {
+    vec![
+        // UUID: 8-4-4-4-12 hex
+        Re::new(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            .unwrap(),
+        // ISO timestamp: 2024-01-15T10:30:00 (with optional fractional seconds and timezone)
+        Re::new(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}").unwrap(),
+        // IP:port or IP address
+        Re::new(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$").unwrap(),
+        // Hex string (8+ chars)
+        Re::new(r"^0x[0-9a-fA-F]+$|^[0-9a-fA-F]{8,}$").unwrap(),
+        // Unix path
+        Re::new(r"^/[^\s]+/[^\s]+$").unwrap(),
+        // Quoted string (double or single)
+        Re::new(r#"^"[^"]*"$|^'[^']*'$"#).unwrap(),
+        // Time-only format: HH:MM:SS with optional fractional seconds (e.g., 04:03:33, 17:41:44,747)
+        Re::new(r"^\d{1,2}:\d{2}:\d{2}([,.]\d+)?$").unwrap(),
+        // Decimal number (e.g., 3.14)
+        Re::new(r"^\d+\.\d+$").unwrap(),
+        // Plain integer
+        Re::new(r"^\d+$").unwrap(),
+        // Contains any digit → likely variable (Drain heuristic catch-all)
+        Re::new(r"\d").unwrap(),
+    ]
+});
+
+/// Tokenize a log line by replacing variable tokens with `<*>`.
+fn tokenize(line: &str) -> String {
+    line.split_whitespace()
+        .map(|token| {
+            for re in VARIABLE_PATTERNS.iter() {
+                if re.is_match(token) {
+                    return "<*>";
+                }
+            }
+            token
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Cluster log lines by structural template.
+pub fn cluster_logs(
+    sources: &[Source],
+    templates: &[SourceTemplate],
+    timestamp_templates: &[TimestampTemplate],
+    time_range: &TimeRange,
+) -> Result<ClusterResult, AnalysisError> {
+    let template_map: HashMap<u64, &SourceTemplate> = templates.iter().map(|t| (t.id, t)).collect();
+    let ts_template_map: HashMap<u64, &TimestampTemplate> =
+        timestamp_templates.iter().map(|t| (t.id, t)).collect();
+
+    let mut iterators = Vec::new();
+    for source in sources {
+        let template = template_map.get(&source.template_id).ok_or_else(|| {
+            AnalysisError::ParseError(format!(
+                "no template found for template_id {}",
+                source.template_id
+            ))
+        })?;
+        let ts_template = ts_template_map
+            .get(&template.timestamp_template_id)
+            .ok_or_else(|| {
+                AnalysisError::ParseError(format!(
+                    "no timestamp template found for timestamp_template_id {}",
+                    template.timestamp_template_id
+                ))
+            })?;
+        iterators.push(LogLineIterator::new(source, template, ts_template)?);
+    }
+
+    let stream = MergedLogStream::new(iterators)?;
+
+    struct ClusterEntry {
+        count: u64,
+        source_ids: std::collections::HashSet<u64>,
+        sample_lines: Vec<String>,
+    }
+
+    let mut clusters: HashMap<String, ClusterEntry> = HashMap::new();
+    let mut total_lines: u64 = 0;
+
+    for result in stream {
+        let line = result?;
+
+        if let Some(start) = time_range.start
+            && line.timestamp < start
+        {
+            continue;
+        }
+        if let Some(end) = time_range.end
+            && line.timestamp > end
+        {
+            break;
+        }
+
+        total_lines += 1;
+        let signature = tokenize(&line.content);
+        let entry = clusters.entry(signature).or_insert_with(|| ClusterEntry {
+            count: 0,
+            source_ids: std::collections::HashSet::new(),
+            sample_lines: Vec::new(),
+        });
+        entry.count += 1;
+        entry.source_ids.insert(line.source_id);
+        if entry.sample_lines.len() < 3 {
+            entry.sample_lines.push(line.raw);
+        }
+    }
+
+    let mut result_clusters: Vec<LogCluster> = clusters
+        .into_iter()
+        .filter(|(_, entry)| entry.count > 1)
+        .map(|(template, entry)| {
+            let mut source_ids: Vec<u64> = entry.source_ids.into_iter().collect();
+            source_ids.sort();
+            LogCluster {
+                template,
+                count: entry.count,
+                source_ids,
+                sample_lines: entry.sample_lines,
+            }
+        })
+        .collect();
+    result_clusters.sort_by(|a, b| b.count.cmp(&a.count));
+
+    Ok(ClusterResult {
+        clusters: result_clusters,
+        total_lines,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2887,5 +3026,169 @@ mod tests {
             5,
             "default TimeRange should return all matches"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Tokenizer tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_tokenize_numbers() {
+        assert_eq!(tokenize("ERROR 42 failed"), "ERROR <*> failed");
+    }
+
+    #[test]
+    fn test_tokenize_ips() {
+        assert_eq!(tokenize("connect 10.0.0.1:8080"), "connect <*>");
+    }
+
+    #[test]
+    fn test_tokenize_preserves_keywords() {
+        assert_eq!(tokenize("ERROR timeout"), "ERROR timeout");
+    }
+
+    #[test]
+    fn test_tokenize_uuids() {
+        assert_eq!(
+            tokenize("req a1b2c3d4-e5f6-7890-abcd-ef1234567890 done"),
+            "req <*> done"
+        );
+    }
+
+    #[test]
+    fn test_tokenize_paths() {
+        assert_eq!(tokenize("open /var/log/app.log failed"), "open <*> failed");
+    }
+
+    #[test]
+    fn test_tokenize_timestamps() {
+        assert_eq!(tokenize("at 2024-01-15T10:30:00 event"), "at <*> event");
+    }
+
+    #[test]
+    fn test_tokenize_quoted_strings() {
+        assert_eq!(tokenize(r#"msg "hello_world" end"#), "msg <*> end");
+    }
+
+    #[test]
+    fn test_cluster_logs_basic() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "2024-01-01 00:00:01 ERROR timeout after 100 ms").unwrap();
+        writeln!(f, "2024-01-01 00:00:02 ERROR timeout after 200 ms").unwrap();
+        writeln!(f, "2024-01-01 00:00:03 INFO started successfully").unwrap();
+        writeln!(f, "2024-01-01 00:00:04 ERROR timeout after 300 ms").unwrap();
+        f.flush().unwrap();
+
+        let ts_template = TimestampTemplate {
+            id: 1,
+            name: "ts".into(),
+            format: "%Y-%m-%d %H:%M:%S".into(),
+            extraction_regex: None,
+            default_year: None,
+        };
+        let template = SourceTemplate {
+            id: 1,
+            name: "tmpl".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
+            json_timestamp_field: None,
+        };
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().to_string(),
+        };
+
+        let result = cluster_logs(
+            &[source],
+            &[template],
+            &[ts_template],
+            &TimeRange::default(),
+        )
+        .unwrap();
+
+        assert_eq!(result.total_lines, 4);
+        assert_eq!(result.clusters.len(), 1); // singleton "INFO started successfully" filtered out
+        assert_eq!(result.clusters[0].count, 3);
+        assert!(result.clusters[0].template.contains("<*>"));
+        assert!(result.clusters[0].sample_lines.len() <= 3);
+        assert_eq!(result.clusters[0].source_ids, vec![1]);
+    }
+
+    #[test]
+    fn test_tokenize_time_only() {
+        assert_eq!(tokenize("at 04:03:33 event"), "at <*> event");
+    }
+
+    #[test]
+    fn test_tokenize_time_with_millis() {
+        assert_eq!(tokenize("at 17:41:44,747 event"), "at <*> event");
+    }
+
+    #[test]
+    fn test_tokenize_embedded_digits() {
+        // Drain catch-all: tokens with embedded digits are variable
+        assert_eq!(
+            tokenize("su(pam_unix)[27953]: session opened"),
+            "<*> session opened"
+        );
+    }
+
+    #[test]
+    fn test_tokenize_syslog_line() {
+        assert_eq!(
+            tokenize(
+                "authentication failure; logname= uid=0 euid=0 tty=NODEVssh ruser= rhost=218.188.2.4"
+            ),
+            "authentication failure; logname= <*> <*> tty=NODEVssh ruser= <*>"
+        );
+    }
+
+    #[test]
+    fn test_cluster_excludes_singletons() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "2024-01-01 00:00:01 ERROR timeout 100").unwrap();
+        writeln!(f, "2024-01-01 00:00:02 ERROR timeout 200").unwrap();
+        writeln!(f, "2024-01-01 00:00:03 ERROR timeout 300").unwrap();
+        writeln!(f, "2024-01-01 00:00:04 UNIQUE never repeated xyz").unwrap();
+        f.flush().unwrap();
+
+        let ts_template = TimestampTemplate {
+            id: 1,
+            name: "ts".into(),
+            format: "%Y-%m-%d %H:%M:%S".into(),
+            extraction_regex: None,
+            default_year: None,
+        };
+        let template = SourceTemplate {
+            id: 1,
+            name: "tmpl".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
+            json_timestamp_field: None,
+        };
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().to_string(),
+        };
+
+        let result = cluster_logs(
+            &[source],
+            &[template],
+            &[ts_template],
+            &TimeRange::default(),
+        )
+        .unwrap();
+
+        assert_eq!(result.total_lines, 4);
+        assert_eq!(result.clusters.len(), 1); // singleton filtered out
+        assert_eq!(result.clusters[0].count, 3);
     }
 }

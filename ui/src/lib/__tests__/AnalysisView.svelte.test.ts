@@ -74,6 +74,9 @@ vi.mock('../api', () => {
       detectTemplate: vi.fn(),
       suggestRule: vi.fn(),
     },
+    clustering: {
+      run: vi.fn().mockResolvedValue({ clusters: [], total_lines: 0 }),
+    },
     sources: {
       list: vi.fn().mockResolvedValue(mockSources),
     },
@@ -314,6 +317,21 @@ describe('AnalysisView', () => {
     await tick();
 
     expect(screen.getByText('Re-analyzing...')).toBeInTheDocument();
+  });
+
+  it('"Clusters" tab appears and switches view', async () => {
+    renderAnalysis();
+    await tick();
+
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await waitFor(() => {
+      expect(screen.getByText('Clusters')).toBeInTheDocument();
+    });
+
+    await fireEvent.click(screen.getByText('Clusters'));
+    const clustersBtn = screen.getByText('Clusters');
+    expect(clustersBtn.classList.contains('active')).toBe(true);
   });
 
   it('"State Evolution" tab appears and switches view', async () => {

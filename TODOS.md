@@ -225,13 +225,9 @@ Extract severity as a built-in field via source template config or auto-detectio
 
 ## 24. Automatic Error Clustering
 
-Auto-cluster log lines by similarity (tokenize, group by template). Show the top N clusters with counts. Click a cluster to create a rule from it.
+**Status:** Done
 
-- Tokenize log lines and group by structure (e.g., Drain algorithm)
-- Show cluster list sorted by frequency
-- Click-to-create-rule from a cluster template
-
-**Inspiration:** Datadog Log Patterns, Elasticsearch log categorization, Drain algorithm.
+Drain-inspired tokenization in `logium-core::engine::cluster_logs()`: splits log lines on whitespace, replaces variable tokens (numbers, IPs, UUIDs, hex, timestamps, paths, quoted strings) with `<*>`, groups by structural template. Streaming via `MergedLogStream` (never loads full files). `POST /api/projects/:pid/cluster` endpoint in `logium-server`. Frontend `ErrorClusteringView` component as a 4th tab in AnalysisView: shows clusters sorted by frequency with count badges, source chips, expand-for-samples, and "Create Rule" button (opens `RuleCreator` with a sample line). Source filter chips to narrow by source. 8 Rust unit tests (tokenizer + cluster_logs), 1 server integration test, 6 frontend component tests.
 
 ---
 
