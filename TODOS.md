@@ -460,3 +460,76 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 **Issue:** 256-item channel with `blocking_send` can stall on slow clients.
 **Fix:** Consider adaptive channel capacity or dropping stale messages.
 **Est. impact:** Prevents stalling on slow clients.
+
+---
+
+## Usability & Onboarding
+
+Improvements to reduce time-to-first-analysis, automate manual steps, and make existing features discoverable. Currently a new user must complete ~7 manual steps before seeing their first result. These items surface existing backend automation in the UI and smooth the onboarding curve.
+
+Suggested priority order (impact-to-effort ratio): #29 → #30 → #28 → #31 → #32 → #34 → #33.
+
+---
+
+### 28. Upload-First Source Creation with Auto-Detection
+
+When a user uploads a log file in SourceManager, auto-detect the format using the existing `detect-template` endpoint (already wired in `api.ts` but never called from the UI), match against the 6 auto-seeded timestamp templates, auto-create a source template if needed, and create the source — all in one flow. Show detected format and confidence to the user. This collapses 3 manual steps (create timestamp template config → create source template → create source) into a single file upload action.
+
+**Key files:** `ui/src/lib/SourceManager.svelte`, `ui/src/lib/api.ts` (line ~406, `detectTemplate` already defined)
+
+---
+
+### 29. Auto-Create Default Ruleset on Source Template Creation
+
+When a source template is created, automatically create a "Default — {template_name}" ruleset linked to it. Auto-assign new rules to default rulesets in RuleCreator and RuleList. This eliminates the mandatory "create a ruleset" step that adds no value for the common case — rulesets become an advanced organizational feature rather than a required prerequisite.
+
+**Key files:** `ui/src/lib/TemplateManager.svelte`, `ui/src/lib/RuleList.svelte`, `ui/src/lib/RuleCreator.svelte`
+
+---
+
+### 30. Actionable Empty States with Contextual Guidance
+
+Replace bare "No X yet" messages with contextual cards that explain what each entity is, what to do next, and link to prerequisite steps. Key improvements:
+- SourceManager: lead with file upload, explain what sources are
+- TemplateManager: explain templates, suggest uploading a file instead (which auto-creates templates via #28)
+- RuleList: explain rules, mention text-selection shortcut in LogViewer
+- AnalysisView: show a setup checklist (sources ✓/✗, rules ✓/✗, rulesets ✓/✗) with links to incomplete steps, instead of just "Click Run Analysis"
+
+**Key files:** `ui/src/lib/SourceManager.svelte`, `ui/src/lib/TemplateManager.svelte`, `ui/src/lib/RuleList.svelte`, `ui/src/lib/AnalysisView.svelte`
+
+---
+
+### 31. Starter Project Configs (One-Click Demo)
+
+Bundle 2–3 pre-built `.logium.json` config files (served from `ui/public/`) with rules for common log formats: Nginx access logs (4xx/5xx errors, slow responses), Syslog (auth failures, OOM, service restarts), Zookeeper (session expirations, leader elections). Add a "Load Starter Config" option in ProjectManager that imports via the existing `projects.importConfig()` API. Pair with downloadable sample log files from the test fixtures. Gives new users a working analysis in under 60 seconds.
+
+**Key files:** `ui/src/lib/ProjectManager.svelte`, `ui/src/lib/api.ts` (`importConfig` already exists), new static files in `ui/public/starters/`
+
+---
+
+### 32. Timestamp Template Management UI
+
+Add a CRUD section for timestamp templates in TemplateManager (or as a collapsible panel). The 6 auto-seeded templates cover common formats but users with custom timestamp formats have no way to create new ones through the UI — the `tsTemplatesApi` CRUD is fully wired in `api.ts` but only the list endpoint is called (for the dropdown). Include a "test" input where users can paste a sample line and verify the format parses correctly.
+
+**Key files:** `ui/src/lib/TemplateManager.svelte`, `ui/src/lib/api.ts` (lines ~196-212, `tsTemplatesApi` CRUD already defined)
+
+---
+
+### 33. Guided Setup Wizard for Empty Projects
+
+When a project has zero sources and zero rules, show a 3-step wizard overlay instead of the raw tab interface:
+1. **Add your log files** — drag-and-drop zone with auto-detection (from #28)
+2. **Define what to look for** — show error clustering results with "Create Rule" buttons (reuse `ErrorClusteringView`), plus manual rule creation
+3. **Run analysis** — single button, inline results
+
+Wizard is skippable ("Show full UI") and hides permanently once the project has at least one source and one rule. The normal tab UI takes over after that.
+
+**Key files:** `ui/src/App.svelte`, new `ui/src/lib/SetupWizard.svelte` component, reuses `ErrorClusteringView.svelte` and `RuleCreator.svelte`
+
+---
+
+### 34. Setup Progress Indicator
+
+Show a compact progress checklist in the project header or sidebar: Templates ✓ → Sources ✓ → Rules ✗ → Analysis ✗. Helps users understand the dependency chain and what steps remain. Disappears once all steps are complete and an analysis has been run. Uses entity counts already loaded by each component.
+
+**Key files:** `ui/src/App.svelte`
