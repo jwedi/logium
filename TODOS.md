@@ -385,11 +385,10 @@ Prioritized optimizations for handling large log files (hundreds of MB).
 **Change:** Wrapped per-source inner state maps in `Arc` for COW semantics. `snapshot()` now clones `Arc` pointers (O(1) per source) instead of deep-cloning inner maps. Mutations use `Arc::make_mut()` — only clones the single source's map when a snapshot holds a reference.
 **Result:** Large benchmark (51k lines) improved from 93.6ms → 88.8ms (~5% faster). Cross-source within noise.
 
-#### P4. Frontend: replace array spread with push on flush
+#### P4. Frontend: replace array spread with push on flush — Done
 **File:** `ui/src/lib/AnalysisView.svelte`
-**Issue:** `[...result.rule_matches, ...buffer]` copies the growing array every 100ms, creating O(n²) growth.
-**Fix:** Use `Array.push(...buffer)` instead.
-**Est. impact:** Eliminates O(n²) array growth; critical for 100k+ matches.
+**Change:** Replaced `result = { ...spread }` with in-place `result!.*.push(...buffer)` in all three flush sites (periodic, onComplete, onError). Svelte 5 `$state` deep reactivity triggers updates from in-place mutations — no reassignment needed.
+**Result:** Flush cost reduced from O(total matches) to O(buffer size) per flush; O(n²) cumulative overhead eliminated.
 
 #### P5. Batch DB queries in load_project_data
 **File:** `crates/logium-server/src/db.rs`
@@ -416,16 +415,13 @@ Two-phase parallel architecture: Phase 1 uses `rayon::par_iter` to read and eval
 Added `estimate_timestamp_len(fmt)` that computes the expected (min, max) output length of a chrono format string from its specifiers (e.g., `%Y-%m-%d %H:%M:%S` → exactly 19 chars). `parse_timestamp_prefix` now tries a narrow window around the estimate (~3-5 positions) before falling back to a full scan. For formats without `extraction_regex` (zookeeper, syslog), this reduces per-line parse attempts from O(line_length) to O(1). No impact on nginx benchmarks (which use extraction_regex and never call `parse_timestamp_prefix`). 8 new tests: 6 for estimate accuracy across common formats, 2 for prefix parsing correctness.
 
 #### P8. Virtualize pattern matches section
-**File:** `ui/src/lib/AnalysisView.svelte`
-**Issue:** Pattern matches with full state snapshots are rendered without virtualization.
-**Fix:** Use a virtual list (e.g. `svelte-virtual-list` or custom) for the matches list.
-**Est. impact:** Prevents DOM thrashing with 1000+ matches.
+**Status:** Done
 
-#### P9. Fix O(n*m) findIndex in LogViewer
-**File:** `ui/src/lib/LogViewer.svelte` ~line 165
-**Issue:** Linear scan per highlighted line using `findIndex`.
-**Fix:** Build a `Set` for O(1) lookup.
-**Est. impact:** Large improvement with many highlights.
+Content-based height estimation virtual scroll for pattern match cards. `estimatePmHeight()` computes each card's height from its data (sources × keys), prefix-sum offsets array for O(1) position lookup, binary search for visible range with overscan of 5. Scroll container capped at 600px with `translateY` positioning. Heading shows total count. No external dependencies — same scroll-spacer + translateY pattern used by `LogViewer`.
+
+#### P9. Fix O(n*m) findIndex in LogViewer — Done
+**File:** `ui/src/lib/LogViewer.svelte`
+**Change:** Added `lineContentIndex` derived Map (line content → first occurrence index) for O(1) lookups, replacing O(M) `findIndex` calls in `lineMatchMap` and navigate effect. Added `filteredIndexSet` derived Set replacing O(F) `filteredIndices.includes()`. Total cost of `lineMatchMap` reduced from O(N*M) to O(N).
 
 #### P10. Streaming export endpoint
 **File:** `crates/logium-server/src/routes/analysis.rs`

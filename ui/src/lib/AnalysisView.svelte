@@ -140,6 +140,85 @@
     return '?';
   }
 
+  // Virtual scroll for pattern matches
+  const PM_PADDING = 32; // .card padding: 16px * 2
+  const PM_BORDER = 2; // .card border: 1px * 2
+  const PM_HEADER = 29; // .pm-header height (~21px text + 8px margin-bottom)
+  const PM_SOURCE_HEADER = 22; // .pm-source-name line height
+  const PM_ENTRY = 22; // .pm-entry height (12px font + 2px padding * 2 + flex spacing)
+  const PM_SOURCE_MARGIN = 8; // .pm-source margin-bottom
+  const PM_CARD_MARGIN = 8; // .pattern-match margin-bottom
+
+  function estimatePmHeight(pm: PatternMatch): number {
+    let h = PM_PADDING + PM_BORDER + PM_HEADER;
+    for (const [, stateMap] of Object.entries(pm.state_snapshot)) {
+      h += PM_SOURCE_HEADER + Object.keys(stateMap).length * PM_ENTRY + PM_SOURCE_MARGIN;
+    }
+    return h + PM_CARD_MARGIN;
+  }
+
+  let pmScrollTop = $state(0);
+  let pmContainerHeight = $state(400);
+  let pmContainer: HTMLDivElement | undefined = $state();
+
+  const PM_OVERSCAN = 5;
+
+  let pmOffsets = $derived.by(() => {
+    const pms = filteredResult.pattern_matches;
+    const offsets = new Array<number>(pms.length + 1);
+    offsets[0] = 0;
+    for (let i = 0; i < pms.length; i++) {
+      offsets[i + 1] = offsets[i] + estimatePmHeight(pms[i]);
+    }
+    return offsets;
+  });
+
+  let pmTotalHeight = $derived(pmOffsets[pmOffsets.length - 1] ?? 0);
+
+  let pmStartIdx = $derived.by(() => {
+    const offsets = pmOffsets;
+    let lo = 0,
+      hi = offsets.length - 2;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (offsets[mid + 1] <= pmScrollTop) lo = mid + 1;
+      else hi = mid;
+    }
+    return Math.max(0, lo - PM_OVERSCAN);
+  });
+
+  let pmEndIdx = $derived.by(() => {
+    const offsets = pmOffsets;
+    const bottom = pmScrollTop + pmContainerHeight;
+    let lo = pmStartIdx,
+      hi = offsets.length - 2;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (offsets[mid] < bottom) lo = mid + 1;
+      else hi = mid;
+    }
+    return Math.min(offsets.length - 1, lo + PM_OVERSCAN);
+  });
+
+  let pmVisibleMatches = $derived(filteredResult.pattern_matches.slice(pmStartIdx, pmEndIdx));
+
+  let pmOffsetY = $derived(pmOffsets[pmStartIdx] ?? 0);
+
+  function onPmScroll(e: Event) {
+    pmScrollTop = (e.target as HTMLDivElement).scrollTop;
+  }
+
+  $effect(() => {
+    if (!pmContainer) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        pmContainerHeight = entry.contentRect.height;
+      }
+    });
+    ro.observe(pmContainer);
+    return () => ro.disconnect();
+  });
+
   async function load() {
     try {
       [sourceList, ruleList, patternList] = await Promise.all([
@@ -182,11 +261,9 @@
         patternMatchBuffer.length > 0 ||
         stateChangeBuffer.length > 0
       ) {
-        result = {
-          rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
-          pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
-          state_changes: [...result!.state_changes, ...stateChangeBuffer],
-        };
+        result!.rule_matches.push(...ruleMatchBuffer);
+        result!.pattern_matches.push(...patternMatchBuffer);
+        result!.state_changes.push(...stateChangeBuffer);
         ruleMatchBuffer = [];
         patternMatchBuffer = [];
         stateChangeBuffer = [];
@@ -221,11 +298,9 @@
             patternMatchBuffer.length > 0 ||
             stateChangeBuffer.length > 0
           ) {
-            result = {
-              rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
-              pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
-              state_changes: [...result!.state_changes, ...stateChangeBuffer],
-            };
+            result!.rule_matches.push(...ruleMatchBuffer);
+            result!.pattern_matches.push(...patternMatchBuffer);
+            result!.state_changes.push(...stateChangeBuffer);
             ruleMatchBuffer = [];
             patternMatchBuffer = [];
             stateChangeBuffer = [];
@@ -242,11 +317,9 @@
             patternMatchBuffer.length > 0 ||
             stateChangeBuffer.length > 0
           ) {
-            result = {
-              rule_matches: [...result!.rule_matches, ...ruleMatchBuffer],
-              pattern_matches: [...result!.pattern_matches, ...patternMatchBuffer],
-              state_changes: [...result!.state_changes, ...stateChangeBuffer],
-            };
+            result!.rule_matches.push(...ruleMatchBuffer);
+            result!.pattern_matches.push(...patternMatchBuffer);
+            result!.state_changes.push(...stateChangeBuffer);
           }
           error = message;
           running = false;
@@ -463,29 +536,36 @@
 
     {#if filteredResult.pattern_matches.length > 0}
       <div class="pattern-matches-section">
-        <h3>Pattern Matches</h3>
-        {#each filteredResult.pattern_matches as pm}
-          <div class="pattern-match card">
-            <div class="pm-header">
-              <span class="pm-name">{getPatternName(pm.pattern_id)}</span>
-              <span class="pm-time">{pm.timestamp}</span>
-            </div>
-            <div class="pm-state">
-              {#each Object.entries(pm.state_snapshot) as [sourceName, stateMap]}
-                <div class="pm-source">
-                  <span class="pm-source-name">{sourceName}</span>
-                  {#each Object.entries(stateMap) as [key, val]}
-                    <div class="pm-entry">
-                      <span class="state-key">{key}</span>
-                      <span class="state-value">{formatStateValue(val.value)}</span>
-                      <span class="state-set-at">{val.set_at}</span>
-                    </div>
-                  {/each}
+        <h3>Pattern Matches ({filteredResult.pattern_matches.length})</h3>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="pm-scroll-container" bind:this={pmContainer} onscroll={onPmScroll}>
+          <div class="pm-scroll-spacer" style="height: {pmTotalHeight}px;">
+            <div class="pm-visible-cards" style="transform: translateY({pmOffsetY}px);">
+              {#each pmVisibleMatches as pm}
+                <div class="pattern-match card">
+                  <div class="pm-header">
+                    <span class="pm-name">{getPatternName(pm.pattern_id)}</span>
+                    <span class="pm-time">{pm.timestamp}</span>
+                  </div>
+                  <div class="pm-state">
+                    {#each Object.entries(pm.state_snapshot) as [sourceName, stateMap]}
+                      <div class="pm-source">
+                        <span class="pm-source-name">{sourceName}</span>
+                        {#each Object.entries(stateMap) as [key, val]}
+                          <div class="pm-entry">
+                            <span class="state-key">{key}</span>
+                            <span class="state-value">{formatStateValue(val.value)}</span>
+                            <span class="state-set-at">{val.set_at}</span>
+                          </div>
+                        {/each}
+                      </div>
+                    {/each}
+                  </div>
                 </div>
               {/each}
             </div>
           </div>
-        {/each}
+        </div>
       </div>
     {/if}
 
@@ -804,5 +884,21 @@
     margin-top: 8px;
     font-size: 12px;
     color: var(--text-dim);
+  }
+
+  .pm-scroll-container {
+    max-height: 600px;
+    overflow-y: auto;
+    position: relative;
+  }
+
+  .pm-scroll-spacer {
+    position: relative;
+  }
+
+  .pm-visible-cards {
+    position: absolute;
+    left: 0;
+    right: 0;
   }
 </style>
