@@ -44,6 +44,34 @@
   let filterRuleId: number | null = $state(null);
   let filterSourceId: number | null = $state(null);
 
+  let showExportOptions = $state(false);
+  let exportRuleMatches = $state(true);
+  let exportPatternMatches = $state(true);
+  let exportStateChanges = $state(true);
+
+  function doExport(format: 'json' | 'csv') {
+    const timeRange: TimeRange = {
+      start: timeStart || null,
+      end: timeEnd || null,
+    };
+    if (format === 'json') {
+      const include: string[] = [];
+      if (exportRuleMatches) include.push('rule_matches');
+      if (exportPatternMatches) include.push('pattern_matches');
+      if (exportStateChanges) include.push('state_changes');
+      analysisApi.exportJson(projectId, timeRange, include.length < 3 ? include : undefined);
+    } else {
+      // CSV: one file per section (each has different column schema)
+      const sections: string[] = [];
+      if (exportRuleMatches) sections.push('rule_matches');
+      if (exportPatternMatches) sections.push('pattern_matches');
+      if (exportStateChanges) sections.push('state_changes');
+      for (const section of sections) {
+        analysisApi.exportCsv(projectId, section, timeRange);
+      }
+    }
+  }
+
   let selectedSource = $derived(sourceList.find((s) => s.id === selectedSourceId) ?? null);
 
   const emptyResult: AnalysisResult = { rule_matches: [], pattern_matches: [], state_changes: [] };
@@ -252,16 +280,33 @@
 
 <div class="header-row">
   <h2>Analysis</h2>
-  <button class="primary" onclick={() => runAnalysis(false)} disabled={running}>
-    {running
-      ? linesProcessed > 0
-        ? `Processing... ${linesProcessed} lines`
-        : autoTriggered
-          ? 'Re-analyzing...'
-          : 'Running...'
-      : 'Run Analysis'}
-  </button>
+  <div class="header-actions">
+    <button class="primary" onclick={() => runAnalysis(false)} disabled={running}>
+      {running
+        ? linesProcessed > 0
+          ? `Processing... ${linesProcessed} lines`
+          : autoTriggered
+            ? 'Re-analyzing...'
+            : 'Running...'
+        : 'Run Analysis'}
+    </button>
+    {#if result}
+      <button onclick={() => (showExportOptions = !showExportOptions)} disabled={running}>
+        Export
+      </button>
+    {/if}
+  </div>
 </div>
+
+{#if showExportOptions}
+  <div class="export-options">
+    <label><input type="checkbox" bind:checked={exportRuleMatches} /> Rule matches</label>
+    <label><input type="checkbox" bind:checked={exportPatternMatches} /> Pattern matches</label>
+    <label><input type="checkbox" bind:checked={exportStateChanges} /> State changes</label>
+    <button onclick={() => doExport('json')}>Download JSON</button>
+    <button onclick={() => doExport('csv')}>Download CSV</button>
+  </div>
+{/if}
 
 <div class="time-range-row">
   <label>From <input type="datetime-local" bind:value={timeStart} step="1" /></label>
@@ -491,6 +536,19 @@
 
   .header-row h2 {
     margin: 0;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .export-options {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 0;
   }
 
   .time-range-row {

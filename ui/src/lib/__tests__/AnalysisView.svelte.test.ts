@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import AnalysisView from '../AnalysisView.svelte';
 import { invalidateAnalysis } from '../analysisInvalidation.svelte';
+import { clearCachedAnalysis } from '../analysisCache.svelte';
 import {
   makeAnalysisResult,
   makeSource,
@@ -71,6 +72,8 @@ vi.mock('../api', () => {
     analysis: {
       run: vi.fn(),
       runStreaming: vi.fn((...args: any[]) => runStreamingImpl(args[0], args[1])),
+      exportJson: vi.fn(),
+      exportCsv: vi.fn(),
       detectTemplate: vi.fn(),
       suggestRule: vi.fn(),
     },
@@ -526,6 +529,45 @@ describe('AnalysisView', () => {
 
     // Filter should be cleared
     expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
+  });
+
+  // --- Export ---
+
+  it('Export button not visible before analysis, visible after', async () => {
+    clearCachedAnalysis();
+    renderAnalysis();
+    await tick();
+
+    // Before analysis, no export button
+    expect(screen.queryByText('Export')).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await waitFor(() => {
+      expect(screen.getByText('Results')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Export')).toBeInTheDocument();
+  });
+
+  it('clicking Export shows section checkboxes and format buttons', async () => {
+    renderAnalysis();
+    await tick();
+
+    await fireEvent.click(screen.getByText('Run Analysis'));
+    vi.advanceTimersByTime(200);
+    await waitFor(() => {
+      expect(screen.getByText('Results')).toBeInTheDocument();
+    });
+
+    await fireEvent.click(screen.getByText('Export'));
+    await tick();
+
+    expect(screen.getByText('Rule matches')).toBeInTheDocument();
+    expect(screen.getByText('Pattern matches')).toBeInTheDocument();
+    expect(screen.getByText('State changes')).toBeInTheDocument();
+    expect(screen.getByText('Download JSON')).toBeInTheDocument();
+    expect(screen.getByText('Download CSV')).toBeInTheDocument();
   });
 
   // --- Snapshot ---

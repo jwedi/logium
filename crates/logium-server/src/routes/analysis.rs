@@ -35,6 +35,10 @@ pub fn router() -> Router<AppState> {
         .route("/api/projects/{project_id}/analyze", post(analyze))
         .route("/api/projects/{project_id}/analyze/ws", get(analyze_ws))
         .route(
+            "/api/projects/{project_id}/analyze/export",
+            get(export_analysis),
+        )
+        .route(
             "/api/projects/{project_id}/detect-template",
             post(detect_template),
         )
@@ -71,6 +75,125 @@ async fn analyze(
     .map_err(|e| ApiError::from(DbError::InvalidData(format!("analysis error: {e}"))))?;
 
     Ok(Json(serde_json::to_value(result).unwrap()))
+}
+
+#[derive(Deserialize, Default)]
+struct ExportQuery {
+    format: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
+    /// Comma-separated list of sections to include: rule_matches,pattern_matches,state_changes
+    /// Used for JSON export. If omitted, all sections are included.
+    include: Option<String>,
+    /// Single section to export as CSV: rule_matches, pattern_matches, or state_changes.
+    /// Required when format=csv (each section is a separate file with its own columns).
+    section: Option<String>,
+}
+
+fn parse_csv_section(s: &str) -> Result<logium_core::export::CsvSection, String> {
+    match s {
+        "rule_matches" => Ok(logium_core::export::CsvSection::RuleMatches),
+        "pattern_matches" => Ok(logium_core::export::CsvSection::PatternMatches),
+        "state_changes" => Ok(logium_core::export::CsvSection::StateChanges),
+        other => Err(format!(
+            "invalid CSV section '{other}', expected rule_matches, pattern_matches, or state_changes"
+        )),
+    }
+}
+
+async fn export_analysis(
+    State(state): State<AppState>,
+    Path(project_id): Path<i64>,
+    Query(query): Query<ExportQuery>,
+) -> Result<Response, ApiError> {
+    let time_query = TimeRangeQuery {
+        start: query.start,
+        end: query.end,
+    };
+    let time_range = time_query
+        .to_time_range()
+        .map_err(|e| ApiError::from(DbError::InvalidData(e)))?;
+
+    let format = query.format.unwrap_or_else(|| "json".to_string());
+    if format != "json" && format != "csv" {
+        return Err(ApiError::from(DbError::InvalidData(format!(
+            "unsupported format '{format}', expected 'json' or 'csv'"
+        ))));
+    }
+
+    // CSV requires a `section` param; JSON uses `include` (optional).
+    let csv_section = if format == "csv" {
+        let s = query.section.as_deref().unwrap_or("rule_matches");
+        Some(parse_csv_section(s).map_err(|e| ApiError::from(DbError::InvalidData(e)))?)
+    } else {
+        None
+    };
+
+    let options = match &query.include {
+        Some(include) => {
+            let sections: Vec<&str> = include.split(',').map(|s| s.trim()).collect();
+            logium_core::export::ExportOptions {
+                rule_matches: sections.contains(&"rule_matches"),
+                pattern_matches: sections.contains(&"pattern_matches"),
+                state_changes: sections.contains(&"state_changes"),
+            }
+        }
+        None => logium_core::export::ExportOptions::default(),
+    };
+
+    let data = state.db.load_project_data(project_id).await?;
+
+    let (body, content_type, filename) = tokio::task::spawn_blocking(move || {
+        let result = logium_core::engine::analyze(
+            &data.sources,
+            &data.templates,
+            &data.timestamp_templates,
+            &data.rules,
+            &data.rulesets,
+            &data.patterns,
+            &time_range,
+        )
+        .map_err(|e| e.to_string())?;
+
+        if let Some(section) = csv_section {
+            let csv = logium_core::export::to_csv(
+                &result,
+                &data.rules,
+                &data.sources,
+                &data.patterns,
+                section,
+            );
+            let section_name = match section {
+                logium_core::export::CsvSection::RuleMatches => "rule-matches",
+                logium_core::export::CsvSection::PatternMatches => "pattern-matches",
+                logium_core::export::CsvSection::StateChanges => "state-changes",
+            };
+            Ok::<_, String>((
+                csv,
+                "text/csv; charset=utf-8",
+                format!("analysis-{section_name}.csv"),
+            ))
+        } else {
+            let json = logium_core::export::to_json(
+                &result,
+                &data.rules,
+                &data.sources,
+                &data.patterns,
+                &options,
+            );
+            Ok((json, "application/json", "analysis-export.json".to_string()))
+        }
+    })
+    .await
+    .map_err(|e| ApiError::from(DbError::InvalidData(format!("task join error: {e}"))))?
+    .map_err(|e| ApiError::from(DbError::InvalidData(format!("analysis error: {e}"))))?;
+
+    let disposition = format!("attachment; filename=\"{filename}\"");
+    Response::builder()
+        .header("Content-Type", content_type)
+        .header("Content-Disposition", disposition)
+        .body(body.into())
+        .map_err(|e| ApiError::from(DbError::InvalidData(format!("response build error: {e}"))))
 }
 
 async fn analyze_ws(
