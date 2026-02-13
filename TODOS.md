@@ -464,7 +464,7 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 
 Improvements to reduce time-to-first-analysis, automate manual steps, and make existing features discoverable. Currently a new user must complete ~7 manual steps before seeing their first result. These items surface existing backend automation in the UI and smooth the onboarding curve.
 
-Suggested priority order (impact-to-effort ratio): #29 → #30 → #28 → #31 → #32 → #34 → #33.
+Suggested priority order (impact-to-effort ratio): #29 → #30 → #28 → #36 → #37 → #31 → #32 → #35 → #34 → #33.
 
 ---
 
@@ -530,3 +530,27 @@ Wizard is skippable ("Show full UI") and hides permanently once the project has 
 Show a compact progress checklist in the project header or sidebar: Templates ✓ → Sources ✓ → Rules ✗ → Analysis ✗. Helps users understand the dependency chain and what steps remain. Disappears once all steps are complete and an analysis has been run. Uses entity counts already loaded by each component.
 
 **Key files:** `ui/src/App.svelte`
+
+---
+
+### 35. Source Replace (Re-associate File)
+
+In the source management view, add a "Replace" button on each source. Clicking it opens the file picker; selecting a file re-associates the source with the new file path and discards the old one. All parse settings (source template, name, etc.) are inherited — only the `file_path` changes. This supports the common workflow of receiving a new version of the same log (e.g., rotated logs, updated captures from a teammate) without recreating the source and its template/ruleset bindings.
+
+**Key files:** `ui/src/lib/SourceManager.svelte`, `ui/src/lib/api.ts`, `crates/logium-server/src/routes/` (PUT source endpoint already exists)
+
+---
+
+### 36. Default Project Bootstrap
+
+If no projects exist on startup, automatically create a "Default project" so the user lands in a usable workspace instead of facing an empty project list. Also add support for renaming projects (the `name` field exists in the DB but there is no rename affordance in the UI). This removes a mandatory first step that adds no value for single-project users and makes the project name editable for users who want to organize multiple projects.
+
+**Key files:** `ui/src/App.svelte`, `ui/src/lib/ProjectManager.svelte`, `ui/src/lib/api.ts`, `crates/logium-server/src/routes/` (project CRUD)
+
+---
+
+### 37. Source Template Auto-Selection via File Name / Log Content Regex
+
+Add two optional fields to source templates: `file_name_regex` (matched against the source file name) and `log_content_regex` (matched against the first 1000 lines of the file). When a source file is picked and matches a template's `file_name_regex`, or its first 1000 lines contain a match for `log_content_regex`, that template is automatically selected. These regex-based checks take precedence over the existing `detect-template` inference logic but do not replace it — if no regex matches, the current detection still runs as a fallback. This lets users define precise template-matching rules for their log formats (e.g., `file_name_regex: "nginx.*\\.log"` or `log_content_regex: "\\[error\\]"`) so new sources are classified correctly without manual selection.
+
+**Key files:** `crates/logium-core/src/model.rs` (SourceTemplate), `crates/logium-server/src/db.rs` (schema + CRUD), `crates/logium-server/src/routes/` (detect-template endpoint), `ui/src/lib/SourceManager.svelte`, `ui/src/lib/TemplateManager.svelte`
