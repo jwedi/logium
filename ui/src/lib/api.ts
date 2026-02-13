@@ -375,6 +375,29 @@ export const analysis = {
 
     return { close: () => ws.close() };
   },
+  exportJson: (pid: number, timeRange?: TimeRange, include?: string[]) => {
+    const params = new URLSearchParams({ format: 'json' });
+    if (timeRange?.start) params.set('start', timeRange.start);
+    if (timeRange?.end) params.set('end', timeRange.end);
+    if (include && include.length > 0) params.set('include', include.join(','));
+    window.open(`${BASE}/projects/${pid}/analyze/export?${params}`);
+  },
+  exportCsv: async (pid: number, section: string, timeRange?: TimeRange) => {
+    const params = new URLSearchParams({ format: 'csv', section });
+    if (timeRange?.start) params.set('start', timeRange.start);
+    if (timeRange?.end) params.set('end', timeRange.end);
+    const res = await fetch(`${BASE}/projects/${pid}/analyze/export?${params}`);
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `analysis-${section.replace('_', '-')}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
   detectTemplate: (pid: number, data: { content: string }) =>
     request<SourceTemplate>(`/projects/${pid}/detect-template`, {
       method: 'POST',
