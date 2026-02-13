@@ -122,7 +122,7 @@ impl LogLineIterator {
             None => None,
         };
         Ok(Self {
-            reader: BufReader::new(file),
+            reader: BufReader::with_capacity(64 * 1024, file),
             source_id: source.id,
             timestamp_format: ts_template.format.clone(),
             extraction_regex,

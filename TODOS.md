@@ -361,3 +361,105 @@ Use `clap`'s `after_long_help` to embed these examples so they appear in `--help
 - `analyze()` already takes flat slices, so JSON → deserialize → call `analyze()` → serialize result
 
 **Inspiration:** OpenClaw's CLI-first Skills pattern ("works with agents that didn't exist when we wrote the code"), `gh --json`, `ripgrep --json`, 12 Factor CLI Apps.
+
+---
+
+## Performance Optimizations
+
+Prioritized optimizations for handling large log files (hundreds of MB).
+
+### Critical Priority
+
+#### P1. Increase BufReader buffer size
+**File:** `crates/logium-core/src/engine.rs` ~line 125
+**Issue:** Default 8KB buffer is too small for sequential large-file reads.
+**Fix:** Use 64–128KB via `BufReader::with_capacity(64 * 1024, file)`.
+**Est. impact:** 20-40% I/O throughput improvement.
+
+#### P2. Eliminate LogLine cloning in hot loop
+**File:** `crates/logium-core/src/engine.rs`
+**Issue:** `LogLine` has two `String` fields (`content`, `raw`) cloned per line during processing.
+**Fix:** Use `Cow<str>` or `Arc<str>` to avoid copying.
+**Est. impact:** 15-30% fewer allocations for large files.
+
+#### P3. Lazy state snapshot cloning
+**File:** `crates/logium-core/src/engine.rs` — `snapshot()`
+**Issue:** Deep-clones entire `per_source_state` on every pattern-match check, even when the pattern doesn't fire.
+**Fix:** Only clone when a pattern actually fires.
+**Est. impact:** 10-30% speedup depending on state cardinality.
+
+#### P4. Frontend: replace array spread with push on flush
+**File:** `ui/src/lib/AnalysisView.svelte`
+**Issue:** `[...result.rule_matches, ...buffer]` copies the growing array every 100ms, creating O(n²) growth.
+**Fix:** Use `Array.push(...buffer)` instead.
+**Est. impact:** Eliminates O(n²) array growth; critical for 100k+ matches.
+
+#### P5. Batch DB queries in load_project_data
+**File:** `crates/logium-server/src/db.rs`
+**Issue:** N+1 query pattern — `build_log_rule` called per rule, `get_predicates` called per pattern.
+**Fix:** Use `WHERE id IN (...)` batch queries.
+**Est. impact:** 30-50+ queries → 3-5; sub-second project load.
+
+### High Priority
+
+#### P6. Avoid JSON double-parse
+**File:** `crates/logium-core/src/engine.rs` ~line 863/1046
+**Issue:** JSON lines parsed by the iterator then re-parsed for auto-extraction.
+**Fix:** Cache the parsed `serde_json::Value` and reuse it.
+**Est. impact:** ~2x for JSON-heavy workloads.
+
+#### P7. Optimize parse_timestamp_prefix
+**File:** `crates/logium-core/src/engine.rs`
+**Issue:** Tries every substring length 10..min(35, len) on each line.
+**Fix:** Add quick pre-checks (e.g. first char is digit, known delimiters) to reduce attempts.
+**Est. impact:** 10-20% for non-JSON formats.
+
+#### P8. Virtualize pattern matches section
+**File:** `ui/src/lib/AnalysisView.svelte`
+**Issue:** Pattern matches with full state snapshots are rendered without virtualization.
+**Fix:** Use a virtual list (e.g. `svelte-virtual-list` or custom) for the matches list.
+**Est. impact:** Prevents DOM thrashing with 1000+ matches.
+
+#### P9. Fix O(n*m) findIndex in LogViewer
+**File:** `ui/src/lib/LogViewer.svelte` ~line 165
+**Issue:** Linear scan per highlighted line using `findIndex`.
+**Fix:** Build a `Set` for O(1) lookup.
+**Est. impact:** Large improvement with many highlights.
+
+#### P10. Streaming export endpoint
+**File:** `crates/logium-server/src/routes/analysis.rs`
+**Issue:** Export materializes the full result in memory before sending.
+**Fix:** Stream results directly using Axum's streaming body.
+**Est. impact:** Enables arbitrarily large exports without OOM.
+
+### Medium Priority
+
+#### P11. Cache source_name in hot loop
+**File:** `crates/logium-core/src/engine.rs`
+**Issue:** `source_name` looked up and cloned from HashMap per line.
+**Fix:** Cache per-source outside the inner loop.
+**Est. impact:** Minor — fewer HashMap lookups.
+
+#### P12. Deduplicate derived filter chains
+**File:** `ui/src/lib/AnalysisView.svelte`
+**Issue:** `filteredResult`, `ruleBreakdown`, `sourceBreakdown` each independently filter the full result.
+**Fix:** Compute the filtered result once and derive breakdowns from it.
+**Est. impact:** 2-3x fewer iterations over large arrays.
+
+#### P13. Viewport-filter timeline events
+**File:** `ui/src/lib/TimelineView.svelte`
+**Issue:** `allEvents` creates objects for ALL matches regardless of visible range.
+**Fix:** Filter to the visible time range before creating event objects.
+**Est. impact:** Less GC pressure for large analyses.
+
+#### P14. Virtualize StateEvolutionView
+**File:** `ui/src/lib/StateEvolutionView.svelte`
+**Issue:** All state change rows rendered without virtualization.
+**Fix:** Add virtual scrolling for the state changes list.
+**Est. impact:** Prevents lag with 10k+ changes.
+
+#### P15. WebSocket backpressure tuning
+**File:** `crates/logium-server/src/routes/analysis.rs`
+**Issue:** 256-item channel with `blocking_send` can stall on slow clients.
+**Fix:** Consider adaptive channel capacity or dropping stale messages.
+**Est. impact:** Prevents stalling on slow clients.
