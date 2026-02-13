@@ -1066,6 +1066,7 @@ dependencies = [
  "chrono",
  "criterion",
  "csv",
+ "rayon",
  "regex",
  "serde",
  "serde_json",

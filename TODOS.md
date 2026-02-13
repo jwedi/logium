@@ -380,11 +380,10 @@ Prioritized optimizations for handling large log files (hundreds of MB).
 
 `LogLine.raw` and `LogLine.content` changed from `String` to `Arc<str>`. Iterator construction shares a single `Arc` when `raw == content` (common case — no `content_regex`). Hot-loop `line.clone()` into `RuleMatch` is now two atomic ref bumps instead of two heap allocations+copies. Benchmarks: ~9% faster on cross-source workload, ~1% on single-source 51k lines.
 
-#### P3. Lazy state snapshot cloning
-**File:** `crates/logium-core/src/engine.rs` — `snapshot()`
-**Issue:** Deep-clones entire `per_source_state` on every pattern-match check, even when the pattern doesn't fire.
-**Fix:** Only clone when a pattern actually fires.
-**Est. impact:** 10-30% speedup depending on state cardinality.
+#### P3. Lazy state snapshot cloning — Done
+**File:** `crates/logium-core/src/engine.rs` — `StateManager`
+**Change:** Wrapped per-source inner state maps in `Arc` for COW semantics. `snapshot()` now clones `Arc` pointers (O(1) per source) instead of deep-cloning inner maps. Mutations use `Arc::make_mut()` — only clones the single source's map when a snapshot holds a reference.
+**Result:** Large benchmark (51k lines) improved from 93.6ms → 88.8ms (~5% faster). Cross-source within noise.
 
 #### P4. Frontend: replace array spread with push on flush
 **File:** `ui/src/lib/AnalysisView.svelte`
@@ -397,6 +396,11 @@ Prioritized optimizations for handling large log files (hundreds of MB).
 **Issue:** N+1 query pattern — `build_log_rule` called per rule, `get_predicates` called per pattern.
 **Fix:** Use `WHERE id IN (...)` batch queries.
 **Est. impact:** 30-50+ queries → 3-5; sub-second project load.
+
+#### P4b. Parallel analysis engine (rayon)
+**Status:** Done
+
+Two-phase parallel architecture: Phase 1 uses `rayon::par_iter` to read and evaluate rules across sources in parallel (nested `par_iter` for per-line rule evaluation within each source). Phase 2 merges results via `ProcessedLineMerger` (K-way merge over pre-processed Vecs) and applies state mutations + pattern evaluation sequentially. Benchmarks: cross-source 6.3ms → 4.4ms (1.43×), single-source 51k lines 88.8ms → 79.2ms (1.12×).
 
 ### High Priority
 

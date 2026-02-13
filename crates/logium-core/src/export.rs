@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -61,7 +62,7 @@ struct ExportRuleMatch {
 struct ExportPatternMatch {
     timestamp: NaiveDateTime,
     pattern_name: String,
-    state_snapshot: HashMap<String, HashMap<String, TrackedValue>>,
+    state_snapshot: HashMap<String, Arc<HashMap<String, TrackedValue>>>,
 }
 
 #[derive(Serialize)]
@@ -368,7 +369,7 @@ mod tests {
                 set_at: test_ts(),
             },
         );
-        snapshot.insert("app.log".to_string(), inner);
+        snapshot.insert("app.log".to_string(), Arc::new(inner));
 
         AnalysisResult {
             rule_matches: vec![RuleMatch {

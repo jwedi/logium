@@ -5,6 +5,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
 use chrono::NaiveDateTime;
+use rayon::prelude::*;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
 
@@ -330,6 +331,17 @@ fn parse_timestamp_prefix(line: &str, fmt: &str) -> Result<NaiveDateTime, chrono
 }
 
 // ---------------------------------------------------------------------------
+// Pre-processed line (Phase 1 output)
+// ---------------------------------------------------------------------------
+
+/// A log line with pre-computed rule evaluation results from parallel Phase 1.
+struct ProcessedLine {
+    line: LogLine,
+    rule_matches: Vec<(u64, HashMap<String, StateValue>)>, // (rule_id, extractions)
+    json_fields: Option<HashMap<String, StateValue>>,
+}
+
+// ---------------------------------------------------------------------------
 // K-way merge (min-heap)
 // ---------------------------------------------------------------------------
 
@@ -403,6 +415,79 @@ impl Iterator for MergedLogStream {
             }
         }
         Some(Ok(item.line))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// K-way merge for ProcessedLine (Phase 2)
+// ---------------------------------------------------------------------------
+
+struct ProcessedHeapItem {
+    processed: ProcessedLine,
+    source_idx: usize,
+}
+
+impl PartialEq for ProcessedHeapItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.processed.line.timestamp == other.processed.line.timestamp
+    }
+}
+
+impl Eq for ProcessedHeapItem {}
+
+impl PartialOrd for ProcessedHeapItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ProcessedHeapItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .processed
+            .line
+            .timestamp
+            .cmp(&self.processed.line.timestamp)
+            .then_with(|| other.source_idx.cmp(&self.source_idx))
+    }
+}
+
+/// Merges multiple pre-processed source Vecs in chronological order.
+struct ProcessedLineMerger {
+    heap: BinaryHeap<ProcessedHeapItem>,
+    iters: Vec<std::vec::IntoIter<ProcessedLine>>,
+}
+
+impl ProcessedLineMerger {
+    fn new(sources: Vec<Vec<ProcessedLine>>) -> Self {
+        let mut iters: Vec<std::vec::IntoIter<ProcessedLine>> =
+            sources.into_iter().map(|v| v.into_iter()).collect();
+        let mut heap = BinaryHeap::with_capacity(iters.len());
+        for (idx, iter) in iters.iter_mut().enumerate() {
+            if let Some(processed) = iter.next() {
+                heap.push(ProcessedHeapItem {
+                    processed,
+                    source_idx: idx,
+                });
+            }
+        }
+        Self { heap, iters }
+    }
+}
+
+impl Iterator for ProcessedLineMerger {
+    type Item = ProcessedLine;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.heap.pop()?;
+        // Refill from the same source
+        if let Some(next) = self.iters[item.source_idx].next() {
+            self.heap.push(ProcessedHeapItem {
+                processed: next,
+                source_idx: item.source_idx,
+            });
+        }
+        Some(item.processed)
     }
 }
 
@@ -519,13 +604,69 @@ pub fn evaluate_rule(
     Some(extracted)
 }
 
+/// Read all lines from a source (sequential I/O), then evaluate rules in parallel.
+/// Returns a Vec of ProcessedLine in chronological order.
+fn process_source(
+    source: &Source,
+    template: &SourceTemplate,
+    ts_template: &TimestampTemplate,
+    rule_ids: &[u64],
+    rule_map: &HashMap<u64, &LogRule>,
+    compiled_map: &HashMap<u64, &CompiledRule>,
+) -> Result<Vec<ProcessedLine>, AnalysisError> {
+    // Step 1: sequential I/O — read all lines
+    let lines: Vec<LogLine> =
+        LogLineIterator::new(source, template, ts_template)?.collect::<Result<Vec<_>, _>>()?;
+
+    let is_json = template.json_timestamp_field.is_some();
+
+    // Step 2: parallel rule evaluation (rayon)
+    let processed: Vec<ProcessedLine> = lines
+        .into_par_iter()
+        .map(|line| {
+            let mut rule_matches = Vec::new();
+            for rule_id in rule_ids {
+                if let (Some(rule), Some(compiled)) =
+                    (rule_map.get(rule_id), compiled_map.get(rule_id))
+                {
+                    if let Some(extracted) = evaluate_rule(rule, &line, compiled) {
+                        rule_matches.push((*rule_id, extracted));
+                    }
+                }
+            }
+            let json_fields = if is_json {
+                if let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content) {
+                    let mut fields = HashMap::new();
+                    for (key, value) in &map {
+                        if let Some(sv) = json_value_to_state_value(value) {
+                            fields.insert(key.clone(), sv);
+                        }
+                    }
+                    Some(fields)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            ProcessedLine {
+                line,
+                rule_matches,
+                json_fields,
+            }
+        })
+        .collect();
+
+    Ok(processed)
+}
+
 // ---------------------------------------------------------------------------
 // State manager
 // ---------------------------------------------------------------------------
 
 /// Manages per-source state.
 pub struct StateManager {
-    pub per_source_state: HashMap<u64, HashMap<String, TrackedValue>>,
+    pub per_source_state: HashMap<u64, Arc<HashMap<String, TrackedValue>>>,
     pub source_names: HashMap<u64, String>,
     name_to_id: HashMap<String, u64>,
 }
@@ -554,7 +695,7 @@ impl StateManager {
         rules: &[ExtractionRule],
         timestamp: NaiveDateTime,
     ) -> Vec<(String, Option<StateValue>, Option<StateValue>)> {
-        let state = self.per_source_state.entry(source_id).or_default();
+        let state = Arc::make_mut(self.per_source_state.entry(source_id).or_default());
         let mut changes = Vec::new();
 
         for rule in rules {
@@ -625,11 +766,11 @@ impl StateManager {
     }
 
     /// Snapshot all state, keyed by source name.
-    pub fn snapshot(&self) -> HashMap<String, HashMap<String, TrackedValue>> {
+    pub fn snapshot(&self) -> HashMap<String, Arc<HashMap<String, TrackedValue>>> {
         let mut snap = HashMap::new();
         for (id, state) in &self.per_source_state {
             if let Some(name) = self.source_names.get(id) {
-                snap.insert(name.clone(), state.clone());
+                snap.insert(name.clone(), Arc::clone(state));
             }
         }
         snap
@@ -849,34 +990,42 @@ pub fn analyze(
             .extend(rs.rule_ids.iter());
     }
 
-    // Build source -> template_id lookup
-    let source_template: HashMap<u64, u64> =
-        sources.iter().map(|s| (s.id, s.template_id)).collect();
-
-    // Create log line iterators
-    let mut iterators = Vec::new();
-    for source in sources {
-        let template = template_map.get(&source.template_id).ok_or_else(|| {
-            AnalysisError::ParseError(format!(
-                "no template found for template_id {}",
-                source.template_id
-            ))
-        })?;
-        let ts_template = ts_template_map
-            .get(&template.timestamp_template_id)
-            .ok_or_else(|| {
+    // --- Phase 1: parallel per-source processing (rayon) ---
+    let processed_sources: Vec<Vec<ProcessedLine>> = sources
+        .par_iter()
+        .map(|source| {
+            let template = template_map.get(&source.template_id).ok_or_else(|| {
                 AnalysisError::ParseError(format!(
-                    "no timestamp template found for timestamp_template_id {}",
-                    template.timestamp_template_id
+                    "no template found for template_id {}",
+                    source.template_id
                 ))
             })?;
-        iterators.push(LogLineIterator::new(source, template, ts_template)?);
-    }
+            let ts_template = ts_template_map
+                .get(&template.timestamp_template_id)
+                .ok_or_else(|| {
+                    AnalysisError::ParseError(format!(
+                        "no timestamp template found for timestamp_template_id {}",
+                        template.timestamp_template_id
+                    ))
+                })?;
+            let rule_ids = template_rule_ids
+                .get(&source.template_id)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            process_source(
+                source,
+                template,
+                ts_template,
+                rule_ids,
+                &rule_map,
+                &compiled_map,
+            )
+        })
+        .collect::<Result<_, _>>()?;
 
-    // K-way merge
-    let stream = MergedLogStream::new(iterators)?;
+    // --- Phase 2: sequential merge + state mutations + pattern evaluation ---
+    let merger = ProcessedLineMerger::new(processed_sources);
 
-    // State and pattern evaluator
     let mut state_manager = StateManager::new(sources);
     let mut pattern_eval = PatternEvaluator::new(patterns);
 
@@ -884,8 +1033,8 @@ pub fn analyze(
     let mut all_pattern_matches = Vec::new();
     let mut all_state_changes = Vec::new();
 
-    for result in stream {
-        let line = result?;
+    for processed in merger {
+        let line = &processed.line;
 
         // Time-range filtering (stream is chronological)
         if let Some(start) = time_range.start
@@ -899,88 +1048,77 @@ pub fn analyze(
             break;
         }
 
-        let tmpl_id = source_template.get(&line.source_id).copied().unwrap_or(0);
-
-        // Auto-extract JSON fields as state before rule processing
-        if let Some(tmpl) = template_map.get(&tmpl_id)
-            && tmpl.json_timestamp_field.is_some()
-            && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content)
-        {
+        // Apply pre-computed JSON fields as state
+        if let Some(json_fields) = &processed.json_fields {
             let source_name = state_manager
                 .source_names
                 .get(&line.source_id)
                 .cloned()
                 .unwrap_or_default();
-            let state = state_manager
-                .per_source_state
-                .entry(line.source_id)
-                .or_default();
-            for (key, value) in &map {
-                if let Some(sv) = json_value_to_state_value(value) {
-                    let old = state.get(key).map(|t| t.value.clone());
-                    let new = Some(sv.clone());
-                    state.insert(
-                        key.clone(),
-                        TrackedValue {
-                            value: sv,
-                            set_at: line.timestamp,
-                        },
-                    );
-                    if old != new {
-                        all_state_changes.push(StateChange {
-                            timestamp: line.timestamp,
-                            source_id: line.source_id,
-                            source_name: source_name.clone(),
-                            state_key: key.clone(),
-                            old_value: old,
-                            new_value: new,
-                            rule_id: 0,
-                        });
-                    }
+            let state = Arc::make_mut(
+                state_manager
+                    .per_source_state
+                    .entry(line.source_id)
+                    .or_default(),
+            );
+            for (key, sv) in json_fields {
+                let old = state.get(key).map(|t| t.value.clone());
+                let new = Some(sv.clone());
+                state.insert(
+                    key.clone(),
+                    TrackedValue {
+                        value: sv.clone(),
+                        set_at: line.timestamp,
+                    },
+                );
+                if old != new {
+                    all_state_changes.push(StateChange {
+                        timestamp: line.timestamp,
+                        source_id: line.source_id,
+                        source_name: source_name.clone(),
+                        state_key: key.clone(),
+                        old_value: old,
+                        new_value: new,
+                        rule_id: 0,
+                    });
                 }
             }
         }
 
-        // Find applicable rule ids
-        if let Some(rule_ids) = template_rule_ids.get(&tmpl_id) {
-            let source_name = state_manager
-                .source_names
-                .get(&line.source_id)
-                .cloned()
-                .unwrap_or_default();
+        // Apply pre-computed rule matches
+        let source_name = state_manager
+            .source_names
+            .get(&line.source_id)
+            .cloned()
+            .unwrap_or_default();
 
-            for rule_id in rule_ids {
-                if let (Some(rule), Some(compiled)) =
-                    (rule_map.get(rule_id), compiled_map.get(rule_id))
-                    && let Some(extracted) = evaluate_rule(rule, &line, compiled)
-                {
-                    // Apply state mutations
-                    let changes = state_manager.apply_mutations(
-                        line.source_id,
-                        &extracted,
-                        &rule.extraction_rules,
-                        line.timestamp,
-                    );
+        for (rule_id, extracted) in &processed.rule_matches {
+            if let Some(rule) = rule_map.get(rule_id) {
+                let changes = state_manager.apply_mutations(
+                    line.source_id,
+                    extracted,
+                    &rule.extraction_rules,
+                    line.timestamp,
+                );
 
-                    for (key, old, new) in changes {
-                        all_state_changes.push(StateChange {
-                            timestamp: line.timestamp,
-                            source_id: line.source_id,
-                            source_name: source_name.clone(),
-                            state_key: key,
-                            old_value: old,
-                            new_value: new,
-                            rule_id: *rule_id,
-                        });
-                    }
-
-                    all_rule_matches.push(RuleMatch {
-                        rule_id: *rule_id,
+                for (key, old, new) in changes {
+                    all_state_changes.push(StateChange {
+                        timestamp: line.timestamp,
                         source_id: line.source_id,
-                        log_line: line.clone(),
-                        extracted_state: extracted,
+                        source_name: source_name.clone(),
+                        state_key: key,
+                        old_value: old,
+                        new_value: new,
+                        rule_id: *rule_id,
                     });
                 }
+
+                all_rule_matches.push(RuleMatch {
+                    rule_id: *rule_id,
+                    source_id: line.source_id,
+                    log_line: line.clone(),
+                    extracted_state: extracted.clone(),
+                });
             }
         }
 
@@ -1032,29 +1170,41 @@ pub fn analyze_streaming(
             .extend(rs.rule_ids.iter());
     }
 
-    let source_template: HashMap<u64, u64> =
-        sources.iter().map(|s| (s.id, s.template_id)).collect();
-
-    let mut iterators = Vec::new();
-    for source in sources {
-        let template = template_map.get(&source.template_id).ok_or_else(|| {
-            AnalysisError::ParseError(format!(
-                "no template found for template_id {}",
-                source.template_id
-            ))
-        })?;
-        let ts_template = ts_template_map
-            .get(&template.timestamp_template_id)
-            .ok_or_else(|| {
+    // --- Phase 1: parallel per-source processing (rayon) ---
+    let processed_sources: Vec<Vec<ProcessedLine>> = sources
+        .par_iter()
+        .map(|source| {
+            let template = template_map.get(&source.template_id).ok_or_else(|| {
                 AnalysisError::ParseError(format!(
-                    "no timestamp template found for timestamp_template_id {}",
-                    template.timestamp_template_id
+                    "no template found for template_id {}",
+                    source.template_id
                 ))
             })?;
-        iterators.push(LogLineIterator::new(source, template, ts_template)?);
-    }
+            let ts_template = ts_template_map
+                .get(&template.timestamp_template_id)
+                .ok_or_else(|| {
+                    AnalysisError::ParseError(format!(
+                        "no timestamp template found for timestamp_template_id {}",
+                        template.timestamp_template_id
+                    ))
+                })?;
+            let rule_ids = template_rule_ids
+                .get(&source.template_id)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            process_source(
+                source,
+                template,
+                ts_template,
+                rule_ids,
+                &rule_map,
+                &compiled_map,
+            )
+        })
+        .collect::<Result<_, _>>()?;
 
-    let stream = MergedLogStream::new(iterators)?;
+    // --- Phase 2: sequential merge + state mutations + pattern evaluation ---
+    let merger = ProcessedLineMerger::new(processed_sources);
 
     let mut state_manager = StateManager::new(sources);
     let mut pattern_eval = PatternEvaluator::new(patterns);
@@ -1064,16 +1214,8 @@ pub fn analyze_streaming(
     let mut total_pattern_matches: u64 = 0;
     let mut total_state_changes: u64 = 0;
 
-    for result in stream {
-        let line = match result {
-            Ok(l) => l,
-            Err(e) => {
-                let _ = tx.send(AnalysisEvent::Error {
-                    message: e.to_string(),
-                });
-                return Err(e);
-            }
-        };
+    for processed in merger {
+        let line = &processed.line;
 
         // Time-range filtering (stream is chronological)
         if let Some(start) = time_range.start
@@ -1089,101 +1231,92 @@ pub fn analyze_streaming(
 
         lines_processed += 1;
 
-        let tmpl_id = source_template.get(&line.source_id).copied().unwrap_or(0);
-
-        // Auto-extract JSON fields as state before rule processing
-        if let Some(tmpl) = template_map.get(&tmpl_id)
-            && tmpl.json_timestamp_field.is_some()
-            && let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&line.content)
-        {
+        // Apply pre-computed JSON fields as state
+        if let Some(json_fields) = &processed.json_fields {
             let source_name = state_manager
                 .source_names
                 .get(&line.source_id)
                 .cloned()
                 .unwrap_or_default();
-            let state = state_manager
-                .per_source_state
-                .entry(line.source_id)
-                .or_default();
-            for (key, value) in &map {
-                if let Some(sv) = json_value_to_state_value(value) {
-                    let old = state.get(key).map(|t| t.value.clone());
-                    let new = Some(sv.clone());
-                    state.insert(
-                        key.clone(),
-                        TrackedValue {
-                            value: sv,
-                            set_at: line.timestamp,
-                        },
-                    );
-                    if old != new {
-                        total_state_changes += 1;
-                        if tx
-                            .send(AnalysisEvent::StateChange(StateChange {
-                                timestamp: line.timestamp,
-                                source_id: line.source_id,
-                                source_name: source_name.clone(),
-                                state_key: key.clone(),
-                                old_value: old,
-                                new_value: new,
-                                rule_id: 0,
-                            }))
-                            .is_err()
-                        {
-                            return Ok(());
-                        }
+            let state = Arc::make_mut(
+                state_manager
+                    .per_source_state
+                    .entry(line.source_id)
+                    .or_default(),
+            );
+            for (key, sv) in json_fields {
+                let old = state.get(key).map(|t| t.value.clone());
+                let new = Some(sv.clone());
+                state.insert(
+                    key.clone(),
+                    TrackedValue {
+                        value: sv.clone(),
+                        set_at: line.timestamp,
+                    },
+                );
+                if old != new {
+                    total_state_changes += 1;
+                    if tx
+                        .send(AnalysisEvent::StateChange(StateChange {
+                            timestamp: line.timestamp,
+                            source_id: line.source_id,
+                            source_name: source_name.clone(),
+                            state_key: key.clone(),
+                            old_value: old,
+                            new_value: new,
+                            rule_id: 0,
+                        }))
+                        .is_err()
+                    {
+                        return Ok(());
                     }
                 }
             }
         }
 
-        if let Some(rule_ids) = template_rule_ids.get(&tmpl_id) {
-            let source_name = state_manager
-                .source_names
-                .get(&line.source_id)
-                .cloned()
-                .unwrap_or_default();
+        // Apply pre-computed rule matches
+        let source_name = state_manager
+            .source_names
+            .get(&line.source_id)
+            .cloned()
+            .unwrap_or_default();
 
-            for rule_id in rule_ids {
-                if let (Some(rule), Some(compiled)) =
-                    (rule_map.get(rule_id), compiled_map.get(rule_id))
-                    && let Some(extracted) = evaluate_rule(rule, &line, compiled)
-                {
-                    let changes = state_manager.apply_mutations(
-                        line.source_id,
-                        &extracted,
-                        &rule.extraction_rules,
-                        line.timestamp,
-                    );
+        for (rule_id, extracted) in &processed.rule_matches {
+            if let Some(rule) = rule_map.get(rule_id) {
+                let changes = state_manager.apply_mutations(
+                    line.source_id,
+                    extracted,
+                    &rule.extraction_rules,
+                    line.timestamp,
+                );
 
-                    for (key, old, new) in changes {
-                        total_state_changes += 1;
-                        if tx
-                            .send(AnalysisEvent::StateChange(StateChange {
-                                timestamp: line.timestamp,
-                                source_id: line.source_id,
-                                source_name: source_name.clone(),
-                                state_key: key,
-                                old_value: old,
-                                new_value: new,
-                                rule_id: *rule_id,
-                            }))
-                            .is_err()
-                        {
-                            return Ok(());
-                        }
+                for (key, old, new) in changes {
+                    total_state_changes += 1;
+                    if tx
+                        .send(AnalysisEvent::StateChange(StateChange {
+                            timestamp: line.timestamp,
+                            source_id: line.source_id,
+                            source_name: source_name.clone(),
+                            state_key: key,
+                            old_value: old,
+                            new_value: new,
+                            rule_id: *rule_id,
+                        }))
+                        .is_err()
+                    {
+                        return Ok(());
                     }
+                }
 
-                    let rm = RuleMatch {
-                        rule_id: *rule_id,
-                        source_id: line.source_id,
-                        log_line: line.clone(),
-                        extracted_state: extracted,
-                    };
-                    total_rule_matches += 1;
-                    if tx.send(AnalysisEvent::RuleMatch(rm)).is_err() {
-                        return Ok(()); // receiver dropped
-                    }
+                let rm = RuleMatch {
+                    rule_id: *rule_id,
+                    source_id: line.source_id,
+                    log_line: line.clone(),
+                    extracted_state: extracted.clone(),
+                };
+                total_rule_matches += 1;
+                if tx.send(AnalysisEvent::RuleMatch(rm)).is_err() {
+                    return Ok(()); // receiver dropped
                 }
             }
         }
@@ -1497,7 +1630,7 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
                 value: StateValue::String("old".into()),
@@ -1531,7 +1664,7 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "tags".into(),
             TrackedValue {
                 value: StateValue::String("a".into()),
@@ -1565,7 +1698,7 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "count".into(),
             TrackedValue {
                 value: StateValue::Integer(10),
@@ -1601,7 +1734,7 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
                 value: StateValue::String("val".into()),
@@ -1729,7 +1862,7 @@ mod tests {
         assert!(matches.is_empty());
 
         // Set status = running -> pred 1 satisfied
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "status".into(),
             TrackedValue {
                 value: StateValue::String("running".into()),
@@ -1740,7 +1873,7 @@ mod tests {
         assert!(matches.is_empty()); // only 1 of 2 done
 
         // Set players = 5 -> pred 2 satisfied
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "players".into(),
             TrackedValue {
                 value: StateValue::Integer(5),
@@ -1779,7 +1912,7 @@ mod tests {
         let mut eval = PatternEvaluator::new(&patterns);
 
         // Satisfy pred 1
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "status".into(),
             TrackedValue {
                 value: StateValue::String("running".into()),
@@ -1790,14 +1923,14 @@ mod tests {
         assert_eq!(eval.progress[0], 1);
 
         // Now invalidate pred 1 (change status away from "running") and try pred 2
-        sm.per_source_state.get_mut(&1).unwrap().insert(
+        Arc::make_mut(sm.per_source_state.get_mut(&1).unwrap()).insert(
             "status".into(),
             TrackedValue {
                 value: StateValue::String("stopped".into()),
                 set_at: test_ts(),
             },
         );
-        sm.per_source_state.get_mut(&1).unwrap().insert(
+        Arc::make_mut(sm.per_source_state.get_mut(&1).unwrap()).insert(
             "count".into(),
             TrackedValue {
                 value: StateValue::Integer(20),
@@ -1829,7 +1962,7 @@ mod tests {
         let mut eval = PatternEvaluator::new(&patterns);
 
         // Set flag=true -> should match
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "flag".into(),
             TrackedValue {
                 value: StateValue::Bool(true),
@@ -1869,14 +2002,14 @@ mod tests {
         let mut eval = PatternEvaluator::new(&patterns);
 
         // Different regions -> no match
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "region".into(),
             TrackedValue {
                 value: StateValue::String("us-east".into()),
                 set_at: test_ts(),
             },
         );
-        sm.per_source_state.entry(2).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(2).or_default()).insert(
             "region".into(),
             TrackedValue {
                 value: StateValue::String("eu-west".into()),
@@ -1887,7 +2020,7 @@ mod tests {
         assert!(matches.is_empty());
 
         // Same regions -> match
-        sm.per_source_state.get_mut(&2).unwrap().insert(
+        Arc::make_mut(sm.per_source_state.get_mut(&2).unwrap()).insert(
             "region".into(),
             TrackedValue {
                 value: StateValue::String("us-east".into()),
@@ -1902,14 +2035,14 @@ mod tests {
     fn test_all_operators() {
         let sources = make_sources();
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "val".into(),
             TrackedValue {
                 value: StateValue::Integer(10),
                 set_at: test_ts(),
             },
         );
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "name".into(),
             TrackedValue {
                 value: StateValue::String("hello world".into()),
@@ -2507,7 +2640,7 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
                 value: StateValue::String("old".into()),
@@ -2541,7 +2674,7 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
                 value: StateValue::String("val".into()),
@@ -2602,7 +2735,7 @@ mod tests {
             file_path: "".into(),
         }];
         let mut sm = StateManager::new(&sources);
-        sm.per_source_state.entry(1).or_default().insert(
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
                 value: StateValue::String("same".into()),
