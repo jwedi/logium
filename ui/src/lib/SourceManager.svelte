@@ -56,9 +56,42 @@
     detectedTemplateName = null;
 
     try {
+      // Phase 1: file_name_regex matching
+      for (const tmpl of templateList) {
+        if (tmpl.file_name_regex) {
+          try {
+            if (new RegExp(tmpl.file_name_regex).test(file.name)) {
+              newTemplateId = tmpl.id;
+              detectedTemplateName = tmpl.name;
+              return;
+            }
+          } catch {
+            // Invalid regex — skip
+          }
+        }
+      }
+
+      // Phase 2: log_content_regex matching
       const slice = file.slice(0, 50 * 1024);
       const sample = await slice.text();
+      const lines = sample.split('\n').slice(0, 1000);
 
+      for (const tmpl of templateList) {
+        if (tmpl.log_content_regex) {
+          try {
+            const re = new RegExp(tmpl.log_content_regex);
+            if (lines.some((line) => re.test(line))) {
+              newTemplateId = tmpl.id;
+              detectedTemplateName = tmpl.name;
+              return;
+            }
+          } catch {
+            // Invalid regex — skip
+          }
+        }
+      }
+
+      // Phase 3: detect-template fallback
       const result = await analysisApi.detectTemplate(projectId, { sample });
       detectionResult = result;
 
@@ -92,6 +125,8 @@
               content_regex: result.content_regex,
               continuation_regex: null,
               json_timestamp_field: result.json_timestamp_field,
+              file_name_regex: null,
+              log_content_regex: null,
             });
             await load();
             newTemplateId = created.id;
@@ -183,6 +218,10 @@
     </div>
     {#if detecting}
       <div class="detection-status">Detecting format...</div>
+    {:else if detectedTemplateName && !detectionResult}
+      <div class="detection-status detection-success">
+        Matched template: <strong>{detectedTemplateName}</strong>
+      </div>
     {:else if detectionResult}
       {#if detectionResult.confidence > 0 && detectedTemplateName}
         <div class="detection-status detection-success">

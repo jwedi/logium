@@ -22,6 +22,8 @@ export interface SourceTemplate {
   content_regex: string | null;
   continuation_regex: string | null;
   json_timestamp_field: string | null;
+  file_name_regex: string | null;
+  log_content_regex: string | null;
 }
 
 export interface Source {

@@ -191,6 +191,10 @@ impl Database {
             .await?;
         self.migrate_add_column("source_templates", "json_timestamp_field", "TEXT")
             .await?;
+        self.migrate_add_column("source_templates", "file_name_regex", "TEXT")
+            .await?;
+        self.migrate_add_column("source_templates", "log_content_regex", "TEXT")
+            .await?;
 
         Ok(())
     }
@@ -428,7 +432,7 @@ impl Database {
 
     pub async fn list_templates(&self, project_id: i64) -> Result<Vec<SourceTemplate>, DbError> {
         let rows = sqlx::query(
-            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex, json_timestamp_field
+            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex, json_timestamp_field, file_name_regex, log_content_regex
              FROM source_templates WHERE project_id = ? ORDER BY id",
         )
         .bind(project_id)
@@ -440,7 +444,7 @@ impl Database {
 
     pub async fn get_template(&self, project_id: i64, id: i64) -> Result<SourceTemplate, DbError> {
         let row = sqlx::query(
-            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex, json_timestamp_field
+            "SELECT id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex, json_timestamp_field, file_name_regex, log_content_regex
              FROM source_templates WHERE id = ? AND project_id = ?",
         )
         .bind(id)
@@ -462,10 +466,12 @@ impl Database {
         content_regex: Option<&str>,
         continuation_regex: Option<&str>,
         json_timestamp_field: Option<&str>,
+        file_name_regex: Option<&str>,
+        log_content_regex: Option<&str>,
     ) -> Result<SourceTemplate, DbError> {
         let id = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO source_templates (project_id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex, json_timestamp_field)
-             VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO source_templates (project_id, name, timestamp_template_id, line_delimiter, content_regex, continuation_regex, json_timestamp_field, file_name_regex, log_content_regex)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(project_id)
         .bind(name)
@@ -474,6 +480,8 @@ impl Database {
         .bind(content_regex)
         .bind(continuation_regex)
         .bind(json_timestamp_field)
+        .bind(file_name_regex)
+        .bind(log_content_regex)
         .fetch_one(&self.pool)
         .await?;
 
@@ -494,6 +502,8 @@ impl Database {
             content_regex: content_regex.map(|s| s.to_string()),
             continuation_regex: continuation_regex.map(|s| s.to_string()),
             json_timestamp_field: json_timestamp_field.map(|s| s.to_string()),
+            file_name_regex: file_name_regex.map(|s| s.to_string()),
+            log_content_regex: log_content_regex.map(|s| s.to_string()),
         })
     }
 
@@ -508,9 +518,11 @@ impl Database {
         content_regex: Option<&str>,
         continuation_regex: Option<&str>,
         json_timestamp_field: Option<&str>,
+        file_name_regex: Option<&str>,
+        log_content_regex: Option<&str>,
     ) -> Result<SourceTemplate, DbError> {
         let result = sqlx::query(
-            "UPDATE source_templates SET name = ?, timestamp_template_id = ?, line_delimiter = ?, content_regex = ?, continuation_regex = ?, json_timestamp_field = ?
+            "UPDATE source_templates SET name = ?, timestamp_template_id = ?, line_delimiter = ?, content_regex = ?, continuation_regex = ?, json_timestamp_field = ?, file_name_regex = ?, log_content_regex = ?
              WHERE id = ? AND project_id = ?",
         )
         .bind(name)
@@ -519,6 +531,8 @@ impl Database {
         .bind(content_regex)
         .bind(continuation_regex)
         .bind(json_timestamp_field)
+        .bind(file_name_regex)
+        .bind(log_content_regex)
         .bind(id)
         .bind(project_id)
         .execute(&self.pool)
@@ -1221,6 +1235,8 @@ impl Database {
                     st.content_regex.as_deref(),
                     st.continuation_regex.as_deref(),
                     st.json_timestamp_field.as_deref(),
+                    st.file_name_regex.as_deref(),
+                    st.log_content_regex.as_deref(),
                 )
                 .await?;
             st_id_map.insert(st.id, new_st.id);
@@ -1396,6 +1412,8 @@ fn row_to_template(row: &sqlx::sqlite::SqliteRow) -> SourceTemplate {
         content_regex: row.get("content_regex"),
         continuation_regex: row.get("continuation_regex"),
         json_timestamp_field: row.get("json_timestamp_field"),
+        file_name_regex: row.get("file_name_regex"),
+        log_content_regex: row.get("log_content_regex"),
     }
 }
 
@@ -1652,6 +1670,8 @@ mod tests {
                 Some(r"^\d{4}.+$"),
                 None,
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -1681,6 +1701,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();
@@ -1700,7 +1722,17 @@ mod tests {
             .await
             .unwrap();
         let t = db
-            .create_template(p.id, "tmpl", tt.id as i64, "\n", None, None, None)
+            .create_template(
+                p.id,
+                "tmpl",
+                tt.id as i64,
+                "\n",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
 
@@ -1782,7 +1814,17 @@ mod tests {
             .await
             .unwrap();
         let t = db
-            .create_template(p.id, "tmpl", tt.id as i64, "\n", None, None, None)
+            .create_template(
+                p.id,
+                "tmpl",
+                tt.id as i64,
+                "\n",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
         let r1 = db
@@ -1906,9 +1948,19 @@ mod tests {
             .create_timestamp_template(p.id, "ts", "%Y", None, None)
             .await
             .unwrap();
-        db.create_template(p.id, "tmpl", tt.id as i64, "\n", None, None, None)
-            .await
-            .unwrap();
+        db.create_template(
+            p.id,
+            "tmpl",
+            tt.id as i64,
+            "\n",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         db.create_rule(p.id, "r1", &MatchMode::Any, &[], &[])
             .await
             .unwrap();
@@ -1948,6 +2000,8 @@ mod tests {
                 tt.id as i64,
                 "\n",
                 Some(r"^\d+"),
+                None,
+                None,
                 None,
                 None,
             )
@@ -2065,5 +2119,68 @@ mod tests {
         assert_eq!(result.rules, 0);
         assert_eq!(result.rulesets, 0);
         assert_eq!(result.patterns, 0);
+    }
+
+    #[tokio::test]
+    async fn test_template_auto_selection_fields() {
+        let db = test_db().await;
+        let p = db.create_project("P1").await.unwrap();
+        let tt = db
+            .create_timestamp_template(p.id, "ts", "%Y-%m-%d %H:%M:%S", None, None)
+            .await
+            .unwrap();
+
+        // Create with auto-selection regexes
+        let t = db
+            .create_template(
+                p.id,
+                "nginx",
+                tt.id as i64,
+                "\n",
+                None,
+                None,
+                None,
+                Some(r"nginx.*\.log$"),
+                Some(r"^\d+\.\d+\.\d+\.\d+ -"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(t.file_name_regex.as_deref(), Some(r"nginx.*\.log$"));
+        assert_eq!(
+            t.log_content_regex.as_deref(),
+            Some(r"^\d+\.\d+\.\d+\.\d+ -")
+        );
+
+        // Verify round-trip via get
+        let fetched = db.get_template(p.id, t.id as i64).await.unwrap();
+        assert_eq!(fetched.file_name_regex.as_deref(), Some(r"nginx.*\.log$"));
+        assert_eq!(
+            fetched.log_content_regex.as_deref(),
+            Some(r"^\d+\.\d+\.\d+\.\d+ -")
+        );
+
+        // Verify round-trip via list
+        let all = db.list_templates(p.id).await.unwrap();
+        let listed = all.iter().find(|t| t.name == "nginx").unwrap();
+        assert_eq!(listed.file_name_regex.as_deref(), Some(r"nginx.*\.log$"));
+
+        // Update: clear the fields
+        let updated = db
+            .update_template(
+                p.id,
+                t.id as i64,
+                "nginx",
+                tt.id as i64,
+                "\n",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(updated.file_name_regex.is_none());
+        assert!(updated.log_content_regex.is_none());
     }
 }

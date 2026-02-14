@@ -32,6 +32,8 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
         content_regex: None,
         continuation_regex: None,
         json_timestamp_field: None,
+        file_name_regex: None,
+        log_content_regex: None,
     };
     let src_a = Source {
         id: 1,
@@ -136,6 +138,8 @@ fn bench_nginx_large(c: &mut Criterion) {
         content_regex: None,
         continuation_regex: None,
         json_timestamp_field: None,
+        file_name_regex: None,
+        log_content_regex: None,
     };
     let src = Source {
         id: 1,

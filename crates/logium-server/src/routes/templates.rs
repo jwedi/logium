@@ -27,6 +27,8 @@ struct CreateTemplate {
     content_regex: Option<String>,
     continuation_regex: Option<String>,
     json_timestamp_field: Option<String>,
+    file_name_regex: Option<String>,
+    log_content_regex: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -38,6 +40,8 @@ struct TemplateResponse {
     content_regex: Option<String>,
     continuation_regex: Option<String>,
     json_timestamp_field: Option<String>,
+    file_name_regex: Option<String>,
+    log_content_regex: Option<String>,
 }
 
 impl From<logium_core::model::SourceTemplate> for TemplateResponse {
@@ -50,6 +54,8 @@ impl From<logium_core::model::SourceTemplate> for TemplateResponse {
             content_regex: t.content_regex,
             continuation_regex: t.continuation_regex,
             json_timestamp_field: t.json_timestamp_field,
+            file_name_regex: t.file_name_regex,
+            log_content_regex: t.log_content_regex,
         }
     }
 }
@@ -77,6 +83,8 @@ async fn create(
             body.content_regex.as_deref(),
             body.continuation_regex.as_deref(),
             body.json_timestamp_field.as_deref(),
+            body.file_name_regex.as_deref(),
+            body.log_content_regex.as_deref(),
         )
         .await?;
     Ok((StatusCode::CREATED, Json(t.into())))
@@ -106,6 +114,8 @@ async fn update(
             body.content_regex.as_deref(),
             body.continuation_regex.as_deref(),
             body.json_timestamp_field.as_deref(),
+            body.file_name_regex.as_deref(),
+            body.log_content_regex.as_deref(),
         )
         .await?;
     Ok(Json(t.into()))

@@ -50,6 +50,8 @@ fn make_source_template(
         content_regex: content_regex.map(|s| s.into()),
         continuation_regex: None,
         json_timestamp_field: None,
+        file_name_regex: None,
+        log_content_regex: None,
     }
 }
 
@@ -419,6 +421,8 @@ fn test_timestamp_template_reuse() {
         content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ - (.+)$".into()),
         continuation_regex: None,
         json_timestamp_field: None,
+        file_name_regex: None,
+        log_content_regex: None,
     };
     let tmpl_b = SourceTemplate {
         id: 2,
@@ -428,6 +432,8 @@ fn test_timestamp_template_reuse() {
         content_regex: None,
         continuation_regex: None,
         json_timestamp_field: None,
+        file_name_regex: None,
+        log_content_regex: None,
     };
 
     let src_a = make_source(1, "source_a", &fixture_path("zookeeper", "source_a.log"), 1);
@@ -593,6 +599,8 @@ fn test_multiline_parsing() {
         content_regex: None,
         continuation_regex: Some(r"^\s".to_string()),
         json_timestamp_field: None,
+        file_name_regex: None,
+        log_content_regex: None,
     };
     let src = make_source(
         1,
@@ -664,6 +672,8 @@ fn test_multiline_cross_source() {
         content_regex: None,
         continuation_regex: Some(r"^\s".to_string()),
         json_timestamp_field: None,
+        file_name_regex: None,
+        log_content_regex: None,
     };
     let src_a = make_source(1, "source_a", &fixture_path("multiline", "source_a.log"), 1);
     let src_b = make_source(2, "source_b", &fixture_path("multiline", "source_b.log"), 1);
@@ -781,6 +791,8 @@ fn test_json_lines_parsing() {
         content_regex: None,
         continuation_regex: None,
         json_timestamp_field: Some("timestamp".into()),
+        file_name_regex: None,
+        log_content_regex: None,
     };
     let src = make_source(1, "json_app", &fixture_path("json", "app.log"), 1);
 
@@ -812,6 +824,8 @@ fn test_json_cross_source() {
         content_regex: None,
         continuation_regex: None,
         json_timestamp_field: Some("timestamp".into()),
+        file_name_regex: None,
+        log_content_regex: None,
     };
     let tmpl_metrics = SourceTemplate {
         id: 2,
@@ -821,6 +835,8 @@ fn test_json_cross_source() {
         content_regex: None,
         continuation_regex: None,
         json_timestamp_field: Some("ts".into()),
+        file_name_regex: None,
+        log_content_regex: None,
     };
 
     let src_app = make_source(1, "app", &fixture_path("json", "app.log"), 1);
