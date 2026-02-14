@@ -477,6 +477,15 @@ impl Database {
         .fetch_one(&self.pool)
         .await?;
 
+        // Auto-create default ruleset for the new template
+        let ruleset_name = format!("Default — {}", name);
+        sqlx::query("INSERT INTO rulesets (project_id, template_id, name) VALUES (?, ?, ?)")
+            .bind(project_id)
+            .bind(id)
+            .bind(&ruleset_name)
+            .execute(&self.pool)
+            .await?;
+
         Ok(SourceTemplate {
             id: id as u64,
             name: name.to_string(),
@@ -522,6 +531,13 @@ impl Database {
     }
 
     pub async fn delete_template(&self, project_id: i64, id: i64) -> Result<(), DbError> {
+        // Delete associated rulesets first (FK on template_id has no CASCADE)
+        sqlx::query("DELETE FROM rulesets WHERE template_id = ? AND project_id = ?")
+            .bind(id)
+            .bind(project_id)
+            .execute(&self.pool)
+            .await?;
+
         let result = sqlx::query("DELETE FROM source_templates WHERE id = ? AND project_id = ?")
             .bind(id)
             .bind(project_id)
@@ -1643,6 +1659,12 @@ mod tests {
         assert_eq!(t.content_regex, Some(r"^\d{4}.+$".to_string()));
         assert_eq!(t.timestamp_template_id, tt.id);
 
+        // Verify auto-created default ruleset
+        let rulesets = db.list_rulesets(p.id).await.unwrap();
+        assert_eq!(rulesets.len(), 1);
+        assert_eq!(rulesets[0].name, "Default — default");
+        assert_eq!(rulesets[0].template_id, t.id);
+
         let templates = db.list_templates(p.id).await.unwrap();
         assert_eq!(templates.len(), 1);
 
@@ -1897,7 +1919,7 @@ mod tests {
         assert_eq!(data.templates.len(), 1);
         assert_eq!(data.rules.len(), 1);
         assert!(data.sources.is_empty());
-        assert!(data.rulesets.is_empty());
+        assert_eq!(data.rulesets.len(), 1);
         assert!(data.patterns.is_empty());
     }
 
@@ -1984,7 +2006,7 @@ mod tests {
         assert_eq!(result.timestamp_templates, 7);
         assert_eq!(result.source_templates, 1);
         assert_eq!(result.rules, 1);
-        assert_eq!(result.rulesets, 1);
+        assert_eq!(result.rulesets, 2);
         assert_eq!(result.patterns, 1);
 
         // Verify entities exist in target project
@@ -1993,11 +2015,16 @@ mod tests {
         assert_eq!(target_data.timestamp_templates.len(), 13);
         assert_eq!(target_data.templates.len(), 1);
         assert_eq!(target_data.rules.len(), 1);
-        assert_eq!(target_data.rulesets.len(), 1);
+        // 1 auto-created default (from create_template) + 2 imported
+        assert_eq!(target_data.rulesets.len(), 3);
         assert_eq!(target_data.patterns.len(), 1);
 
-        // Verify ID remapping: ruleset's template_id should point to the new source template
-        let imported_rs = &target_data.rulesets[0];
+        // Find the imported "main_rules" ruleset (not the auto-created defaults)
+        let imported_rs = target_data
+            .rulesets
+            .iter()
+            .find(|rs| rs.name == "main_rules")
+            .expect("should find imported main_rules ruleset");
         let imported_st = &target_data.templates[0];
         assert_eq!(imported_rs.template_id, imported_st.id);
 

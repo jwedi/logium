@@ -476,11 +476,9 @@ When a user uploads a log file in SourceManager, auto-detect the format using th
 
 ---
 
-### 29. Auto-Create Default Ruleset on Source Template Creation
+### 29. Auto-Create Default Ruleset on Source Template Creation — Done
 
-When a source template is created, automatically create a "Default — {template_name}" ruleset linked to it. Auto-assign new rules to default rulesets in RuleCreator and RuleList. This eliminates the mandatory "create a ruleset" step that adds no value for the common case — rulesets become an advanced organizational feature rather than a required prerequisite.
-
-**Key files:** `ui/src/lib/TemplateManager.svelte`, `ui/src/lib/RuleList.svelte`, `ui/src/lib/RuleCreator.svelte`
+`create_template()` in `db.rs` now auto-inserts a "Default — {name}" ruleset. `delete_template()` cascades to delete associated rulesets. Tests updated for the new behavior.
 
 ---
 
