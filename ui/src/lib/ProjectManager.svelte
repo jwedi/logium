@@ -4,11 +4,13 @@
   let {
     projects,
     onProjectCreated,
+    onProjectUpdated,
     onProjectDeleted,
     onSelect,
   }: {
     projects: Project[];
     onProjectCreated: (p: Project) => void;
+    onProjectUpdated: (p: Project) => void;
     onProjectDeleted: (id: number) => void;
     onSelect: (id: number) => void;
   } = $props();
@@ -17,6 +19,8 @@
   let creating = $state(false);
   let fileInput: HTMLInputElement | null = $state(null);
   let importTargetId: number | null = $state(null);
+  let editingId: number | null = $state(null);
+  let editName = $state('');
 
   async function exportProject(id: number, name: string) {
     try {
@@ -85,6 +89,30 @@
       alert(e.message);
     }
   }
+
+  function startRename(project: Project) {
+    editingId = project.id;
+    editName = project.name;
+  }
+
+  function cancelRename() {
+    editingId = null;
+    editName = '';
+  }
+
+  async function saveRename(id: number) {
+    const trimmed = editName.trim();
+    if (!trimmed) return;
+    try {
+      const updated = await projectsApi.update(id, { name: trimmed });
+      onProjectUpdated(updated);
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      editingId = null;
+      editName = '';
+    }
+  }
 </script>
 
 <h2>Projects</h2>
@@ -108,14 +136,38 @@
     {#each projects as project}
       <div class="project-card card">
         <div class="project-info">
-          <span class="project-name">{project.name}</span>
+          {#if editingId === project.id}
+            <input
+              type="text"
+              class="rename-input"
+              bind:value={editName}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') saveRename(project.id);
+                if (e.key === 'Escape') cancelRename();
+              }}
+            />
+          {:else}
+            <span class="project-name">{project.name}</span>
+          {/if}
           <span class="project-date">{new Date(project.created_at).toLocaleDateString()}</span>
         </div>
         <div class="project-actions">
-          <button onclick={() => onSelect(project.id)}>Open</button>
-          <button onclick={() => exportProject(project.id, project.name)}>Export</button>
-          <button onclick={() => startImport(project.id)}>Import</button>
-          <button class="danger" onclick={() => deleteProject(project.id)}>Delete</button>
+          {#if editingId === project.id}
+            <button
+              class="primary"
+              onclick={() => saveRename(project.id)}
+              disabled={!editName.trim()}
+            >
+              Save
+            </button>
+            <button onclick={cancelRename}>Cancel</button>
+          {:else}
+            <button onclick={() => onSelect(project.id)}>Open</button>
+            <button onclick={() => startRename(project)}>Rename</button>
+            <button onclick={() => exportProject(project.id, project.name)}>Export</button>
+            <button onclick={() => startImport(project.id)}>Import</button>
+            <button class="danger" onclick={() => deleteProject(project.id)}>Delete</button>
+          {/if}
         </div>
       </div>
     {/each}
@@ -173,5 +225,12 @@
   .project-actions {
     display: flex;
     gap: 8px;
+  }
+
+  .rename-input {
+    font-size: 15px;
+    font-weight: 600;
+    padding: 2px 6px;
+    width: 200px;
   }
 </style>

@@ -533,11 +533,9 @@ In the source management view, add a "Replace" button on each source. Clicking i
 
 ---
 
-### 36. Default Project Bootstrap
+### 36. Default Project Bootstrap — Done
 
-If no projects exist on startup, automatically create a "Default project" so the user lands in a usable workspace instead of facing an empty project list. Also add support for renaming projects (the `name` field exists in the DB but there is no rename affordance in the UI). This removes a mandatory first step that adds no value for single-project users and makes the project name editable for users who want to organize multiple projects.
-
-**Key files:** `ui/src/App.svelte`, `ui/src/lib/ProjectManager.svelte`, `ui/src/lib/api.ts`, `crates/logium-server/src/routes/` (project CRUD)
+Auto-creates a "Default project" when the project list is empty on first load, and auto-selects it. Added inline rename UI to ProjectManager (Rename button → input with Save/Cancel, Enter/Escape keys). Uses the existing `PUT /api/projects/:id` endpoint — no backend changes needed.
 
 ---
 
