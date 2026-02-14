@@ -68,6 +68,13 @@
     error = null;
     try {
       allProjects = await projectsApi.list();
+      if (allProjects.length === 0) {
+        await projectsApi.create({ name: 'Default project' });
+        allProjects = await projectsApi.list();
+      }
+      if (allProjects.length > 0 && !currentProjectId) {
+        selectProject(allProjects[0].id);
+      }
     } catch (e: any) {
       error = e.message;
     } finally {
@@ -82,6 +89,10 @@
   function onProjectCreated(project: Project) {
     allProjects = [...allProjects, project];
     selectProject(project.id);
+  }
+
+  function onProjectUpdated(updated: Project) {
+    allProjects = allProjects.map((p) => (p.id === updated.id ? updated : p));
   }
 
   function onProjectDeleted(id: number) {
@@ -164,6 +175,7 @@
       <ProjectManager
         projects={allProjects}
         {onProjectCreated}
+        {onProjectUpdated}
         {onProjectDeleted}
         onSelect={selectProject}
       />

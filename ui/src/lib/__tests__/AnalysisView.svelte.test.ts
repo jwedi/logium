@@ -89,6 +89,9 @@ vi.mock('../api', () => {
     patterns: {
       list: vi.fn().mockResolvedValue(mockPatterns),
     },
+    rulesets: {
+      list: vi.fn().mockResolvedValue([{ id: 1, name: 'Default', template_id: 1, rule_ids: [1] }]),
+    },
     // Re-export types are just interfaces, not needed at runtime
   };
 });
@@ -99,10 +102,15 @@ import {
   sources as sourcesApi,
   rules as rulesApi,
   patterns as patternsApi,
+  rulesets as rulesetsApi,
 } from '../api';
 
 function renderAnalysis(projectId = 1) {
   return render(AnalysisView, { props: { projectId } });
+}
+
+function getRunButton() {
+  return screen.getByRole('button', { name: /Run Analysis/ });
 }
 
 describe('AnalysisView', () => {
@@ -121,7 +129,7 @@ describe('AnalysisView', () => {
   it('renders "Run Analysis" button', async () => {
     renderAnalysis();
     await tick();
-    expect(screen.getByText('Run Analysis')).toBeInTheDocument();
+    expect(getRunButton()).toBeInTheDocument();
   });
 
   it('tab defaults to "Table" with active class', async () => {
@@ -129,7 +137,7 @@ describe('AnalysisView', () => {
     await tick();
 
     // Click run and wait for results
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Table')).toBeInTheDocument();
@@ -143,7 +151,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Timeline')).toBeInTheDocument();
@@ -161,7 +169,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Timeline')).toBeInTheDocument();
@@ -180,7 +188,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Results')).toBeInTheDocument();
@@ -205,7 +213,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Server error')).toBeInTheDocument();
@@ -224,7 +232,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     await tick();
 
     expect(screen.getByText('Running...')).toBeInTheDocument();
@@ -284,7 +292,7 @@ describe('AnalysisView', () => {
     await tick();
 
     // Manual run
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     await tick();
 
     expect(analysisApi.runStreaming).toHaveBeenCalledTimes(1);
@@ -326,7 +334,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Clusters')).toBeInTheDocument();
@@ -341,7 +349,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('State Evolution')).toBeInTheDocument();
@@ -358,7 +366,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Results')).toBeInTheDocument();
@@ -423,7 +431,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await tick();
     await vi.waitFor(() => {
@@ -446,7 +454,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await tick();
     await vi.waitFor(() => {
@@ -474,7 +482,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await tick();
     await vi.waitFor(() => {
@@ -502,7 +510,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await tick();
     await vi.waitFor(() => {
@@ -520,7 +528,7 @@ describe('AnalysisView', () => {
     expect(screen.getByText(/Showing/)).toBeInTheDocument();
 
     // Run analysis again
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await tick();
     await vi.waitFor(() => {
@@ -541,7 +549,7 @@ describe('AnalysisView', () => {
     // Before analysis, no export button
     expect(screen.queryByText('Export')).not.toBeInTheDocument();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Results')).toBeInTheDocument();
@@ -554,7 +562,7 @@ describe('AnalysisView', () => {
     renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Results')).toBeInTheDocument();
@@ -576,7 +584,7 @@ describe('AnalysisView', () => {
     const { container } = renderAnalysis();
     await tick();
 
-    await fireEvent.click(screen.getByText('Run Analysis'));
+    await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
       expect(screen.getByText('Results')).toBeInTheDocument();

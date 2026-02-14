@@ -22,6 +22,8 @@ export interface SourceTemplate {
   content_regex: string | null;
   continuation_regex: string | null;
   json_timestamp_field: string | null;
+  file_name_regex: string | null;
+  log_content_regex: string | null;
 }
 
 export interface Source {
@@ -118,6 +120,14 @@ export interface AnalysisResult {
   rule_matches: RuleMatch[];
   pattern_matches: PatternMatch[];
   state_changes: StateChange[];
+}
+
+export interface DetectTemplateResponse {
+  timestamp_format: string | null;
+  line_delimiter: string;
+  content_regex: string | null;
+  json_timestamp_field: string | null;
+  confidence: number;
 }
 
 export interface SuggestRuleResponse {
@@ -403,8 +413,8 @@ export const analysis = {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
-  detectTemplate: (pid: number, data: { content: string }) =>
-    request<SourceTemplate>(`/projects/${pid}/detect-template`, {
+  detectTemplate: (pid: number, data: { sample: string }) =>
+    request<DetectTemplateResponse>(`/projects/${pid}/detect-template`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),

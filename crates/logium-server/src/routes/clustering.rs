@@ -60,6 +60,8 @@ mod tests {
                 Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$"),
                 None,
                 None,
+                None,
+                None,
             )
             .await
             .unwrap();

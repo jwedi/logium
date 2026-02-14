@@ -4,6 +4,7 @@
     sources as sourcesApi,
     rules as rulesApi,
     patterns as patternsApi,
+    rulesets as rulesetsApi,
     type AnalysisResult,
     type RuleMatch,
     type PatternMatch,
@@ -11,6 +12,7 @@
     type Source,
     type LogRule,
     type Pattern,
+    type Ruleset,
     type StateValue,
     type TimeRange,
   } from './api';
@@ -27,6 +29,7 @@
   let sourceList: Source[] = $state([]);
   let ruleList: LogRule[] = $state([]);
   let patternList: Pattern[] = $state([]);
+  let rulesetList: Ruleset[] = $state([]);
   let running = $state(false);
   let error: string | null = $state(null);
   let selectedSourceId: number | null = $state(null);
@@ -221,10 +224,11 @@
 
   async function load() {
     try {
-      [sourceList, ruleList, patternList] = await Promise.all([
+      [sourceList, ruleList, patternList, rulesetList] = await Promise.all([
         sourcesApi.list(projectId),
         rulesApi.list(projectId),
         patternsApi.list(projectId),
+        rulesetsApi.list(projectId),
       ]);
     } catch (e: any) {
       error = e.message;
@@ -602,8 +606,30 @@
     <ErrorClusteringView {projectId} {sourceList} />
   {/if}
 {:else if !running}
-  <div class="empty">
-    Click "Run Analysis" to analyze all sources with configured rules and patterns.
+  <div class="guidance">
+    <strong>Setup checklist</strong>
+    <ul class="checklist">
+      <li class:done={sourceList.length > 0}>
+        {sourceList.length > 0
+          ? `${sourceList.length} source${sourceList.length > 1 ? 's' : ''} configured`
+          : 'Add at least one source (Sources tab)'}
+      </li>
+      <li class:done={ruleList.length > 0}>
+        {ruleList.length > 0
+          ? `${ruleList.length} rule${ruleList.length > 1 ? 's' : ''} defined`
+          : 'Create rules to detect events (Rules tab)'}
+      </li>
+      <li class:done={rulesetList.length > 0}>
+        {rulesetList.length > 0
+          ? `${rulesetList.length} ruleset${rulesetList.length > 1 ? 's' : ''} linking rules to templates`
+          : 'Create a ruleset to bind rules to a template (Rulesets tab)'}
+      </li>
+    </ul>
+    {#if sourceList.length > 0 && ruleList.length > 0 && rulesetList.length > 0}
+      <p>Ready — click <strong>Run Analysis</strong> above.</p>
+    {:else}
+      <p>Complete the steps above, then click <strong>Run Analysis</strong>.</p>
+    {/if}
   </div>
 {/if}
 
@@ -900,5 +926,24 @@
     position: absolute;
     left: 0;
     right: 0;
+  }
+
+  .checklist {
+    list-style: none;
+    padding: 8px 0;
+  }
+
+  .checklist li {
+    padding: 4px 0;
+  }
+
+  .checklist li::before {
+    content: '\2717  ';
+    color: var(--text-muted);
+  }
+
+  .checklist li.done::before {
+    content: '\2713  ';
+    color: var(--green);
   }
 </style>

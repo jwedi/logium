@@ -2293,6 +2293,8 @@ mod tests {
             content_regex: None,
             continuation_regex: None,
             json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
         }
     }
 
@@ -2396,6 +2398,8 @@ mod tests {
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
             continuation_regex: None,
             json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
         };
 
         let sources = vec![
@@ -2577,6 +2581,8 @@ mod tests {
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
             continuation_regex: None,
             json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
         };
 
         let sources = vec![
@@ -2896,6 +2902,8 @@ mod tests {
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
             continuation_regex: None,
             json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
         };
 
         let sources = vec![Source {
@@ -3003,6 +3011,8 @@ mod tests {
             content_regex: None,
             continuation_regex: Some(r"^\s".to_string()),
             json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
         };
         let source = Source {
             id: 1,
@@ -3108,6 +3118,8 @@ mod tests {
             content_regex: None,
             continuation_regex: None,
             json_timestamp_field: Some("timestamp".into()),
+            file_name_regex: None,
+            log_content_regex: None,
         };
         let source = Source {
             id: 1,
@@ -3147,6 +3159,8 @@ mod tests {
             content_regex: None,
             continuation_regex: None,
             json_timestamp_field: Some("timestamp".into()),
+            file_name_regex: None,
+            log_content_regex: None,
         };
         let source = Source {
             id: 1,
@@ -3178,6 +3192,8 @@ mod tests {
             content_regex: None,
             continuation_regex: None,
             json_timestamp_field: Some("timestamp".into()),
+            file_name_regex: None,
+            log_content_regex: None,
         };
         let source = Source {
             id: 1,
@@ -3271,6 +3287,8 @@ mod tests {
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
             continuation_regex: None,
             json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
         };
         let source = Source {
             id: 1,
@@ -3463,6 +3481,8 @@ mod tests {
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
             continuation_regex: None,
             json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
         };
         let source = Source {
             id: 1,
@@ -3540,6 +3560,8 @@ mod tests {
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
             continuation_regex: None,
             json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
         };
         let source = Source {
             id: 1,

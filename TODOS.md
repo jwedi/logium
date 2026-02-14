@@ -476,31 +476,23 @@ When a user uploads a log file in SourceManager, auto-detect the format using th
 
 ---
 
-### 29. Auto-Create Default Ruleset on Source Template Creation
+### 29. Auto-Create Default Ruleset on Source Template Creation — Done
 
-When a source template is created, automatically create a "Default — {template_name}" ruleset linked to it. Auto-assign new rules to default rulesets in RuleCreator and RuleList. This eliminates the mandatory "create a ruleset" step that adds no value for the common case — rulesets become an advanced organizational feature rather than a required prerequisite.
-
-**Key files:** `ui/src/lib/TemplateManager.svelte`, `ui/src/lib/RuleList.svelte`, `ui/src/lib/RuleCreator.svelte`
+`create_template()` in `db.rs` now auto-inserts a "Default — {name}" ruleset. `delete_template()` cascades to delete associated rulesets. Tests updated for the new behavior.
 
 ---
 
-### 30. Actionable Empty States with Contextual Guidance
+### 30. Actionable Empty States with Contextual Guidance — Done
 
-Replace bare "No X yet" messages with contextual cards that explain what each entity is, what to do next, and link to prerequisite steps. Key improvements:
-- SourceManager: lead with file upload, explain what sources are
-- TemplateManager: explain templates, suggest uploading a file instead (which auto-creates templates via #28)
-- RuleList: explain rules, mention text-selection shortcut in LogViewer
-- AnalysisView: show a setup checklist (sources ✓/✗, rules ✓/✗, rulesets ✓/✗) with links to incomplete steps, instead of just "Click Run Analysis"
-
-**Key files:** `ui/src/lib/SourceManager.svelte`, `ui/src/lib/TemplateManager.svelte`, `ui/src/lib/RuleList.svelte`, `ui/src/lib/AnalysisView.svelte`
+Replaced bare "No X yet" messages with `.guidance` cards across all manager components. Each card explains the entity, the next step, and prerequisites. AnalysisView now shows a setup checklist with live source/rule/ruleset counts. Added `.guidance` CSS class in `app.css`, updated SourceManager, TemplateManager, RuleList, RulesetManager, and AnalysisView. Updated test mocks and snapshot.
 
 ---
 
 ### 31. Starter Project Configs (One-Click Demo)
 
-Bundle 2–3 pre-built `.logium.json` config files (served from `ui/public/`) with rules for common log formats: Nginx access logs (4xx/5xx errors, slow responses), Syslog (auth failures, OOM, service restarts), Zookeeper (session expirations, leader elections). Add a "Load Starter Config" option in ProjectManager that imports via the existing `projects.importConfig()` API. Pair with downloadable sample log files from the test fixtures. Gives new users a working analysis in under 60 seconds.
+**Status:** Done
 
-**Key files:** `ui/src/lib/ProjectManager.svelte`, `ui/src/lib/api.ts` (`importConfig` already exists), new static files in `ui/public/starters/`
+Bundled 3 pre-built `.logium.json` config files (Nginx, Syslog, Zookeeper) in `ui/public/starters/` with matching 50-line sample log files in `ui/public/starters/samples/`. Added a "Load Starter" dropdown button on each project card in `ProjectManager.svelte` that fetches the static JSON and imports it via `projectsApi.importConfig()`. Each config includes a timestamp template, source template, 2 rules, 1 ruleset, and 1 pattern.
 
 ---
 
@@ -541,16 +533,12 @@ In the source management view, add a "Replace" button on each source. Clicking i
 
 ---
 
-### 36. Default Project Bootstrap
+### 36. Default Project Bootstrap — Done
 
-If no projects exist on startup, automatically create a "Default project" so the user lands in a usable workspace instead of facing an empty project list. Also add support for renaming projects (the `name` field exists in the DB but there is no rename affordance in the UI). This removes a mandatory first step that adds no value for single-project users and makes the project name editable for users who want to organize multiple projects.
-
-**Key files:** `ui/src/App.svelte`, `ui/src/lib/ProjectManager.svelte`, `ui/src/lib/api.ts`, `crates/logium-server/src/routes/` (project CRUD)
+Auto-creates a "Default project" when the project list is empty on first load, and auto-selects it. Added inline rename UI to ProjectManager (Rename button → input with Save/Cancel, Enter/Escape keys). Uses the existing `PUT /api/projects/:id` endpoint — no backend changes needed.
 
 ---
 
-### 37. Source Template Auto-Selection via File Name / Log Content Regex
+### 37. Source Template Auto-Selection via File Name / Log Content Regex — Done
 
-Add two optional fields to source templates: `file_name_regex` (matched against the source file name) and `log_content_regex` (matched against the first 1000 lines of the file). When a source file is picked and matches a template's `file_name_regex`, or its first 1000 lines contain a match for `log_content_regex`, that template is automatically selected. These regex-based checks take precedence over the existing `detect-template` inference logic but do not replace it — if no regex matches, the current detection still runs as a fallback. This lets users define precise template-matching rules for their log formats (e.g., `file_name_regex: "nginx.*\\.log"` or `log_content_regex: "\\[error\\]"`) so new sources are classified correctly without manual selection.
-
-**Key files:** `crates/logium-core/src/model.rs` (SourceTemplate), `crates/logium-server/src/db.rs` (schema + CRUD), `crates/logium-server/src/routes/` (detect-template endpoint), `ui/src/lib/SourceManager.svelte`, `ui/src/lib/TemplateManager.svelte`
+Added `file_name_regex` and `log_content_regex` optional fields to `SourceTemplate` across the full stack (model, DB migration, CRUD, routes, API types, UI). `SourceManager.onFileSelected()` now runs a three-phase detection: (1) file name regex match, (2) log content regex match against first 1000 lines, (3) existing `detect-template` fallback. `TemplateManager` exposes create/edit fields and card display for both regexes. New DB test verifies round-trip persistence and clearing.

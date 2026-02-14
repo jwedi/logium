@@ -19,6 +19,8 @@
   let newContentRegex = $state('');
   let newContinuationRegex = $state('');
   let newJsonTimestampField = $state('');
+  let newFileNameRegex = $state('');
+  let newLogContentRegex = $state('');
 
   function tsTemplateName(id: number): string {
     return tsTemplateList.find((t) => t.id === id)?.name ?? `#${id}`;
@@ -51,12 +53,16 @@
         content_regex: newContentRegex || null,
         continuation_regex: newContinuationRegex || null,
         json_timestamp_field: newJsonTimestampField || null,
+        file_name_regex: newFileNameRegex || null,
+        log_content_regex: newLogContentRegex || null,
       });
       newName = '';
       newLineDelimiter = '\\n';
       newContentRegex = '';
       newContinuationRegex = '';
       newJsonTimestampField = '';
+      newFileNameRegex = '';
+      newLogContentRegex = '';
       await load();
     } catch (e: any) {
       alert(e.message);
@@ -136,6 +142,14 @@
         placeholder="e.g. timestamp, ts, @timestamp"
       />
     </div>
+    <div class="field">
+      <label>File Name Regex (optional)</label>
+      <input type="text" bind:value={newFileNameRegex} placeholder="e.g. nginx.*\.log$" />
+    </div>
+    <div class="field">
+      <label>Log Content Regex (optional)</label>
+      <input type="text" bind:value={newLogContentRegex} placeholder="e.g. ^\d+\.\d+\.\d+\.\d+ -" />
+    </div>
   </div>
   <div class="actions">
     <button
@@ -149,7 +163,11 @@
 {#if loading}
   <div class="empty">Loading...</div>
 {:else if templateList.length === 0}
-  <div class="empty">No templates yet.</div>
+  <div class="guidance">
+    <strong>Source templates</strong> describe how to parse a log format — timestamp pattern, line delimiter,
+    and content regex. Fill in the form above to create one, or upload a log file in the Sources tab to
+    auto-detect the format.
+  </div>
 {:else}
   <div class="template-list">
     {#each templateList as tmpl}
@@ -188,6 +206,22 @@
                 placeholder="e.g. timestamp, ts, @timestamp"
               />
             </div>
+            <div class="field">
+              <label>File Name Regex</label>
+              <input
+                type="text"
+                bind:value={editing.file_name_regex}
+                placeholder="e.g. nginx.*\.log$"
+              />
+            </div>
+            <div class="field">
+              <label>Log Content Regex</label>
+              <input
+                type="text"
+                bind:value={editing.log_content_regex}
+                placeholder="e.g. ^\d+\.\d+\.\d+\.\d+ -"
+              />
+            </div>
           </div>
           <div class="actions">
             <button class="primary" onclick={updateTemplate}>Save</button>
@@ -209,6 +243,18 @@
                 <span
                   ><strong>JSON Timestamp Field:</strong>
                   <code>{tmpl.json_timestamp_field}</code></span
+                >
+              {/if}
+              {#if tmpl.file_name_regex}
+                <span
+                  ><strong>File Name Regex:</strong>
+                  <code>{tmpl.file_name_regex}</code></span
+                >
+              {/if}
+              {#if tmpl.log_content_regex}
+                <span
+                  ><strong>Log Content Regex:</strong>
+                  <code>{tmpl.log_content_regex}</code></span
                 >
               {/if}
             </div>

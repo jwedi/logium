@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "timestamp_templates": [
+    {
+      "id": 1,
+      "name": "Apache/Nginx",
+      "format": "%d/%b/%Y:%H:%M:%S",
+      "extraction_regex": "\\[(\\d{2}/\\w{3}/\\d{4}:\\d{2}:\\d{2}:\\d{2})",
+      "default_year": null
+    }
+  ],
+  "source_templates": [
+    {
+      "id": 1,
+      "name": "Nginx Access Log",
+      "timestamp_template_id": 1,
+      "line_delimiter": "\n",
+      "content_regex": null,
+      "continuation_regex": null,
+      "json_timestamp_field": null,
+      "file_name_regex": "nginx.*\\.log$",
+      "log_content_regex": "^\\d+\\.\\d+\\.\\d+\\.\\d+ - "
+    }
+  ],
+  "rules": [
+    {
+      "id": 1,
+      "name": "Extract HTTP Status",
+      "match_mode": "Any",
+      "match_rules": [{ "id": 1, "pattern": "HTTP/1\\.\\d\"\\s+\\d+" }],
+      "extraction_rules": [
+        {
+          "id": 1,
+          "extraction_type": "Parsed",
+          "state_key": "status",
+          "pattern": "HTTP/1\\.\\d\"\\s+(?P<status>\\d+)",
+          "static_value": null,
+          "mode": "Replace"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Detect HTTP Method",
+      "match_mode": "Any",
+      "match_rules": [{ "id": 2, "pattern": "GET|POST|PUT|DELETE" }],
+      "extraction_rules": [
+        {
+          "id": 2,
+          "extraction_type": "Parsed",
+          "state_key": "method",
+          "pattern": "\"(?P<method>GET|POST|PUT|DELETE)",
+          "static_value": null,
+          "mode": "Replace"
+        }
+      ]
+    }
+  ],
+  "rulesets": [{ "id": 1, "name": "Nginx Rules", "template_id": 1, "rule_ids": [1, 2] }],
+  "patterns": [
+    {
+      "id": 1,
+      "name": "404 Not Found",
+      "predicates": [
+        {
+          "source_name": "nginx",
+          "state_key": "status",
+          "operator": "Eq",
+          "operand": { "Literal": { "Integer": 404 } }
+        }
+      ]
+    }
+  ]
+}

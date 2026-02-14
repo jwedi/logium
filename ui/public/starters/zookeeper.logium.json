@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "timestamp_templates": [
+    {
+      "id": 1,
+      "name": "Standard Datetime",
+      "format": "%Y-%m-%d %H:%M:%S",
+      "extraction_regex": null,
+      "default_year": null
+    }
+  ],
+  "source_templates": [
+    {
+      "id": 1,
+      "name": "Zookeeper Log",
+      "timestamp_template_id": 1,
+      "line_delimiter": "\n",
+      "content_regex": null,
+      "continuation_regex": null,
+      "json_timestamp_field": null,
+      "file_name_regex": "zookeeper.*\\.log$",
+      "log_content_regex": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2},\\d+ - (INFO|WARN|ERROR)"
+    }
+  ],
+  "rules": [
+    {
+      "id": 1,
+      "name": "Detect WARN/ERROR",
+      "match_mode": "Any",
+      "match_rules": [{ "id": 1, "pattern": "WARN|ERROR" }],
+      "extraction_rules": [
+        {
+          "id": 1,
+          "extraction_type": "Parsed",
+          "state_key": "level",
+          "pattern": "(?P<level>WARN|ERROR)",
+          "static_value": null,
+          "mode": "Replace"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Detect Connection Events",
+      "match_mode": "Any",
+      "match_rules": [
+        {
+          "id": 2,
+          "pattern": "Connection broken|connection request|Received connection"
+        }
+      ],
+      "extraction_rules": [
+        {
+          "id": 2,
+          "extraction_type": "Static",
+          "state_key": "connection_event",
+          "pattern": null,
+          "static_value": "true",
+          "mode": "Replace"
+        }
+      ]
+    }
+  ],
+  "rulesets": [
+    { "id": 1, "name": "Zookeeper Rules", "template_id": 1, "rule_ids": [1, 2] }
+  ],
+  "patterns": [
+    {
+      "id": 1,
+      "name": "Warning with Connection Issue",
+      "predicates": [
+        {
+          "source_name": "zookeeper",
+          "state_key": "level",
+          "operator": "Eq",
+          "operand": { "Literal": { "String": "WARN" } }
+        },
+        {
+          "source_name": "zookeeper",
+          "state_key": "connection_event",
+          "operator": "Eq",
+          "operand": { "Literal": { "String": "true" } }
+        }
+      ]
+    }
+  ]
+}
