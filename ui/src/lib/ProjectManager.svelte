@@ -21,6 +21,25 @@
   let importTargetId: number | null = $state(null);
   let editingId: number | null = $state(null);
   let editName = $state('');
+  let starterMenuId: number | null = $state(null);
+
+  const STARTERS = [
+    {
+      key: 'nginx',
+      label: 'Nginx Access Log',
+      description: 'HTTP status extraction, 404 detection',
+    },
+    {
+      key: 'syslog',
+      label: 'Syslog Auth Log',
+      description: 'Auth failures, remote host extraction',
+    },
+    {
+      key: 'zookeeper',
+      label: 'Zookeeper',
+      description: 'WARN/ERROR levels, connection events',
+    },
+  ] as const;
 
   async function exportProject(id: number, name: string) {
     try {
@@ -100,6 +119,27 @@
     editName = '';
   }
 
+  async function loadStarter(projectId: number, key: string) {
+    starterMenuId = null;
+    try {
+      const res = await fetch(`/starters/${key}.logium.json`);
+      if (!res.ok) throw new Error(`Failed to fetch starter config`);
+      const data = await res.json();
+      const result = await projectsApi.importConfig(projectId, data);
+      const total =
+        result.timestamp_templates +
+        result.source_templates +
+        result.rules +
+        result.rulesets +
+        result.patterns;
+      alert(
+        `Loaded ${total} items (${result.timestamp_templates} timestamp templates, ${result.source_templates} source templates, ${result.rules} rules, ${result.rulesets} rulesets, ${result.patterns} patterns).\n\nDownload a sample log file at /starters/samples/${key}_sample.log to try it out.`,
+      );
+    } catch (e: any) {
+      alert(`Failed to load starter: ${e.message}`);
+    }
+  }
+
   async function saveRename(id: number) {
     const trimmed = editName.trim();
     if (!trimmed) return;
@@ -166,6 +206,26 @@
             <button onclick={() => startRename(project)}>Rename</button>
             <button onclick={() => exportProject(project.id, project.name)}>Export</button>
             <button onclick={() => startImport(project.id)}>Import</button>
+            <div class="starter-dropdown">
+              <button
+                onclick={() => (starterMenuId = starterMenuId === project.id ? null : project.id)}
+              >
+                Load Starter
+              </button>
+              {#if starterMenuId === project.id}
+                <div class="starter-menu">
+                  {#each STARTERS as starter}
+                    <button
+                      class="starter-option"
+                      onclick={() => loadStarter(project.id, starter.key)}
+                    >
+                      <strong>{starter.label}</strong>
+                      <span class="hint">{starter.description}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
             <button class="danger" onclick={() => deleteProject(project.id)}>Delete</button>
           {/if}
         </div>
@@ -232,5 +292,48 @@
     font-weight: 600;
     padding: 2px 6px;
     width: 200px;
+  }
+
+  .starter-dropdown {
+    position: relative;
+  }
+
+  .starter-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 10;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    min-width: 240px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .starter-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 12px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    border-radius: 4px;
+    text-align: left;
+    width: 100%;
+  }
+
+  .starter-option:hover {
+    background: var(--bg-hover);
+  }
+
+  .starter-option .hint {
+    font-size: 12px;
+    color: var(--text-muted);
   }
 </style>

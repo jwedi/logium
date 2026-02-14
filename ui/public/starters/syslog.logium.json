@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "timestamp_templates": [
+    {
+      "id": 1,
+      "name": "Syslog (RFC 3164)",
+      "format": "%b %d %H:%M:%S",
+      "extraction_regex": null,
+      "default_year": 2005
+    }
+  ],
+  "source_templates": [
+    {
+      "id": 1,
+      "name": "Syslog Auth Log",
+      "timestamp_template_id": 1,
+      "line_delimiter": "\n",
+      "content_regex": null,
+      "continuation_regex": null,
+      "json_timestamp_field": null,
+      "file_name_regex": "syslog|auth\\.log",
+      "log_content_regex": "^\\w{3}\\s+\\d+\\s+\\d{2}:\\d{2}:\\d{2}\\s+\\w+"
+    }
+  ],
+  "rules": [
+    {
+      "id": 1,
+      "name": "Detect Auth Failure",
+      "match_mode": "Any",
+      "match_rules": [{ "id": 1, "pattern": "authentication failure" }],
+      "extraction_rules": [
+        {
+          "id": 1,
+          "extraction_type": "Static",
+          "state_key": "auth_failed",
+          "pattern": null,
+          "static_value": "true",
+          "mode": "Replace"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Extract Remote Host",
+      "match_mode": "Any",
+      "match_rules": [{ "id": 2, "pattern": "rhost=\\S+" }],
+      "extraction_rules": [
+        {
+          "id": 2,
+          "extraction_type": "Parsed",
+          "state_key": "rhost",
+          "pattern": "rhost=(?P<rhost>\\S+)",
+          "static_value": null,
+          "mode": "Replace"
+        }
+      ]
+    }
+  ],
+  "rulesets": [{ "id": 1, "name": "Syslog Rules", "template_id": 1, "rule_ids": [1, 2] }],
+  "patterns": [
+    {
+      "id": 1,
+      "name": "Auth Failure Detected",
+      "predicates": [
+        {
+          "source_name": "syslog",
+          "state_key": "auth_failed",
+          "operator": "Eq",
+          "operand": { "Literal": { "String": "true" } }
+        }
+      ]
+    }
+  ]
+}

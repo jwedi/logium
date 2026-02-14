@@ -490,9 +490,9 @@ Replaced bare "No X yet" messages with `.guidance` cards across all manager comp
 
 ### 31. Starter Project Configs (One-Click Demo)
 
-Bundle 2–3 pre-built `.logium.json` config files (served from `ui/public/`) with rules for common log formats: Nginx access logs (4xx/5xx errors, slow responses), Syslog (auth failures, OOM, service restarts), Zookeeper (session expirations, leader elections). Add a "Load Starter Config" option in ProjectManager that imports via the existing `projects.importConfig()` API. Pair with downloadable sample log files from the test fixtures. Gives new users a working analysis in under 60 seconds.
+**Status:** Done
 
-**Key files:** `ui/src/lib/ProjectManager.svelte`, `ui/src/lib/api.ts` (`importConfig` already exists), new static files in `ui/public/starters/`
+Bundled 3 pre-built `.logium.json` config files (Nginx, Syslog, Zookeeper) in `ui/public/starters/` with matching 50-line sample log files in `ui/public/starters/samples/`. Added a "Load Starter" dropdown button on each project card in `ProjectManager.svelte` that fetches the static JSON and imports it via `projectsApi.importConfig()`. Each config includes a timestamp template, source template, 2 rules, 1 ruleset, and 1 pattern.
 
 ---
 
@@ -539,8 +539,6 @@ Auto-creates a "Default project" when the project list is empty on first load, a
 
 ---
 
-### 37. Source Template Auto-Selection via File Name / Log Content Regex
+### 37. Source Template Auto-Selection via File Name / Log Content Regex — Done
 
-Add two optional fields to source templates: `file_name_regex` (matched against the source file name) and `log_content_regex` (matched against the first 1000 lines of the file). When a source file is picked and matches a template's `file_name_regex`, or its first 1000 lines contain a match for `log_content_regex`, that template is automatically selected. These regex-based checks take precedence over the existing `detect-template` inference logic but do not replace it — if no regex matches, the current detection still runs as a fallback. This lets users define precise template-matching rules for their log formats (e.g., `file_name_regex: "nginx.*\\.log"` or `log_content_regex: "\\[error\\]"`) so new sources are classified correctly without manual selection.
-
-**Key files:** `crates/logium-core/src/model.rs` (SourceTemplate), `crates/logium-server/src/db.rs` (schema + CRUD), `crates/logium-server/src/routes/` (detect-template endpoint), `ui/src/lib/SourceManager.svelte`, `ui/src/lib/TemplateManager.svelte`
+Added `file_name_regex` and `log_content_regex` optional fields to `SourceTemplate` across the full stack (model, DB migration, CRUD, routes, API types, UI). `SourceManager.onFileSelected()` now runs a three-phase detection: (1) file name regex match, (2) log content regex match against first 1000 lines, (3) existing `detect-template` fallback. `TemplateManager` exposes create/edit fields and card display for both regexes. New DB test verifies round-trip persistence and clearing.
