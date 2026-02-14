@@ -110,7 +110,14 @@
   {#if loading}
     <div class="empty">Loading...</div>
   {:else if sourceList.length === 0}
-    <div class="empty">No sources yet. Add a template first, then create a source.</div>
+    <div class="guidance">
+      <strong>Sources</strong> link a log file to a parsing template so the engine knows how to read
+      it. Use the form above to name your source, pick a template, and upload a log file.
+      <div class="hint">
+        Need a template first? Create one in the Templates tab, or upload a file — the format will
+        be auto-detected.
+      </div>
+    </div>
   {:else}
     <div class="source-list">
       {#each sourceList as source}

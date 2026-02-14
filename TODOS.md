@@ -482,15 +482,9 @@ When a user uploads a log file in SourceManager, auto-detect the format using th
 
 ---
 
-### 30. Actionable Empty States with Contextual Guidance
+### 30. Actionable Empty States with Contextual Guidance — Done
 
-Replace bare "No X yet" messages with contextual cards that explain what each entity is, what to do next, and link to prerequisite steps. Key improvements:
-- SourceManager: lead with file upload, explain what sources are
-- TemplateManager: explain templates, suggest uploading a file instead (which auto-creates templates via #28)
-- RuleList: explain rules, mention text-selection shortcut in LogViewer
-- AnalysisView: show a setup checklist (sources ✓/✗, rules ✓/✗, rulesets ✓/✗) with links to incomplete steps, instead of just "Click Run Analysis"
-
-**Key files:** `ui/src/lib/SourceManager.svelte`, `ui/src/lib/TemplateManager.svelte`, `ui/src/lib/RuleList.svelte`, `ui/src/lib/AnalysisView.svelte`
+Replaced bare "No X yet" messages with `.guidance` cards across all manager components. Each card explains the entity, the next step, and prerequisites. AnalysisView now shows a setup checklist with live source/rule/ruleset counts. Added `.guidance` CSS class in `app.css`, updated SourceManager, TemplateManager, RuleList, RulesetManager, and AnalysisView. Updated test mocks and snapshot.
 
 ---
 

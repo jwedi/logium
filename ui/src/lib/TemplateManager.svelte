@@ -149,7 +149,11 @@
 {#if loading}
   <div class="empty">Loading...</div>
 {:else if templateList.length === 0}
-  <div class="empty">No templates yet.</div>
+  <div class="guidance">
+    <strong>Source templates</strong> describe how to parse a log format — timestamp pattern, line delimiter,
+    and content regex. Fill in the form above to create one, or upload a log file in the Sources tab to
+    auto-detect the format.
+  </div>
 {:else}
   <div class="template-list">
     {#each templateList as tmpl}

@@ -106,8 +106,10 @@
 {#if loading}
   <div class="empty">Loading...</div>
 {:else if ruleList.length === 0}
-  <div class="empty">
-    No rules yet. Create one or use the log viewer to create rules from text selection.
+  <div class="guidance">
+    <strong>Rules</strong> define what to look for in your logs — a regex pattern that extracts
+    state when matched. Create one with the form above, or run an analysis first and
+    <strong>select text in the log viewer</strong> to generate a rule from a real log line.
   </div>
 {:else}
   <div class="rule-list">

@@ -161,6 +161,25 @@ h3 {
   text-align: center;
 }
 
+.guidance {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.guidance strong {
+  color: var(--text);
+}
+
+.guidance .hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
+
 .badge {
   display: inline-block;
   padding: 2px 8px;

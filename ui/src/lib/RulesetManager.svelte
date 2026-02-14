@@ -148,7 +148,13 @@
 {#if loading}
   <div class="empty">Loading...</div>
 {:else if rulesetList.length === 0}
-  <div class="empty">No rulesets yet.</div>
+  <div class="guidance">
+    <strong>Rulesets</strong> bind rules to a source template so they run during analysis. A default
+    ruleset is created automatically with each new template — you only need to add rules to it.
+    <div class="hint">
+      Tip: rulesets are created automatically when you create a source template.
+    </div>
+  </div>
 {:else}
   <div class="ruleset-list">
     {#each rulesetList as rs}
