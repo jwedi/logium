@@ -2,8 +2,12 @@
   import {
     sources as sourcesApi,
     templates as templatesApi,
+    timestampTemplates as tsTemplatesApi,
+    analysis as analysisApi,
     type Source,
     type SourceTemplate,
+    type TimestampTemplate,
+    type DetectTemplateResponse,
   } from './api';
   import LogViewer from './LogViewer.svelte';
 
@@ -18,17 +22,87 @@
   let newTemplateId = $state<number | ''>('');
   let fileInput: HTMLInputElement | undefined = $state();
 
+  let tsTemplateList: TimestampTemplate[] = $state([]);
+  let detecting = $state(false);
+  let detectionResult: DetectTemplateResponse | null = $state(null);
+  let detectedTemplateName: string | null = $state(null);
+
   async function load() {
     loading = true;
     try {
-      [sourceList, templateList] = await Promise.all([
+      [sourceList, templateList, tsTemplateList] = await Promise.all([
         sourcesApi.list(projectId),
         templatesApi.list(projectId),
+        tsTemplatesApi.list(projectId),
       ]);
     } catch (e: any) {
       alert(e.message);
     } finally {
       loading = false;
+    }
+  }
+
+  async function onFileSelected() {
+    const file = fileInput?.files?.[0];
+    if (!file) return;
+
+    // Auto-fill name from filename if empty
+    if (!newName.trim()) {
+      newName = file.name.replace(/\.[^.]+$/, '');
+    }
+
+    detecting = true;
+    detectionResult = null;
+    detectedTemplateName = null;
+
+    try {
+      const slice = file.slice(0, 50 * 1024);
+      const sample = await slice.text();
+
+      const result = await analysisApi.detectTemplate(projectId, { sample });
+      detectionResult = result;
+
+      if (result.confidence > 0 && result.timestamp_format) {
+        // Find matching timestamp template by format
+        const matchingTsTemplate = tsTemplateList.find(
+          (ts) => ts.format === result.timestamp_format,
+        );
+
+        if (matchingTsTemplate) {
+          // Check if a source template already exists with matching config
+          const existing = templateList.find(
+            (t) =>
+              t.timestamp_template_id === matchingTsTemplate.id &&
+              (t.content_regex ?? null) === (result.content_regex ?? null) &&
+              (t.json_timestamp_field ?? null) === (result.json_timestamp_field ?? null),
+          );
+
+          if (existing) {
+            newTemplateId = existing.id;
+            detectedTemplateName = existing.name;
+          } else {
+            // Auto-create a source template
+            const name = result.json_timestamp_field
+              ? `${matchingTsTemplate.name} (JSON)`
+              : `${matchingTsTemplate.name} (auto)`;
+            const created = await templatesApi.create(projectId, {
+              name,
+              timestamp_template_id: matchingTsTemplate.id,
+              line_delimiter: result.line_delimiter,
+              content_regex: result.content_regex,
+              continuation_regex: null,
+              json_timestamp_field: result.json_timestamp_field,
+            });
+            await load();
+            newTemplateId = created.id;
+            detectedTemplateName = created.name;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Template detection failed:', e);
+    } finally {
+      detecting = false;
     }
   }
 
@@ -47,6 +121,8 @@
 
       newName = '';
       newTemplateId = '';
+      detectionResult = null;
+      detectedTemplateName = null;
       if (fileInput) fileInput.value = '';
       await load();
     } catch (e: any) {
@@ -99,12 +175,27 @@
       </div>
       <div class="field">
         <label>Log file</label>
-        <input type="file" bind:this={fileInput} />
+        <input type="file" bind:this={fileInput} onchange={onFileSelected} />
       </div>
       <button class="primary" onclick={createSource} disabled={!newName.trim() || !newTemplateId}>
         Add
       </button>
     </div>
+    {#if detecting}
+      <div class="detection-status">Detecting format...</div>
+    {:else if detectionResult}
+      {#if detectionResult.confidence > 0 && detectedTemplateName}
+        <div class="detection-status detection-success">
+          Detected: <strong>{detectedTemplateName}</strong> — confidence {Math.round(
+            detectionResult.confidence * 100,
+          )}%
+        </div>
+      {:else}
+        <div class="detection-status detection-low">
+          Could not detect format. Please select a template manually.
+        </div>
+      {/if}
+    {/if}
   </div>
 
   {#if loading}
@@ -197,5 +288,19 @@
   .source-actions {
     display: flex;
     gap: 8px;
+  }
+
+  .detection-status {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .detection-success {
+    color: var(--success, #22c55e);
+  }
+
+  .detection-low {
+    color: var(--warning, #eab308);
   }
 </style>

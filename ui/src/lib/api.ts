@@ -120,6 +120,14 @@ export interface AnalysisResult {
   state_changes: StateChange[];
 }
 
+export interface DetectTemplateResponse {
+  timestamp_format: string | null;
+  line_delimiter: string;
+  content_regex: string | null;
+  json_timestamp_field: string | null;
+  confidence: number;
+}
+
 export interface SuggestRuleResponse {
   pattern: string;
   capture_groups: string[];
@@ -403,8 +411,8 @@ export const analysis = {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
-  detectTemplate: (pid: number, data: { content: string }) =>
-    request<SourceTemplate>(`/projects/${pid}/detect-template`, {
+  detectTemplate: (pid: number, data: { sample: string }) =>
+    request<DetectTemplateResponse>(`/projects/${pid}/detect-template`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
