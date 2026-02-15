@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
+use tracing_subscriber::EnvFilter;
 
 mod db;
 mod routes;
@@ -15,6 +16,11 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
     let db_url =
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:logium.db?mode=rwc".to_string());
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
@@ -67,6 +73,6 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("failed to bind");
-    println!("Logium server listening on http://localhost:{port}");
+    tracing::info!("Logium server listening on http://localhost:{port}");
     axum::serve(listener, app).await.unwrap();
 }

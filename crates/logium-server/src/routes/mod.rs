@@ -38,6 +38,11 @@ impl IntoResponse for ApiError {
                 format!("migration error: {e}"),
             ),
         };
+        if status.is_server_error() {
+            tracing::error!(status = %status, error = %self.0, "API request failed");
+        } else if status == StatusCode::BAD_REQUEST {
+            tracing::warn!(status = %status, error = %self.0, "API bad request");
+        }
         (status, Json(serde_json::json!({ "error": message }))).into_response()
     }
 }
