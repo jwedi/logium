@@ -33,6 +33,10 @@ impl IntoResponse for ApiError {
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("database error: {e}"),
             ),
+            DbError::Migrate(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("migration error: {e}"),
+            ),
         };
         (status, Json(serde_json::json!({ "error": message }))).into_response()
     }
