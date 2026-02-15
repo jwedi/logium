@@ -3,12 +3,21 @@
   import ProjectManager from './lib/ProjectManager.svelte';
   import SourceManager from './lib/SourceManager.svelte';
   import TemplateManager from './lib/TemplateManager.svelte';
+  import TimestampTemplateManager from './lib/TimestampTemplateManager.svelte';
   import RuleList from './lib/RuleList.svelte';
   import RulesetManager from './lib/RulesetManager.svelte';
   import PatternEditor from './lib/PatternEditor.svelte';
   import AnalysisView from './lib/AnalysisView.svelte';
 
-  type View = 'projects' | 'sources' | 'templates' | 'rules' | 'rulesets' | 'patterns' | 'analysis';
+  type View =
+    | 'projects'
+    | 'sources'
+    | 'templates'
+    | 'ts-templates'
+    | 'rules'
+    | 'rulesets'
+    | 'patterns'
+    | 'analysis';
 
   interface Route {
     projectId: number | null;
@@ -17,7 +26,7 @@
 
   function parseRoute(path: string): Route {
     const m = path.match(
-      /^\/projects\/(\d+)(?:\/(sources|templates|rules|rulesets|patterns|analysis))?$/,
+      /^\/projects\/(\d+)(?:\/(sources|templates|ts-templates|rules|rulesets|patterns|analysis))?$/,
     );
     if (m) return { projectId: Number(m[1]), view: (m[2] as View) ?? 'sources' };
     return { projectId: null, view: 'projects' };
@@ -57,6 +66,7 @@
     { view: 'projects', label: 'Projects', requiresProject: false },
     { view: 'sources', label: 'Sources', requiresProject: true },
     { view: 'templates', label: 'Templates', requiresProject: true },
+    { view: 'ts-templates', label: 'Timestamp Templates', requiresProject: true },
     { view: 'rules', label: 'Rules', requiresProject: true },
     { view: 'rulesets', label: 'Rulesets', requiresProject: true },
     { view: 'patterns', label: 'Patterns', requiresProject: true },
@@ -184,6 +194,8 @@
         <SourceManager projectId={currentProjectId} />
       {:else if currentView === 'templates'}
         <TemplateManager projectId={currentProjectId} />
+      {:else if currentView === 'ts-templates'}
+        <TimestampTemplateManager projectId={currentProjectId} />
       {:else if currentView === 'rules'}
         <RuleList projectId={currentProjectId} />
       {:else if currentView === 'rulesets'}

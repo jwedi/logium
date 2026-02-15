@@ -15,13 +15,13 @@
 
   const NICE_INTERVALS = [
     100, 250, 500, 1_000, 2_000, 5_000, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000,
-    1_800_000, 3_600_000,
+    1_800_000, 3_600_000, 7_200_000, 14_400_000, 21_600_000, 43_200_000, 86_400_000,
   ];
 
   let totalHeight = $derived((maxTime - minTime) / msPerPixel);
 
   let ticks = $derived.by(() => {
-    const targetSpacingPx = 60;
+    const targetSpacingPx = 80;
     const targetIntervalMs = targetSpacingPx * msPerPixel;
 
     let interval = NICE_INTERVALS[NICE_INTERVALS.length - 1];
@@ -59,22 +59,30 @@
       return `${h}:${m}:${s}.${mil}`;
     } else if (interval < 60_000) {
       return `${h}:${m}:${s}`;
-    } else {
+    } else if (interval < 3_600_000) {
       return `${h}:${m}`;
+    } else if (interval < 86_400_000) {
+      const mon = d.toLocaleString('en', { month: 'short', timeZone: 'UTC' });
+      const day = d.getUTCDate().toString().padStart(2, '0');
+      return `${mon} ${day} ${h}:${m}`;
+    } else {
+      const mon = d.toLocaleString('en', { month: 'short', timeZone: 'UTC' });
+      const day = d.getUTCDate().toString().padStart(2, '0');
+      return `${mon} ${day}`;
     }
   }
 </script>
 
-<svg class="timeline-axis" width="80" height={totalHeight}>
+<svg class="timeline-axis" width="120" height={totalHeight}>
   {#each ticks as tick}
-    <line x1="70" y1={tick.y} x2="80" y2={tick.y} stroke="var(--text-muted)" stroke-width="1" />
+    <line x1="110" y1={tick.y} x2="120" y2={tick.y} stroke="var(--text-muted)" stroke-width="1" />
     <text
-      x="66"
+      x="106"
       y={tick.y + 4}
       text-anchor="end"
       fill="var(--text-dim)"
       font-family="var(--font-mono)"
-      font-size="11">{tick.label}</text
+      font-size="12">{tick.label}</text
     >
   {/each}
 </svg>

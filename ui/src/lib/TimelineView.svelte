@@ -215,7 +215,7 @@
     }
   });
 
-  const AXIS_WIDTH = 80;
+  const AXIS_WIDTH = 120;
   const MIN_LANE_WIDTH = 60;
   let laneWidth = $derived.by(() => {
     if (sourceLanes.length === 0) return 100;
@@ -389,7 +389,7 @@
   }
 
   .axis-header {
-    width: 80px;
+    width: 120px;
     flex-shrink: 0;
   }
 
@@ -436,7 +436,7 @@
   }
 
   .axis-column {
-    width: 80px;
+    width: 120px;
     flex-shrink: 0;
     position: sticky;
     left: 0;

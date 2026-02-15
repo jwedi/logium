@@ -1,8 +1,9 @@
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use chrono::Datelike;
 use sqlx::Row;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 
 use logium_core::model::*;
 
@@ -11,6 +12,7 @@ use crate::routes::import_export::{ImportResult, ProjectExport};
 #[derive(Debug)]
 pub enum DbError {
     Sqlx(sqlx::Error),
+    Migrate(sqlx::migrate::MigrateError),
     NotFound,
     InvalidData(String),
 }
@@ -21,10 +23,17 @@ impl From<sqlx::Error> for DbError {
     }
 }
 
+impl From<sqlx::migrate::MigrateError> for DbError {
+    fn from(e: sqlx::migrate::MigrateError) -> Self {
+        DbError::Migrate(e)
+    }
+}
+
 impl std::fmt::Display for DbError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DbError::Sqlx(e) => write!(f, "database error: {e}"),
+            DbError::Migrate(e) => write!(f, "migration error: {e}"),
             DbError::NotFound => write!(f, "not found"),
             DbError::InvalidData(s) => write!(f, "invalid data: {s}"),
         }
@@ -40,26 +49,84 @@ pub struct Database {
 
 impl Database {
     pub async fn new(url: &str) -> Result<Self, DbError> {
+        let options = SqliteConnectOptions::from_str(url)?
+            .pragma("foreign_keys", "ON")
+            .create_if_missing(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(url)
+            .connect_with(options)
             .await?;
         let db = Self { pool };
-        db.run_migrations().await?;
+        db.legacy_fixup().await?;
+        sqlx::migrate!("./migrations").run(&db.pool).await?;
         Ok(db)
     }
 
-    async fn run_migrations(&self) -> Result<(), DbError> {
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS projects (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )",
+    /// Handle pre-sqlx-migration databases. Runs before `sqlx::migrate!()`.
+    async fn legacy_fixup(&self) -> Result<(), DbError> {
+        // If _sqlx_migrations exists, we've already bootstrapped — nothing to do.
+        let has_sqlx_table = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'",
         )
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await?;
+        if has_sqlx_table > 0 {
+            return Ok(());
+        }
 
+        // If projects table doesn't exist, this is a fresh DB — nothing to do.
+        let has_projects = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='projects'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        if has_projects == 0 {
+            return Ok(());
+        }
+
+        // Legacy database: fix schema before sqlx migrations run.
+        self.legacy_fix_timestamp_template().await?;
+        self.legacy_add_column_if_missing("source_templates", "continuation_regex", "TEXT")
+            .await?;
+        self.legacy_add_column_if_missing("source_templates", "json_timestamp_field", "TEXT")
+            .await?;
+        self.legacy_add_column_if_missing("source_templates", "file_name_regex", "TEXT")
+            .await?;
+        self.legacy_add_column_if_missing("source_templates", "log_content_regex", "TEXT")
+            .await?;
+
+        Ok(())
+    }
+
+    /// Fix legacy databases that have `timestamp_format` in `source_templates`.
+    /// Handles both V1 (only old column) and partially-migrated (both columns) states.
+    async fn legacy_fix_timestamp_template(&self) -> Result<(), DbError> {
+        // Check if source_templates exists at all.
+        let has_table = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='source_templates'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        if has_table == 0 {
+            return Ok(());
+        }
+
+        let cols = sqlx::query("PRAGMA table_info(source_templates)")
+            .fetch_all(&self.pool)
+            .await?;
+        let has_old = cols
+            .iter()
+            .any(|r| sqlx::Row::get::<String, _>(r, "name") == "timestamp_format");
+        let has_new = cols
+            .iter()
+            .any(|r| sqlx::Row::get::<String, _>(r, "name") == "timestamp_template_id");
+
+        if !has_old {
+            // No old column — nothing to fix.
+            return Ok(());
+        }
+
+        // Ensure timestamp_templates table exists.
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS timestamp_templates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,140 +140,97 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS source_templates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                timestamp_template_id INTEGER NOT NULL REFERENCES timestamp_templates(id),
-                line_delimiter TEXT NOT NULL,
-                content_regex TEXT,
-                continuation_regex TEXT,
-                json_timestamp_field TEXT
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
+        // Seed default timestamp templates for every project that has none.
+        let project_ids = sqlx::query_scalar::<_, i64>("SELECT id FROM projects")
+            .fetch_all(&self.pool)
+            .await?;
+        for pid in &project_ids {
+            let count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM timestamp_templates WHERE project_id = ?",
+            )
+            .bind(pid)
+            .fetch_one(&self.pool)
+            .await?;
+            if count == 0 {
+                self.seed_default_timestamp_templates(*pid).await?;
+            }
+        }
 
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS sources (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                template_id INTEGER NOT NULL REFERENCES source_templates(id),
-                name TEXT NOT NULL,
-                file_path TEXT NOT NULL
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                match_mode TEXT NOT NULL
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS match_rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                rule_id INTEGER NOT NULL REFERENCES rules(id) ON DELETE CASCADE,
-                pattern TEXT NOT NULL
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS extraction_rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                rule_id INTEGER NOT NULL REFERENCES rules(id) ON DELETE CASCADE,
-                extraction_type TEXT NOT NULL,
-                state_key TEXT NOT NULL,
-                pattern TEXT,
-                static_value TEXT,
-                mode TEXT NOT NULL
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS rulesets (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                template_id INTEGER NOT NULL REFERENCES source_templates(id),
-                name TEXT NOT NULL
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS ruleset_rules (
-                ruleset_id INTEGER NOT NULL REFERENCES rulesets(id) ON DELETE CASCADE,
-                rule_id INTEGER NOT NULL REFERENCES rules(id) ON DELETE CASCADE,
-                PRIMARY KEY (ruleset_id, rule_id)
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS patterns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-                name TEXT NOT NULL
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS pattern_predicates (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pattern_id INTEGER NOT NULL REFERENCES patterns(id) ON DELETE CASCADE,
-                order_index INTEGER NOT NULL,
-                source_name TEXT NOT NULL,
-                state_key TEXT NOT NULL,
-                operator TEXT NOT NULL,
-                operand_type TEXT NOT NULL,
-                operand_value TEXT NOT NULL
-            )",
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Enable foreign keys
-        sqlx::query("PRAGMA foreign_keys = ON")
+        // Add the new column if missing (nullable for now so we can populate it).
+        if !has_new {
+            sqlx::query(
+                "ALTER TABLE source_templates ADD COLUMN timestamp_template_id INTEGER REFERENCES timestamp_templates(id)",
+            )
             .execute(&self.pool)
             .await?;
+        }
 
-        // Migrations for columns added after initial schema
-        self.migrate_add_column("source_templates", "continuation_regex", "TEXT")
+        // Populate any NULL timestamp_template_id values from old format strings.
+        let rows = sqlx::query(
+            "SELECT id, project_id, timestamp_format FROM source_templates WHERE timestamp_template_id IS NULL",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        for row in &rows {
+            let st_id: i64 = sqlx::Row::get(row, "id");
+            let project_id: i64 = sqlx::Row::get(row, "project_id");
+            let ts_format: String = sqlx::Row::get(row, "timestamp_format");
+
+            let tt_id = sqlx::query_scalar::<_, i64>(
+                "SELECT id FROM timestamp_templates WHERE project_id = ? AND format = ? LIMIT 1",
+            )
+            .bind(project_id)
+            .bind(&ts_format)
+            .fetch_optional(&self.pool)
             .await?;
-        self.migrate_add_column("source_templates", "json_timestamp_field", "TEXT")
-            .await?;
-        self.migrate_add_column("source_templates", "file_name_regex", "TEXT")
-            .await?;
-        self.migrate_add_column("source_templates", "log_content_regex", "TEXT")
+
+            let tt_id = match tt_id {
+                Some(id) => id,
+                None => {
+                    sqlx::query_scalar::<_, i64>(
+                        "INSERT INTO timestamp_templates (project_id, name, format) VALUES (?, ?, ?) RETURNING id",
+                    )
+                    .bind(project_id)
+                    .bind(format!("Migrated: {ts_format}"))
+                    .bind(&ts_format)
+                    .fetch_one(&self.pool)
+                    .await?
+                }
+            };
+
+            sqlx::query("UPDATE source_templates SET timestamp_template_id = ? WHERE id = ?")
+                .bind(tt_id)
+                .bind(st_id)
+                .execute(&self.pool)
+                .await?;
+        }
+
+        // Drop the old column so its NOT NULL constraint no longer blocks inserts.
+        sqlx::query("ALTER TABLE source_templates DROP COLUMN timestamp_format")
+            .execute(&self.pool)
             .await?;
 
         Ok(())
     }
 
     /// Add a column to an existing table if it doesn't already exist.
-    async fn migrate_add_column(
+    async fn legacy_add_column_if_missing(
         &self,
         table: &str,
         column: &str,
         col_type: &str,
     ) -> Result<(), DbError> {
-        // PRAGMA table_info returns one row per column; check if ours is present.
+        let has_table = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+        )
+        .bind(table)
+        .fetch_one(&self.pool)
+        .await?;
+        if has_table == 0 {
+            return Ok(());
+        }
+
         let rows = sqlx::query(&format!("PRAGMA table_info({table})"))
             .fetch_all(&self.pool)
             .await?;
@@ -2182,5 +2206,211 @@ mod tests {
             .unwrap();
         assert!(updated.file_name_regex.is_none());
         assert!(updated.log_content_regex.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_legacy_fixup_v1_database() {
+        // Simulate a V1 database with `timestamp_format` column instead of
+        // `timestamp_template_id`.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("sqlite:{}?mode=rwc", tmp.path().display());
+
+        // Create V1 schema directly.
+        let opts = SqliteConnectOptions::from_str(&url)
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE source_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                timestamp_format TEXT NOT NULL,
+                line_delimiter TEXT NOT NULL,
+                content_regex TEXT
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Insert V1 data.
+        sqlx::query(
+            "INSERT INTO projects (name, created_at) VALUES ('P1', '2024-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO source_templates (project_id, name, timestamp_format, line_delimiter)
+             VALUES (1, 'syslog', '%b %d %H:%M:%S', '\n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        pool.close().await;
+
+        // Open via Database::new() — should migrate successfully.
+        let db = Database::new(&url).await.unwrap();
+
+        // Verify: old column is gone, source template has timestamp_template_id.
+        let templates = db.list_templates(1).await.unwrap();
+        assert_eq!(templates.len(), 1);
+        assert!(templates[0].timestamp_template_id > 0);
+
+        // Verify: can create new source templates (would fail if timestamp_format NOT NULL remained).
+        let tts = db.list_timestamp_templates(1).await.unwrap();
+        assert!(!tts.is_empty());
+        let tt_id = tts[0].id as i64;
+        let new_st = db
+            .create_template(1, "new_tmpl", tt_id, "\n", None, None, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(new_st.name, "new_tmpl");
+    }
+
+    #[tokio::test]
+    async fn test_legacy_fixup_partially_migrated() {
+        // Simulate partially-migrated state: both `timestamp_format` and
+        // `timestamp_template_id` exist, but `timestamp_template_id` is NULL.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("sqlite:{}?mode=rwc", tmp.path().display());
+
+        let opts = SqliteConnectOptions::from_str(&url)
+            .unwrap()
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(opts)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "CREATE TABLE timestamp_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                format TEXT NOT NULL,
+                extraction_regex TEXT,
+                default_year INTEGER
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Partially migrated: has BOTH columns, timestamp_template_id is nullable.
+        sqlx::query(
+            "CREATE TABLE source_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                timestamp_format TEXT NOT NULL,
+                timestamp_template_id INTEGER REFERENCES timestamp_templates(id),
+                line_delimiter TEXT NOT NULL,
+                content_regex TEXT
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO projects (name, created_at) VALUES ('P1', '2024-01-01T00:00:00Z')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO source_templates (project_id, name, timestamp_format, line_delimiter)
+             VALUES (1, 'syslog', '%b %d %H:%M:%S', '\n')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        pool.close().await;
+
+        // Open via Database::new() — should fix the partially-migrated state.
+        let db = Database::new(&url).await.unwrap();
+
+        // Verify: timestamp_template_id is populated.
+        let templates = db.list_templates(1).await.unwrap();
+        assert_eq!(templates.len(), 1);
+        assert!(templates[0].timestamp_template_id > 0);
+
+        // Verify: timestamp_format column is gone (can insert without it).
+        let tts = db.list_timestamp_templates(1).await.unwrap();
+        let tt_id = tts[0].id as i64;
+        db.create_template(1, "new", tt_id, "\n", None, None, None, None, None)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_idempotent_restart() {
+        // Open a DB, create data, close, re-open — verify data survives.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let url = format!("sqlite:{}?mode=rwc", tmp.path().display());
+
+        let db = Database::new(&url).await.unwrap();
+        let p = db.create_project("Persistent").await.unwrap();
+        let tt = db
+            .create_timestamp_template(p.id, "ts", "%Y-%m-%d", None, None)
+            .await
+            .unwrap();
+        db.create_template(
+            p.id,
+            "tmpl",
+            tt.id as i64,
+            "\n",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        // Drop the pool to release all connections.
+        drop(db);
+
+        // Re-open — should not fail and data should survive.
+        let db2 = Database::new(&url).await.unwrap();
+        let projects = db2.list_projects().await.unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "Persistent");
+
+        let templates = db2.list_templates(p.id).await.unwrap();
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].name, "tmpl");
     }
 }

@@ -50,7 +50,7 @@ describe('TimelineAxis', () => {
   });
 
   it('picks minute-level interval when zoomed out', () => {
-    // msPerPixel=1000 → target=60000ms → picks 60000ms → HH:MM
+    // msPerPixel=1000 → target=80000ms → picks 120000ms → HH:MM
     const { container } = renderAxis({
       minTime: 0,
       maxTime: 3_600_000,
@@ -62,6 +62,42 @@ describe('TimelineAxis', () => {
     expect(texts.length).toBeGreaterThan(0);
     const label = texts[0].textContent!;
     expect(label).toMatch(/^\d{2}:\d{2}$/);
+  });
+
+  it('picks hour-level interval with date labels for multi-day spans', () => {
+    // msPerPixel=50000 → target=4000000ms → picks 7200000ms (2h) → Mon DD HH:MM
+    const dayMs = 86_400_000;
+    const baseTime = Date.UTC(2024, 6, 29, 0, 0, 0); // Jul 29 2024
+    const { container } = renderAxis({
+      minTime: baseTime,
+      maxTime: baseTime + 4 * dayMs,
+      msPerPixel: 50_000,
+      scrollTop: 0,
+      viewportHeight: 600,
+    });
+    const texts = container.querySelectorAll('text');
+    expect(texts.length).toBeGreaterThan(0);
+    const label = texts[0].textContent!;
+    // Hour-level: "Mon DD HH:MM" e.g. "Jul 29 02:00"
+    expect(label).toMatch(/^\w{3} \d{2} \d{2}:\d{2}$/);
+  });
+
+  it('picks day-level interval with date-only labels for very wide spans', () => {
+    // msPerPixel=2000000 → target=160000000ms → picks 86400000ms (24h) → Mon DD
+    const dayMs = 86_400_000;
+    const baseTime = Date.UTC(2024, 6, 1, 0, 0, 0);
+    const { container } = renderAxis({
+      minTime: baseTime,
+      maxTime: baseTime + 30 * dayMs,
+      msPerPixel: 2_000_000,
+      scrollTop: 0,
+      viewportHeight: 600,
+    });
+    const texts = container.querySelectorAll('text');
+    expect(texts.length).toBeGreaterThan(0);
+    const label = texts[0].textContent!;
+    // Day-level: "Mon DD" e.g. "Jul 01"
+    expect(label).toMatch(/^\w{3} \d{2}$/);
   });
 
   it('renders at most one tick when time range is zero', () => {

@@ -20,7 +20,9 @@ impl TimeRangeQuery {
     pub fn to_time_range(&self) -> Result<logium_core::engine::TimeRange, String> {
         let parse = |s: &str| -> Result<NaiveDateTime, String> {
             NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S")
+                .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M"))
                 .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S"))
+                .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M"))
                 .map_err(|e| format!("invalid datetime '{}': {}", s, e))
         };
         Ok(logium_core::engine::TimeRange {
@@ -214,9 +216,12 @@ async fn handle_analysis_ws(
     project_id: i64,
     time_range: logium_core::engine::TimeRange,
 ) {
+    tracing::info!(project_id, ?time_range, "WebSocket analysis started");
+
     let data = match state.db.load_project_data(project_id).await {
         Ok(d) => d,
         Err(e) => {
+            tracing::error!(project_id, error = %e, "Failed to load project data for WS analysis");
             let err_event = logium_core::engine::AnalysisEvent::Error {
                 message: format!("failed to load project data: {e}"),
             };
@@ -237,7 +242,7 @@ async fn handle_analysis_ws(
 
     // Spawn the blocking engine
     tokio::task::spawn_blocking(move || {
-        let _ = logium_core::engine::analyze_streaming(
+        if let Err(e) = logium_core::engine::analyze_streaming(
             &data.sources,
             &data.templates,
             &data.timestamp_templates,
@@ -246,13 +251,16 @@ async fn handle_analysis_ws(
             &data.patterns,
             std_tx,
             &time_range,
-        );
+        ) {
+            tracing::error!(project_id, error = %e, "Streaming analysis engine error");
+        }
     });
 
     // Bridge std channel -> tokio channel
     tokio::task::spawn_blocking(move || {
         for event in std_rx {
             if tok_tx.blocking_send(event).is_err() {
+                tracing::debug!("WS bridge: tokio receiver dropped, client likely disconnected");
                 break;
             }
         }
@@ -262,9 +270,12 @@ async fn handle_analysis_ws(
     while let Some(event) = tok_rx.recv().await {
         let json = serde_json::to_string(&event).unwrap();
         if socket.send(Message::Text(json.into())).await.is_err() {
-            break; // client disconnected
+            tracing::debug!(project_id, "WebSocket client disconnected during analysis");
+            break;
         }
     }
+
+    tracing::info!(project_id, "WebSocket analysis finished");
 }
 
 #[derive(Deserialize)]
@@ -534,6 +545,24 @@ mod tests {
         assert_eq!(
             tr.end.unwrap(),
             NaiveDateTime::parse_from_str("2024-01-01 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_time_range_query_without_seconds() {
+        // HTML datetime-local inputs may omit :SS when seconds are 00
+        let q = TimeRangeQuery {
+            start: Some("2026-06-19T00:00".into()),
+            end: Some("2026-06-20 14:30".into()),
+        };
+        let tr = q.to_time_range().unwrap();
+        assert_eq!(
+            tr.start.unwrap(),
+            NaiveDateTime::parse_from_str("2026-06-19 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+        assert_eq!(
+            tr.end.unwrap(),
+            NaiveDateTime::parse_from_str("2026-06-20 14:30:00", "%Y-%m-%d %H:%M:%S").unwrap()
         );
     }
 

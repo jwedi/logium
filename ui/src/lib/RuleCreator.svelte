@@ -127,6 +127,8 @@
         const ruleset = availableRulesets.find((rs) => rs.id === selectedRulesetId);
         if (ruleset) {
           await rulesetsApi.update(projectId, ruleset.id, {
+            name: ruleset.name,
+            template_id: ruleset.template_id,
             rule_ids: [...ruleset.rule_ids, createdRule.id],
           });
         }
