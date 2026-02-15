@@ -161,6 +161,8 @@ describe('RuleCreator', () => {
     // Should update ruleset with the new rule ID appended
     await waitFor(() => {
       expect(rulesetsApi.update).toHaveBeenCalledWith(1, 1, {
+        name: 'Server Rules',
+        template_id: 1,
         rule_ids: [10, 20, 42],
       });
     });
