@@ -135,6 +135,20 @@ export interface SuggestRuleResponse {
   capture_groups: string[];
 }
 
+export interface DryRunRequest {
+  source_id: number;
+  match_mode: 'Any' | 'All';
+  match_rules: { pattern: string }[];
+  extraction_rules: {
+    extraction_type: string;
+    state_key: string;
+    pattern: string | null;
+    static_value: string | null;
+    mode: string;
+  }[];
+  limit?: number;
+}
+
 export interface LogCluster {
   template: string;
   count: number;
@@ -420,6 +434,11 @@ export const analysis = {
     }),
   suggestRule: (pid: number, data: { text: string; context_lines?: string[] }) =>
     request<SuggestRuleResponse>(`/projects/${pid}/suggest-rule`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  dryRun: (pid: number, data: DryRunRequest) =>
+    request<RuleMatch[]>(`/projects/${pid}/dry-run`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),

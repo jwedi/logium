@@ -724,6 +724,36 @@ pub fn evaluate_rule(
     Some(extracted)
 }
 
+/// Dry-run a single rule against a source file without persisting anything.
+/// Returns the first `limit` matches with their extracted state.
+pub fn dry_run_rule(
+    source: &Source,
+    template: &SourceTemplate,
+    ts_template: &TimestampTemplate,
+    rule: &LogRule,
+    limit: usize,
+) -> Result<Vec<RuleMatch>, AnalysisError> {
+    let compiled = compile_rules(std::slice::from_ref(rule))?.remove(0);
+    let iter = LogLineIterator::new(source, template, ts_template)?;
+
+    let mut matches = Vec::new();
+    for result in iter {
+        let line = result?;
+        if let Some(extracted) = evaluate_rule(rule, &line, &compiled) {
+            matches.push(RuleMatch {
+                rule_id: rule.id,
+                source_id: source.id,
+                log_line: line,
+                extracted_state: extracted,
+            });
+            if matches.len() >= limit {
+                break;
+            }
+        }
+    }
+    Ok(matches)
+}
+
 /// Read all lines from a source (sequential I/O), then evaluate rules in parallel.
 /// Returns a Vec of ProcessedLine in chronological order.
 fn process_source(
@@ -3649,5 +3679,128 @@ mod tests {
             ts,
             NaiveDateTime::parse_from_str("2005-01-03 04:03:33", "%Y-%m-%d %H:%M:%S").unwrap()
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Dry-run tests
+    // -----------------------------------------------------------------------
+
+    fn make_dry_run_file(
+        lines: &[&str],
+    ) -> (NamedTempFile, Source, SourceTemplate, TimestampTemplate) {
+        let mut file = NamedTempFile::new().unwrap();
+        for line in lines {
+            writeln!(file, "{}", line).unwrap();
+        }
+        file.flush().unwrap();
+
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: file.path().to_str().unwrap().into(),
+        };
+        let ts_template = TimestampTemplate {
+            id: 1,
+            name: "ts".into(),
+            format: "%Y-%m-%d %H:%M:%S".into(),
+            extraction_regex: None,
+            default_year: None,
+        };
+        let template = SourceTemplate {
+            id: 1,
+            name: "tmpl".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+(.+)$".into()),
+            continuation_regex: None,
+            json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
+        };
+        (file, source, template, ts_template)
+    }
+
+    #[test]
+    fn test_dry_run_rule() {
+        let lines = &[
+            "2024-01-01 00:00:01 ERROR first failure",
+            "2024-01-01 00:00:02 INFO all good",
+            "2024-01-01 00:00:03 ERROR second failure",
+            "2024-01-01 00:00:04 DEBUG trace msg",
+            "2024-01-01 00:00:05 ERROR third failure",
+        ];
+        let (_file, source, template, ts_template) = make_dry_run_file(lines);
+
+        let rule = LogRule {
+            id: 0,
+            name: "error".into(),
+            match_mode: MatchMode::Any,
+            match_rules: vec![MatchRule {
+                id: 0,
+                pattern: "ERROR".into(),
+            }],
+            extraction_rules: vec![],
+        };
+
+        // All matches
+        let matches = dry_run_rule(&source, &template, &ts_template, &rule, 100).unwrap();
+        assert_eq!(matches.len(), 3);
+
+        // With limit
+        let limited = dry_run_rule(&source, &template, &ts_template, &rule, 2).unwrap();
+        assert_eq!(limited.len(), 2);
+    }
+
+    #[test]
+    fn test_dry_run_rule_with_extraction() {
+        let lines = &[
+            "2024-01-01 00:00:01 count=42 done",
+            "2024-01-01 00:00:02 no match here",
+            "2024-01-01 00:00:03 count=7 done",
+        ];
+        let (_file, source, template, ts_template) = make_dry_run_file(lines);
+
+        let rule = LogRule {
+            id: 0,
+            name: "counter".into(),
+            match_mode: MatchMode::Any,
+            match_rules: vec![MatchRule {
+                id: 0,
+                pattern: r"count=\d+".into(),
+            }],
+            extraction_rules: vec![ExtractionRule {
+                id: 0,
+                extraction_type: ExtractionType::Parsed,
+                state_key: "count".into(),
+                pattern: Some(r"count=(?P<count>\d+)".into()),
+                static_value: None,
+                mode: ExtractionMode::Replace,
+            }],
+        };
+
+        let matches = dry_run_rule(&source, &template, &ts_template, &rule, 100).unwrap();
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].extracted_state["count"], StateValue::Integer(42));
+        assert_eq!(matches[1].extracted_state["count"], StateValue::Integer(7));
+    }
+
+    #[test]
+    fn test_dry_run_rule_invalid_regex() {
+        let lines = &["2024-01-01 00:00:01 hello"];
+        let (_file, source, template, ts_template) = make_dry_run_file(lines);
+
+        let rule = LogRule {
+            id: 0,
+            name: "bad".into(),
+            match_mode: MatchMode::Any,
+            match_rules: vec![MatchRule {
+                id: 0,
+                pattern: "[invalid".into(),
+            }],
+            extraction_rules: vec![],
+        };
+
+        assert!(dry_run_rule(&source, &template, &ts_template, &rule, 100).is_err());
     }
 }

@@ -550,3 +550,11 @@ Added `file_name_regex` and `log_content_regex` optional fields to `SourceTempla
 **Status:** Done
 
 Expanded the RuleCreator modal to support full extraction rule CRUD (add/remove, State Key, Type, Mode, Pattern, Value fields) — matching the RuleEditor's capabilities. Capture groups from the suggested regex pattern are auto-seeded as Parsed extraction rules with the pattern pre-filled. Users can add manual extraction rules (Static, Clear types) and remove any rule before saving. Replaced the old read-only `captureGroups` array with a full `extractionRules` state. 2 new tests (add/remove extraction rules) + updated save test to verify new payload shape.
+
+---
+
+### 39. Source-Level Dry Run in RuleCreator
+
+**Status:** Done
+
+Added `dry_run_rule()` to `logium-core::engine` that streams a source file and evaluates a single rule with early break at `limit`. New `POST /api/projects/:pid/dry-run` endpoint in the server builds an ad-hoc `LogRule` from the request body and calls the engine function via `spawn_blocking`. RuleCreator now has a "Test Against Source" section with a source dropdown (filtered by `sourceTemplateId`), Run button, and scrollable results area showing matched log lines with extraction value chips. Default limit 20, capped at 100. 3 new Rust engine tests (match + limit, extraction values, invalid regex), 2 server deserialization tests, 3 frontend tests (source filtering, API call + result display, error handling).
