@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import RuleEditor from '../RuleEditor.svelte';
-import { makeRule, makeRuleWithExtractions } from './fixtures';
+import {
+  makeRule,
+  makeRuleWithExtractions,
+  makeSource,
+  makeRuleMatch,
+  makeLogLine,
+} from './fixtures';
 import * as invalidation from '../analysisInvalidation.svelte';
 
 vi.mock('../api', () => ({
@@ -17,15 +23,19 @@ vi.mock('../api', () => ({
     list: vi.fn().mockResolvedValue([]),
     update: vi.fn(),
   },
+  sources: {
+    list: vi.fn().mockResolvedValue([]),
+  },
   analysis: {
     suggestRule: vi.fn(),
     run: vi.fn(),
     runStreaming: vi.fn(),
     detectTemplate: vi.fn(),
+    dryRun: vi.fn().mockResolvedValue([]),
   },
 }));
 
-import { rules as rulesApi } from '../api';
+import { rules as rulesApi, sources as sourcesApi, analysis as analysisApi } from '../api';
 
 function renderEditor(
   ruleOverrides: Record<string, any> = {},
@@ -54,6 +64,11 @@ describe('RuleEditor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(rulesApi.update).mockResolvedValue(makeRule());
+    vi.mocked(sourcesApi.list).mockResolvedValue([
+      makeSource({ id: 1, name: 'app.log' }),
+      makeSource({ id: 2, name: 'nginx.log' }),
+    ]);
+    vi.mocked(analysisApi.dryRun).mockResolvedValue([]);
   });
 
   it('pre-populates fields from rule prop', () => {
@@ -236,7 +251,7 @@ describe('RuleEditor', () => {
         },
       ],
     });
-    expect(screen.getByPlaceholderText('regex with groups...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('e.g. ERROR (?P<message>.+)')).toBeInTheDocument();
   });
 
   it('shows static value input when type is Static', () => {
@@ -269,7 +284,7 @@ describe('RuleEditor', () => {
         },
       ],
     });
-    expect(screen.queryByPlaceholderText('regex with groups...')).toBeNull();
+    expect(screen.queryByPlaceholderText('e.g. ERROR (?P<message>.+)')).toBeNull();
     expect(screen.queryByPlaceholderText('static value...')).toBeNull();
   });
 
@@ -439,5 +454,71 @@ describe('RuleEditor', () => {
     const payload = vi.mocked(rulesApi.update).mock.calls[0][2];
     expect(payload.match_rules![0].id).toBe(0);
     expect(payload.extraction_rules![0].id).toBe(0);
+  });
+
+  // Source-level dry run tests
+  it('shows source dropdown and calls dry run API with results', async () => {
+    vi.mocked(analysisApi.dryRun).mockResolvedValue([
+      makeRuleMatch({
+        log_line: makeLogLine({ raw: 'ERROR connection refused' }),
+        extracted_state: { message: { String: 'connection refused' } },
+      }),
+    ]);
+
+    renderEditor({ match_rules: [{ id: 1, pattern: 'ERROR' }] });
+
+    // Wait for sources to load
+    await waitFor(() => {
+      expect(screen.getByText('app.log')).toBeInTheDocument();
+    });
+
+    // Select a source
+    const sourceSelect = screen.getByDisplayValue('Select a source...');
+    await fireEvent.change(sourceSelect, { target: { value: '1' } });
+
+    // Click Run
+    const runButton = screen.getByText('Run');
+    await fireEvent.click(runButton);
+
+    await waitFor(() => {
+      expect(analysisApi.dryRun).toHaveBeenCalledTimes(1);
+    });
+
+    const call = vi.mocked(analysisApi.dryRun).mock.calls[0];
+    expect(call[0]).toBe(1); // projectId
+    expect(call[1]).toMatchObject({
+      source_id: 1,
+      match_mode: 'Any',
+      match_rules: [{ pattern: 'ERROR' }],
+    });
+
+    // Results should be rendered
+    await waitFor(() => {
+      expect(screen.getByText('1 match found')).toBeInTheDocument();
+      expect(screen.getByText('ERROR connection refused')).toBeInTheDocument();
+      expect(screen.getByText('message: connection refused')).toBeInTheDocument();
+    });
+  });
+
+  it('shows error when source dry run fails', async () => {
+    vi.mocked(analysisApi.dryRun).mockRejectedValue(new Error('Source file not found'));
+
+    renderEditor({ match_rules: [{ id: 1, pattern: 'ERROR' }] });
+
+    // Wait for sources to load
+    await waitFor(() => {
+      expect(screen.getByText('app.log')).toBeInTheDocument();
+    });
+
+    // Select a source
+    const sourceSelect = screen.getByDisplayValue('Select a source...');
+    await fireEvent.change(sourceSelect, { target: { value: '1' } });
+
+    // Click Run
+    await fireEvent.click(screen.getByText('Run'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Source file not found')).toBeInTheDocument();
+    });
   });
 });
