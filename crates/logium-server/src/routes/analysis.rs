@@ -48,6 +48,7 @@ pub fn router() -> Router<AppState> {
             "/api/projects/{project_id}/suggest-rule",
             post(suggest_rule),
         )
+        .route("/api/projects/{project_id}/dry-run", post(dry_run))
 }
 
 async fn analyze(
@@ -485,6 +486,115 @@ fn build_suggested_pattern(text: &str) -> (String, Vec<String>) {
     (pattern, groups)
 }
 
+// ---------------------------------------------------------------------------
+// Dry-run endpoint
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct DryRunMatchRule {
+    pattern: String,
+}
+
+#[derive(Deserialize)]
+struct DryRunExtractionRule {
+    extraction_type: String,
+    state_key: String,
+    pattern: Option<String>,
+    static_value: Option<String>,
+    mode: String,
+}
+
+fn default_limit() -> usize {
+    20
+}
+
+const MAX_DRY_RUN_LIMIT: usize = 100;
+
+#[derive(Deserialize)]
+struct DryRunRequest {
+    source_id: i64,
+    match_mode: String,
+    match_rules: Vec<DryRunMatchRule>,
+    extraction_rules: Vec<DryRunExtractionRule>,
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
+async fn dry_run(
+    State(state): State<AppState>,
+    Path(project_id): Path<i64>,
+    Json(body): Json<DryRunRequest>,
+) -> ApiResult<Json<Vec<logium_core::model::RuleMatch>>> {
+    let limit = body.limit.min(MAX_DRY_RUN_LIMIT);
+
+    let source = state.db.get_source(project_id, body.source_id).await?;
+    let template = state
+        .db
+        .get_template(project_id, source.template_id as i64)
+        .await?;
+    let ts_template = state
+        .db
+        .get_timestamp_template(project_id, template.timestamp_template_id as i64)
+        .await?;
+
+    let match_mode = match body.match_mode.as_str() {
+        "All" => logium_core::model::MatchMode::All,
+        _ => logium_core::model::MatchMode::Any,
+    };
+
+    let match_rules: Vec<logium_core::model::MatchRule> = body
+        .match_rules
+        .into_iter()
+        .enumerate()
+        .map(|(i, m)| logium_core::model::MatchRule {
+            id: i as u64,
+            pattern: m.pattern,
+        })
+        .collect();
+
+    let extraction_rules: Vec<logium_core::model::ExtractionRule> = body
+        .extraction_rules
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let extraction_type = match e.extraction_type.as_str() {
+                "Static" => logium_core::model::ExtractionType::Static,
+                "Clear" => logium_core::model::ExtractionType::Clear,
+                _ => logium_core::model::ExtractionType::Parsed,
+            };
+            let mode = match e.mode.as_str() {
+                "Accumulate" => logium_core::model::ExtractionMode::Accumulate,
+                _ => logium_core::model::ExtractionMode::Replace,
+            };
+            logium_core::model::ExtractionRule {
+                id: i as u64,
+                extraction_type,
+                state_key: e.state_key,
+                pattern: e.pattern,
+                static_value: e.static_value,
+                mode,
+            }
+        })
+        .collect();
+
+    let rule = logium_core::model::LogRule {
+        id: 0,
+        name: String::new(),
+        match_mode,
+        match_rules,
+        extraction_rules,
+    };
+
+    let result = tokio::task::spawn_blocking(move || {
+        logium_core::engine::dry_run_rule(&source, &template, &ts_template, &rule, limit)
+    })
+    .await
+    .map_err(|e| ApiError::from(DbError::InvalidData(format!("task join error: {e}"))))?
+    .map_err(|e| ApiError::from(DbError::InvalidData(format!("dry run error: {e}"))))?;
+
+    Ok(Json(result))
+}
+
 fn is_regex_special(c: char) -> bool {
     matches!(
         c,
@@ -581,5 +691,35 @@ mod tests {
         let tr = q.to_time_range().unwrap();
         assert!(tr.start.is_none());
         assert!(tr.end.is_none());
+    }
+
+    #[test]
+    fn test_dry_run_request_deserialization() {
+        let json = r#"{
+            "source_id": 1,
+            "match_mode": "Any",
+            "match_rules": [{"pattern": "ERROR"}],
+            "extraction_rules": [],
+            "limit": 10
+        }"#;
+        let req: DryRunRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.source_id, 1);
+        assert_eq!(req.match_mode, "Any");
+        assert_eq!(req.match_rules.len(), 1);
+        assert_eq!(req.limit, 10);
+    }
+
+    #[test]
+    fn test_dry_run_request_default_limit() {
+        let json = r#"{
+            "source_id": 1,
+            "match_mode": "All",
+            "match_rules": [{"pattern": "WARN"}],
+            "extraction_rules": [{"extraction_type": "Parsed", "state_key": "msg", "pattern": "(?P<msg>.+)", "static_value": null, "mode": "Replace"}]
+        }"#;
+        let req: DryRunRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.limit, 20);
+        assert_eq!(req.extraction_rules.len(), 1);
+        assert_eq!(req.extraction_rules[0].state_key, "msg");
     }
 }

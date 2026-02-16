@@ -3,8 +3,12 @@
     rules as rulesApi,
     rulesets as rulesetsApi,
     analysis as analysisApi,
+    sources as sourcesApi,
     type Ruleset,
+    type Source,
+    type RuleMatch,
     type SuggestRuleResponse,
+    type DryRunRequest,
   } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
   import { detectGroups, testPattern } from './regexUtils';
@@ -38,6 +42,11 @@
   let suggestError = $state('');
   let availableRulesets: Ruleset[] = $state([]);
   let selectedRulesetId: number | '' = $state('');
+  let availableSources: Source[] = $state([]);
+  let selectedSourceId: number | '' = $state('');
+  let dryRunLoading = $state(false);
+  let dryRunResults: RuleMatch[] = $state([]);
+  let dryRunError = $state('');
 
   function escapeRegex(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -121,9 +130,50 @@
     fetchSuggestion();
   });
 
+  async function loadSources() {
+    try {
+      const all = await sourcesApi.list(projectId);
+      availableSources = all.filter((s) => s.template_id === sourceTemplateId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function runDryRun() {
+    if (selectedSourceId === '' || !regexPattern.trim()) return;
+    dryRunLoading = true;
+    dryRunError = '';
+    dryRunResults = [];
+    try {
+      const data: DryRunRequest = {
+        source_id: selectedSourceId as number,
+        match_mode: matchMode,
+        match_rules: [{ pattern: regexPattern }],
+        extraction_rules: extractionRules.map((er) => ({
+          extraction_type: er.extraction_type,
+          state_key: er.state_key,
+          pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
+          static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
+          mode: er.mode,
+        })),
+      };
+      dryRunResults = await analysisApi.dryRun(projectId, data);
+    } catch (e: any) {
+      dryRunError = e.message;
+    } finally {
+      dryRunLoading = false;
+    }
+  }
+
+  function formatStateValue(sv: Record<string, unknown>): string {
+    const key = Object.keys(sv)[0];
+    return String(sv[key]);
+  }
+
   $effect(() => {
     sourceTemplateId;
     loadRulesets();
+    loadSources();
   });
 
   async function save() {
@@ -243,7 +293,11 @@
             {#if er.extraction_type === 'Parsed'}
               <div class="field">
                 <label>Pattern</label>
-                <input type="text" bind:value={er.pattern} placeholder="regex with groups..." />
+                <input
+                  type="text"
+                  bind:value={er.pattern}
+                  placeholder="e.g. ERROR (?P<message>.+)"
+                />
               </div>
             {/if}
             {#if er.extraction_type === 'Static'}
@@ -254,6 +308,57 @@
             {/if}
           </div>
         {/each}
+      </div>
+
+      <div class="dry-run-section">
+        <div class="section-header">
+          <label>Test Against Source</label>
+        </div>
+        {#if availableSources.length === 0}
+          <div class="hint">No sources use this template</div>
+        {:else}
+          <div class="dry-run-controls">
+            <select bind:value={selectedSourceId}>
+              <option value="">Select a source...</option>
+              {#each availableSources as src}
+                <option value={src.id}>{src.name}</option>
+              {/each}
+            </select>
+            <button
+              class="small"
+              onclick={runDryRun}
+              disabled={dryRunLoading || selectedSourceId === '' || !regexPattern.trim()}
+            >
+              {dryRunLoading ? 'Running...' : 'Run'}
+            </button>
+          </div>
+          {#if dryRunError}
+            <div class="hint error">{dryRunError}</div>
+          {/if}
+          {#if dryRunResults.length > 0}
+            <div class="dry-run-results">
+              <div class="hint">
+                {dryRunResults.length} match{dryRunResults.length === 1 ? '' : 'es'} found
+              </div>
+              {#each dryRunResults as rm, i}
+                <div class="dry-run-match">
+                  <code>{rm.log_line.raw}</code>
+                  {#if Object.keys(rm.extracted_state).length > 0}
+                    <div class="extraction-chips">
+                      {#each Object.entries(rm.extracted_state) as [key, value]}
+                        <span class="chip"
+                          >{key}: {formatStateValue(value as Record<string, unknown>)}</span
+                        >
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {:else if !dryRunLoading && !dryRunError && selectedSourceId !== ''}
+            <!-- only show after a run has been attempted -->
+          {/if}
+        {/if}
       </div>
 
       {#if availableRulesets.length > 0}
@@ -410,5 +515,60 @@
     gap: 8px;
     padding: 16px 20px;
     border-top: 1px solid var(--border);
+  }
+
+  .dry-run-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .dry-run-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .dry-run-controls select {
+    flex: 1;
+  }
+
+  .dry-run-results {
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .dry-run-match {
+    padding: 6px 8px;
+    background: var(--bg);
+    border-radius: var(--radius);
+  }
+
+  .dry-run-match code {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .extraction-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .chip {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--green);
+    color: var(--bg);
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--font-mono);
   }
 </style>

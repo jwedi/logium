@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { rules as rulesApi, type LogRule, type ExtractionRule } from './api';
+  import {
+    rules as rulesApi,
+    sources as sourcesApi,
+    analysis as analysisApi,
+    type LogRule,
+    type ExtractionRule,
+    type Source,
+    type RuleMatch,
+    type DryRunRequest,
+  } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
   import { testPattern, toJsRegex } from './regexUtils';
 
@@ -46,6 +55,13 @@
   );
 
   let saving = $state(false);
+
+  // Source-level dry run state
+  let availableSources: Source[] = $state([]);
+  let selectedSourceId: number | '' = $state('');
+  let dryRunLoading = $state(false);
+  let dryRunResults: RuleMatch[] = $state([]);
+  let dryRunError = $state('');
 
   // Dry-run state
   let testLine = $state('');
@@ -139,6 +155,52 @@
   function removeExtractionRule(index: number) {
     editExtractionRules = editExtractionRules.filter((_, i) => i !== index);
   }
+
+  async function loadSources() {
+    try {
+      availableSources = await sourcesApi.list(projectId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function runDryRun() {
+    if (selectedSourceId === '' || !editMatchPatterns.some((mp) => mp.pattern.trim())) return;
+    dryRunLoading = true;
+    dryRunError = '';
+    dryRunResults = [];
+    try {
+      const data: DryRunRequest = {
+        source_id: selectedSourceId as number,
+        match_mode: editMatchMode,
+        match_rules: editMatchPatterns
+          .filter((mp) => mp.pattern.trim())
+          .map((mp) => ({ pattern: mp.pattern })),
+        extraction_rules: editExtractionRules.map((er) => ({
+          extraction_type: er.extraction_type,
+          state_key: er.state_key,
+          pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
+          static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
+          mode: er.mode,
+        })),
+      };
+      dryRunResults = await analysisApi.dryRun(projectId, data);
+    } catch (e: any) {
+      dryRunError = e.message;
+    } finally {
+      dryRunLoading = false;
+    }
+  }
+
+  function formatStateValue(sv: Record<string, unknown>): string {
+    const key = Object.keys(sv)[0];
+    return String(sv[key]);
+  }
+
+  $effect(() => {
+    projectId;
+    loadSources();
+  });
 
   let canSave = $derived(
     editName.trim() !== '' && editMatchPatterns.some((mp) => mp.pattern.trim() !== ''),
@@ -257,7 +319,7 @@
       {#if er.extraction_type === 'Parsed'}
         <div class="field" style="flex:2">
           <label>Pattern</label>
-          <input type="text" bind:value={er.pattern} placeholder="regex with groups..." />
+          <input type="text" bind:value={er.pattern} placeholder="e.g. ERROR (?P<message>.+)" />
         </div>
       {/if}
       {#if er.extraction_type === 'Static'}
@@ -300,6 +362,55 @@
         {/each}
       </div>
     {/if}
+
+    <div class="source-dry-run">
+      <h4>Test Against Source</h4>
+      {#if availableSources.length === 0}
+        <div class="source-hint">No sources available</div>
+      {:else}
+        <div class="source-dry-run-controls">
+          <select bind:value={selectedSourceId}>
+            <option value="">Select a source...</option>
+            {#each availableSources as src}
+              <option value={src.id}>{src.name}</option>
+            {/each}
+          </select>
+          <button
+            class="small"
+            onclick={runDryRun}
+            disabled={dryRunLoading ||
+              selectedSourceId === '' ||
+              !editMatchPatterns.some((mp) => mp.pattern.trim())}
+          >
+            {dryRunLoading ? 'Running...' : 'Run'}
+          </button>
+        </div>
+        {#if dryRunError}
+          <div class="source-hint error">{dryRunError}</div>
+        {/if}
+        {#if dryRunResults.length > 0}
+          <div class="source-dry-run-results">
+            <div class="source-hint">
+              {dryRunResults.length} match{dryRunResults.length === 1 ? '' : 'es'} found
+            </div>
+            {#each dryRunResults as rm}
+              <div class="source-dry-run-match">
+                <code>{rm.log_line.raw}</code>
+                {#if Object.keys(rm.extracted_state).length > 0}
+                  <div class="extraction-chips">
+                    {#each Object.entries(rm.extracted_state) as [key, value]}
+                      <span class="chip"
+                        >{key}: {formatStateValue(value as Record<string, unknown>)}</span
+                      >
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+      {/if}
+    </div>
   </div>
 
   <div class="editor-footer">
@@ -442,6 +553,76 @@
   .preview-type {
     font-size: 11px;
     color: var(--text-muted);
+  }
+
+  .source-dry-run {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .source-dry-run h4 {
+    margin: 0;
+  }
+
+  .source-dry-run-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .source-dry-run-controls select {
+    flex: 1;
+  }
+
+  .source-dry-run-results {
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .source-dry-run-match {
+    padding: 6px 8px;
+    background: var(--bg);
+    border-radius: var(--radius);
+  }
+
+  .source-dry-run-match code {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .extraction-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .chip {
+    display: inline-block;
+    padding: 1px 6px;
+    background: var(--green);
+    color: var(--bg);
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+  }
+
+  .source-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  .source-hint.error {
+    color: var(--yellow);
   }
 
   .editor-footer {

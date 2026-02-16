@@ -2,7 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import RuleCreator from '../RuleCreator.svelte';
-import { makeRule, makeRuleset, makeSuggestRuleResponse } from './fixtures';
+import {
+  makeRule,
+  makeRuleset,
+  makeSource,
+  makeRuleMatch,
+  makeLogLine,
+  makeSuggestRuleResponse,
+} from './fixtures';
 import * as invalidation from '../analysisInvalidation.svelte';
 
 // vi.mock factory is hoisted — cannot reference imported helpers, so use plain objects
@@ -15,15 +22,24 @@ vi.mock('../api', () => ({
     list: vi.fn(),
     update: vi.fn(),
   },
+  sources: {
+    list: vi.fn(),
+  },
   analysis: {
     suggestRule: vi.fn(),
     run: vi.fn(),
     runStreaming: vi.fn(),
     detectTemplate: vi.fn(),
+    dryRun: vi.fn(),
   },
 }));
 
-import { rules as rulesApi, rulesets as rulesetsApi, analysis as analysisApi } from '../api';
+import {
+  rules as rulesApi,
+  rulesets as rulesetsApi,
+  sources as sourcesApi,
+  analysis as analysisApi,
+} from '../api';
 
 function renderRuleCreator(overrides: Record<string, any> = {}) {
   const props = {
@@ -64,6 +80,11 @@ describe('RuleCreator', () => {
       makeRuleset({ id: 3, name: 'More Server Rules', template_id: 1, rule_ids: [30] }),
     ]);
     vi.mocked(rulesetsApi.update).mockResolvedValue({} as any);
+    vi.mocked(sourcesApi.list).mockResolvedValue([
+      makeSource({ id: 1, name: 'app.log', template_id: 1 }),
+      makeSource({ id: 2, name: 'server.log', template_id: 1 }),
+      makeSource({ id: 3, name: 'client.log', template_id: 2 }),
+    ]);
   });
 
   it('renders modal with selected text displayed', async () => {
@@ -290,5 +311,86 @@ describe('RuleCreator', () => {
     });
 
     spy.mockRestore();
+  });
+
+  // -----------------------------------------------------------------------
+  // Dry-run tests
+  // -----------------------------------------------------------------------
+
+  it('shows source dropdown filtered by template_id', async () => {
+    renderRuleCreator({ sourceTemplateId: 1 });
+    await tick();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Against Source')).toBeInTheDocument();
+    });
+
+    // Should show matching sources (template_id=1)
+    expect(screen.getByText('app.log')).toBeInTheDocument();
+    expect(screen.getByText('server.log')).toBeInTheDocument();
+    // Should NOT show non-matching source (template_id=2)
+    const options = document.querySelectorAll('.dry-run-controls option');
+    const optionTexts = Array.from(options).map((o) => o.textContent);
+    expect(optionTexts).not.toContain('client.log');
+  });
+
+  it('calls dry run API and displays results', async () => {
+    vi.mocked(analysisApi.dryRun).mockResolvedValue([
+      makeRuleMatch({
+        log_line: makeLogLine({ raw: '2024-01-01 ERROR disk full', content: 'ERROR disk full' }),
+        extracted_state: { message: { String: 'disk full' } as any },
+      }),
+    ]);
+
+    renderRuleCreator({ sourceTemplateId: 1 });
+    await tick();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Against Source')).toBeInTheDocument();
+    });
+
+    // Select a source
+    const sourceSelect = document.querySelector('.dry-run-controls select') as HTMLSelectElement;
+    await fireEvent.change(sourceSelect, { target: { value: '1' } });
+
+    // Click Run
+    await fireEvent.click(screen.getByText('Run'));
+
+    await waitFor(() => {
+      expect(analysisApi.dryRun).toHaveBeenCalledWith(
+        1,
+        expect.objectContaining({
+          source_id: 1,
+          match_mode: 'Any',
+          match_rules: [{ pattern: 'ERROR (?P<message>.+)' }],
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('1 match found')).toBeInTheDocument();
+      expect(screen.getByText('2024-01-01 ERROR disk full')).toBeInTheDocument();
+      expect(screen.getByText('message: disk full')).toBeInTheDocument();
+    });
+  });
+
+  it('shows error message when dry run fails', async () => {
+    vi.mocked(analysisApi.dryRun).mockRejectedValue(new Error('invalid regex'));
+
+    renderRuleCreator({ sourceTemplateId: 1 });
+    await tick();
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Against Source')).toBeInTheDocument();
+    });
+
+    const sourceSelect = document.querySelector('.dry-run-controls select') as HTMLSelectElement;
+    await fireEvent.change(sourceSelect, { target: { value: '1' } });
+
+    await fireEvent.click(screen.getByText('Run'));
+
+    await waitFor(() => {
+      expect(screen.getByText('invalid regex')).toBeInTheDocument();
+    });
   });
 });
