@@ -6,3 +6,5 @@ ui/build/
 *.sqlite
 crates/logium-server/uploads/*
 uploads/
+AGENTS.md
+.claude/

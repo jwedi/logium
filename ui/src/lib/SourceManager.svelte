@@ -10,6 +10,7 @@
     type DetectTemplateResponse,
   } from './api';
   import LogViewer from './LogViewer.svelte';
+  import { invalidateAnalysis } from './analysisInvalidation.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -21,6 +22,9 @@
   let newName = $state('');
   let newTemplateId = $state<number | ''>('');
   let fileInput: HTMLInputElement | undefined = $state();
+
+  let replacingSourceId: number | null = $state(null);
+  let replaceFileInput: HTMLInputElement | undefined = $state();
 
   let tsTemplateList: TimestampTemplate[] = $state([]);
   let detecting = $state(false);
@@ -176,6 +180,21 @@
     }
   }
 
+  async function replaceFile() {
+    const file = replaceFileInput?.files?.[0];
+    if (!file || replacingSourceId == null) return;
+    try {
+      await sourcesApi.upload(projectId, replacingSourceId, file);
+      await load();
+      invalidateAnalysis();
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      replacingSourceId = null;
+      if (replaceFileInput) replaceFileInput.value = '';
+    }
+  }
+
   $effect(() => {
     projectId;
     load();
@@ -183,6 +202,8 @@
 </script>
 
 <h2>Sources</h2>
+
+<input type="file" bind:this={replaceFileInput} onchange={replaceFile} hidden />
 
 {#if selectedSource}
   <div class="viewer-header">
@@ -260,6 +281,12 @@
           </div>
           <div class="source-actions">
             <button onclick={() => (selectedSource = source)}>View logs</button>
+            <button
+              onclick={() => {
+                replacingSourceId = source.id;
+                replaceFileInput?.click();
+              }}>Replace</button
+            >
             <button class="danger" onclick={() => deleteSource(source.id)}>Delete</button>
           </div>
         </div>
