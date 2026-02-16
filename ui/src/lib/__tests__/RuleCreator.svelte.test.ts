@@ -158,6 +158,20 @@ describe('RuleCreator', () => {
       expect(rulesApi.create).toHaveBeenCalledTimes(1);
     });
 
+    // Verify extraction rules include pattern and static_value fields
+    const createCall = vi.mocked(rulesApi.create).mock.calls[0];
+    const payload = createCall[1];
+    expect(payload.extraction_rules).toEqual([
+      {
+        id: 0,
+        extraction_type: 'Parsed',
+        state_key: 'message',
+        pattern: 'ERROR (?P<message>.+)',
+        static_value: null,
+        mode: 'Replace',
+      },
+    ]);
+
     // Should update ruleset with the new rule ID appended
     await waitFor(() => {
       expect(rulesetsApi.update).toHaveBeenCalledWith(1, 1, {
@@ -204,6 +218,52 @@ describe('RuleCreator', () => {
 
     const saveBtn = screen.getByText('Create Rule');
     expect(saveBtn).toBeDisabled();
+  });
+
+  it('adds a manual extraction rule via "+ Add" button', async () => {
+    renderRuleCreator();
+    await tick();
+
+    await waitFor(() => {
+      expect(analysisApi.suggestRule).toHaveBeenCalled();
+    });
+
+    // Should already have one auto-seeded extraction rule from the suggested pattern
+    await waitFor(() => {
+      expect(screen.getAllByPlaceholderText('state_key').length).toBe(1);
+    });
+
+    // Click "+ Add" to add another extraction rule
+    await fireEvent.click(screen.getByText('+ Add'));
+
+    // Now there should be two state_key inputs
+    expect(screen.getAllByPlaceholderText('state_key').length).toBe(2);
+  });
+
+  it('removes an extraction rule via the remove button', async () => {
+    renderRuleCreator();
+    await tick();
+
+    await waitFor(() => {
+      expect(analysisApi.suggestRule).toHaveBeenCalled();
+    });
+
+    // Should have one auto-seeded extraction rule
+    await waitFor(() => {
+      expect(screen.getAllByPlaceholderText('state_key').length).toBe(1);
+    });
+
+    // Click the "x" remove button
+    const removeButtons = screen.getAllByText('x');
+    // Filter to only the extraction rule remove button (not the modal close button)
+    const extractionRemoveBtn = removeButtons.find(
+      (btn) => btn.classList.contains('danger') || btn.closest('.group-row'),
+    );
+    expect(extractionRemoveBtn).toBeTruthy();
+    await fireEvent.click(extractionRemoveBtn!);
+
+    // No more state_key inputs
+    expect(screen.queryAllByPlaceholderText('state_key').length).toBe(0);
   });
 
   it('calls invalidateAnalysis after successful save', async () => {

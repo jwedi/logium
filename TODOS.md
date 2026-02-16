@@ -525,7 +525,7 @@ Show a compact progress checklist in the project header or sidebar: Templates �
 
 ---
 
-### 35. Source Replace (Re-associate File)
+### 35. Source Replace (Re-associate File) - Done
 
 In the source management view, add a "Replace" button on each source. Clicking it opens the file picker; selecting a file re-associates the source with the new file path and discards the old one. All parse settings (source template, name, etc.) are inherited — only the `file_path` changes. This supports the common workflow of receiving a new version of the same log (e.g., rotated logs, updated captures from a teammate) without recreating the source and its template/ruleset bindings.
 
@@ -542,3 +542,11 @@ Auto-creates a "Default project" when the project list is empty on first load, a
 ### 37. Source Template Auto-Selection via File Name / Log Content Regex — Done
 
 Added `file_name_regex` and `log_content_regex` optional fields to `SourceTemplate` across the full stack (model, DB migration, CRUD, routes, API types, UI). `SourceManager.onFileSelected()` now runs a three-phase detection: (1) file name regex match, (2) log content regex match against first 1000 lines, (3) existing `detect-template` fallback. `TemplateManager` exposes create/edit fields and card display for both regexes. New DB test verifies round-trip persistence and clearing.
+
+---
+
+### 38. Extraction Rules in RuleCreator Modal
+
+**Status:** Done
+
+Expanded the RuleCreator modal to support full extraction rule CRUD (add/remove, State Key, Type, Mode, Pattern, Value fields) — matching the RuleEditor's capabilities. Capture groups from the suggested regex pattern are auto-seeded as Parsed extraction rules with the pattern pre-filled. Users can add manual extraction rules (Static, Clear types) and remove any rule before saving. Replaced the old read-only `captureGroups` array with a full `extractionRules` state. 2 new tests (add/remove extraction rules) + updated save test to verify new payload shape.

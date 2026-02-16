@@ -26,9 +26,11 @@
   let ruleName = $state('');
   let regexPattern = $state('');
   let matchMode: 'Any' | 'All' = $state('Any');
-  let captureGroups: {
-    name: string;
-    extractionType: 'Parsed' | 'Static' | 'Clear';
+  let extractionRules: {
+    state_key: string;
+    extraction_type: 'Parsed' | 'Static' | 'Clear';
+    pattern: string;
+    static_value: string;
     mode: 'Replace' | 'Accumulate';
   }[] = $state([]);
   let saving = $state(false);
@@ -55,18 +57,48 @@
     return 'No match on selected text';
   });
 
+  function seedExtractionRules(pattern: string) {
+    const groups = detectGroups(pattern);
+    extractionRules = groups.map((name) => ({
+      state_key: name,
+      extraction_type: 'Parsed' as const,
+      pattern: pattern,
+      static_value: '',
+      mode: 'Replace' as const,
+    }));
+  }
+
+  function addExtractionRule() {
+    extractionRules = [
+      ...extractionRules,
+      {
+        state_key: '',
+        extraction_type: 'Parsed',
+        pattern: '',
+        static_value: '',
+        mode: 'Replace',
+      },
+    ];
+  }
+
+  function removeExtractionRule(index: number) {
+    extractionRules = extractionRules.filter((_, i) => i !== index);
+  }
+
   async function fetchSuggestion() {
     suggestLoading = true;
     suggestError = '';
     try {
       const suggestion = await analysisApi.suggestRule(projectId, { text: selectedText });
       regexPattern = suggestion.pattern;
+      seedExtractionRules(suggestion.pattern);
     } catch (e: any) {
       suggestError = e.message;
       // Fallback: escape text and replace numbers with capture groups
       let pattern = escapeRegex(selectedText);
       pattern = pattern.replace(/\d+/g, '(\\d+)');
       regexPattern = pattern;
+      seedExtractionRules(pattern);
     } finally {
       suggestLoading = false;
     }
@@ -94,16 +126,6 @@
     loadRulesets();
   });
 
-  $effect(() => {
-    regexPattern;
-    const groups = detectGroups(regexPattern);
-    captureGroups = groups.map((name) => ({
-      name,
-      extractionType: 'Parsed' as const,
-      mode: 'Replace' as const,
-    }));
-  });
-
   async function save() {
     if (!ruleName.trim() || !regexPattern.trim()) return;
     saving = true;
@@ -112,13 +134,13 @@
         name: ruleName.trim(),
         match_mode: matchMode,
         match_rules: [{ id: 0, pattern: regexPattern }],
-        extraction_rules: captureGroups.map((cg) => ({
+        extraction_rules: extractionRules.map((er) => ({
           id: 0,
-          extraction_type: cg.extractionType,
-          state_key: cg.name,
-          pattern: cg.extractionType === 'Parsed' ? regexPattern : null,
-          static_value: null,
-          mode: cg.mode,
+          extraction_type: er.extraction_type,
+          state_key: er.state_key,
+          pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
+          static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
+          mode: er.mode,
         })),
       });
 
@@ -189,18 +211,21 @@
         </div>
       </div>
 
-      {#if captureGroups.length > 0}
-        <div class="capture-groups">
-          <label>Capture Groups (Extraction Rules)</label>
-          {#each captureGroups as group, i}
-            <div class="group-row">
+      <div class="extraction-rules">
+        <div class="section-header">
+          <label>Extraction Rules</label>
+          <button class="small" onclick={addExtractionRule}>+ Add</button>
+        </div>
+        {#each extractionRules as er, i}
+          <div class="group-row">
+            <div class="group-row-top">
               <div class="field">
                 <label>State Key</label>
-                <input type="text" bind:value={group.name} />
+                <input type="text" bind:value={er.state_key} placeholder="state_key" />
               </div>
               <div class="field">
                 <label>Type</label>
-                <select bind:value={group.extractionType}>
+                <select bind:value={er.extraction_type}>
                   <option value="Parsed">Parsed</option>
                   <option value="Static">Static</option>
                   <option value="Clear">Clear</option>
@@ -208,15 +233,28 @@
               </div>
               <div class="field">
                 <label>Mode</label>
-                <select bind:value={group.mode}>
+                <select bind:value={er.mode}>
                   <option value="Replace">Replace</option>
                   <option value="Accumulate">Accumulate</option>
                 </select>
               </div>
+              <button class="small danger" onclick={() => removeExtractionRule(i)}>x</button>
             </div>
-          {/each}
-        </div>
-      {/if}
+            {#if er.extraction_type === 'Parsed'}
+              <div class="field">
+                <label>Pattern</label>
+                <input type="text" bind:value={er.pattern} placeholder="regex with groups..." />
+              </div>
+            {/if}
+            {#if er.extraction_type === 'Static'}
+              <div class="field">
+                <label>Value</label>
+                <input type="text" bind:value={er.static_value} placeholder="static value..." />
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
 
       {#if availableRulesets.length > 0}
         <div class="field">
@@ -330,22 +368,40 @@
     color: var(--red);
   }
 
-  .capture-groups {
+  .extraction-rules {
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
 
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
   .group-row {
     display: flex;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
     padding: 8px;
     background: var(--bg);
     border-radius: var(--radius);
   }
 
-  .group-row .field {
+  .group-row-top {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .group-row-top .field {
     flex: 1;
+  }
+
+  button.small {
+    padding: 2px 8px;
+    font-size: 12px;
   }
 
   .modal-footer {
