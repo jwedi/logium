@@ -218,38 +218,40 @@
         </div>
         {#each extractionRules as er, i}
           <div class="group-row">
-            <div class="field">
-              <label>State Key</label>
-              <input type="text" bind:value={er.state_key} placeholder="state_key" />
-            </div>
-            <div class="field">
-              <label>Type</label>
-              <select bind:value={er.extraction_type}>
-                <option value="Parsed">Parsed</option>
-                <option value="Static">Static</option>
-                <option value="Clear">Clear</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Mode</label>
-              <select bind:value={er.mode}>
-                <option value="Replace">Replace</option>
-                <option value="Accumulate">Accumulate</option>
-              </select>
+            <div class="group-row-top">
+              <div class="field">
+                <label>State Key</label>
+                <input type="text" bind:value={er.state_key} placeholder="state_key" />
+              </div>
+              <div class="field">
+                <label>Type</label>
+                <select bind:value={er.extraction_type}>
+                  <option value="Parsed">Parsed</option>
+                  <option value="Static">Static</option>
+                  <option value="Clear">Clear</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Mode</label>
+                <select bind:value={er.mode}>
+                  <option value="Replace">Replace</option>
+                  <option value="Accumulate">Accumulate</option>
+                </select>
+              </div>
+              <button class="small danger" onclick={() => removeExtractionRule(i)}>x</button>
             </div>
             {#if er.extraction_type === 'Parsed'}
-              <div class="field" style="flex:2">
+              <div class="field">
                 <label>Pattern</label>
                 <input type="text" bind:value={er.pattern} placeholder="regex with groups..." />
               </div>
             {/if}
             {#if er.extraction_type === 'Static'}
-              <div class="field" style="flex:2">
+              <div class="field">
                 <label>Value</label>
                 <input type="text" bind:value={er.static_value} placeholder="static value..." />
               </div>
             {/if}
-            <button class="small danger" onclick={() => removeExtractionRule(i)}>x</button>
           </div>
         {/each}
       </div>
@@ -380,14 +382,20 @@
 
   .group-row {
     display: flex;
-    align-items: flex-end;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
     padding: 8px;
     background: var(--bg);
     border-radius: var(--radius);
   }
 
-  .group-row .field {
+  .group-row-top {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+  }
+
+  .group-row-top .field {
     flex: 1;
   }
 
