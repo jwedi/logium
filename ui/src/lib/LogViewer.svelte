@@ -6,6 +6,7 @@
     type LogRule,
     type RuleMatch,
     type PatternMatch,
+    type StateChange,
     type StateValue,
   } from './api';
   import RuleCreator from './RuleCreator.svelte';
@@ -15,13 +16,15 @@
     projectId,
     ruleMatches = [],
     patternMatches = [],
+    stateChanges = [],
     navigateTarget = null,
   }: {
     source: Source;
     projectId: number;
     ruleMatches?: RuleMatch[];
     patternMatches?: PatternMatch[];
-    navigateTarget?: string | null;
+    stateChanges?: StateChange[];
+    navigateTarget?: { raw: string; seq: number } | null;
   } = $props();
 
   const LINE_HEIGHT = 22;
@@ -51,6 +54,9 @@
   // Context expansion state
   let expandedLines: Set<number> = $state(new Set());
   let contextSize: number = $state(5);
+
+  // Guard: when true, the filter-reset effect should not scroll to top
+  let navigateInProgress = false;
 
   // Filter: compiled regex
   let filterRegex: RegExp | null = $derived.by(() => {
@@ -111,10 +117,12 @@
   });
 
   // Reverse lookup: line content -> first occurrence index (O(M) build, O(1) lookup)
+  // Strip trailing \r so Windows-formatted files match engine output (which strips \r)
   let lineContentIndex = $derived.by(() => {
     const map = new Map<string, number>();
     for (let i = 0; i < lines.length; i++) {
-      if (!map.has(lines[i])) map.set(lines[i], i);
+      const key = lines[i].replace(/\r$/, '');
+      if (!map.has(key)) map.set(key, i);
     }
     return map;
   });
@@ -170,14 +178,80 @@
     const map = new Map<number, { ruleId: number; match: RuleMatch }[]>();
     for (const m of ruleMatches) {
       if (m.source_id !== source.id) continue;
-      // Try to find the line index by raw content match
-      const idx = lineContentIndex.get(m.log_line.raw) ?? -1;
+      // Strip trailing \r to match lineContentIndex keys
+      const idx = lineContentIndex.get(m.log_line.raw.replace(/\r$/, '')) ?? -1;
       if (idx >= 0) {
         if (!map.has(idx)) map.set(idx, []);
         map.get(idx)!.push({ ruleId: m.rule_id, match: m });
       }
     }
     return map;
+  });
+
+  // Sorted array of { lineIndex, timestamp } for timestamp resolution via binary search
+  let matchTimestampIndex = $derived.by(() => {
+    const entries: { lineIndex: number; timestamp: string }[] = [];
+    for (const m of ruleMatches) {
+      if (m.source_id !== source.id) continue;
+      const idx = lineContentIndex.get(m.log_line.raw.replace(/\r$/, '')) ?? -1;
+      if (idx >= 0) {
+        entries.push({ lineIndex: idx, timestamp: m.log_line.timestamp });
+      }
+    }
+    entries.sort((a, b) => a.lineIndex - b.lineIndex);
+    return entries;
+  });
+
+  function resolveTimestamp(lineIdx: number): string | null {
+    // Matched line: use exact timestamp
+    const matches = lineMatchMap.get(lineIdx);
+    if (matches && matches.length > 0) {
+      return matches[0].match.log_line.timestamp;
+    }
+    // Unmatched line: binary search for nearest matched line at or before this position
+    const arr = matchTimestampIndex;
+    if (arr.length === 0) return null;
+    let lo = 0;
+    let hi = arr.length - 1;
+    let best = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (arr[mid].lineIndex <= lineIdx) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return best >= 0 ? arr[best].timestamp : null;
+  }
+
+  // Accumulated state at the selected line's timestamp
+  let accumulatedState = $derived.by(() => {
+    if (selectedLineIdx === null || stateChanges.length === 0) return null;
+    const ts = resolveTimestamp(selectedLineIdx);
+    if (ts === null) return null;
+    const stateMap = new Map<string, Map<string, StateValue>>();
+    for (const sc of stateChanges) {
+      if (sc.timestamp > ts) break;
+      if (sc.new_value === null) {
+        // Deletion
+        const sourceMap = stateMap.get(sc.source_name);
+        if (sourceMap) sourceMap.delete(sc.state_key);
+      } else {
+        let sourceMap = stateMap.get(sc.source_name);
+        if (!sourceMap) {
+          sourceMap = new Map();
+          stateMap.set(sc.source_name, sourceMap);
+        }
+        sourceMap.set(sc.state_key, sc.new_value);
+      }
+    }
+    // Remove empty sources
+    for (const [k, v] of stateMap) {
+      if (v.size === 0) stateMap.delete(k);
+    }
+    return { timestamp: ts, state: stateMap };
   });
 
   // Pattern match timestamps mapped to line indices
@@ -386,24 +460,31 @@
     currentMatchIdx = 0;
   });
 
-  // Navigate to a specific line when navigateTarget is set (from timeline click)
+  // Navigate to a specific line when navigateTarget is set (from timeline/histogram click)
   $effect(() => {
-    if (navigateTarget && lines.length > 0) {
-      const origIdx = lineContentIndex.get(navigateTarget) ?? -1;
-      if (origIdx >= 0 && container) {
-        selectedLineIdx = origIdx;
-        let filteredPos = filteredIndices.indexOf(origIdx);
-        if (filteredPos < 0 && filterQuery) {
-          filterQuery = '';
-          tick().then(() => {
-            if (container)
-              container.scrollTop = origIdx * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
-          });
-          return;
+    if (!navigateTarget || lines.length === 0) return;
+    const _seq = navigateTarget.seq; // read seq so Svelte re-fires on every new request
+    const raw = navigateTarget.raw;
+    const origIdx = lineContentIndex.get(raw) ?? -1;
+    if (origIdx < 0 || !container) return;
+
+    selectedLineIdx = origIdx;
+    let filteredPos = filteredIndices.indexOf(origIdx);
+    if (filteredPos < 0 && filterQuery) {
+      navigateInProgress = true;
+      filterQuery = '';
+      tick().then(() => {
+        if (container) {
+          container.scrollTop = origIdx * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
+          scrollTop = container.scrollTop;
         }
-        if (filteredPos >= 0)
-          container.scrollTop = filteredPos * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
-      }
+        navigateInProgress = false;
+      });
+      return;
+    }
+    if (filteredPos >= 0) {
+      container.scrollTop = filteredPos * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
+      scrollTop = container.scrollTop;
     }
   });
 
@@ -412,7 +493,7 @@
     filterQuery;
     filterIsRegex;
     expandedLines = new Set();
-    if (container) {
+    if (container && !navigateInProgress) {
       container.scrollTop = 0;
       scrollTop = 0;
     }
@@ -550,30 +631,57 @@
     </div>
   </div>
 
-  {#if selectedLineIdx !== null && lineMatchMap.has(selectedLineIdx)}
+  {#if selectedLineIdx !== null && (lineMatchMap.has(selectedLineIdx) || accumulatedState !== null)}
     <div class="state-panel">
-      <h3>Extracted State</h3>
       <button class="close-btn" onclick={() => (selectedLineIdx = null)}>x</button>
-      {#each lineMatchMap.get(selectedLineIdx)! as { ruleId, match }}
-        <div class="state-group">
-          <div class="state-rule-name">
-            Rule #{ruleId}
-            {#each allRules as r}
-              {#if r.id === ruleId}
-                - {r.name}{/if}
+      {#if lineMatchMap.has(selectedLineIdx)}
+        <h3>Extracted State</h3>
+        {#each lineMatchMap.get(selectedLineIdx)! as { ruleId, match }}
+          <div class="state-group">
+            <div class="state-rule-name">
+              Rule #{ruleId}
+              {#each allRules as r}
+                {#if r.id === ruleId}
+                  - {r.name}{/if}
+              {/each}
+            </div>
+            {#each Object.entries(match.extracted_state) as [key, val]}
+              <div class="state-entry">
+                <span class="state-key">{key}</span>
+                <span class="state-value">{formatStateValue(val)}</span>
+              </div>
             {/each}
+            {#if Object.keys(match.extracted_state).length === 0}
+              <div class="state-empty">No state extracted</div>
+            {/if}
           </div>
-          {#each Object.entries(match.extracted_state) as [key, val]}
-            <div class="state-entry">
-              <span class="state-key">{key}</span>
-              <span class="state-value">{formatStateValue(val)}</span>
+        {/each}
+      {/if}
+      {#if accumulatedState !== null}
+        {#if lineMatchMap.has(selectedLineIdx)}
+          <div class="state-section-divider"></div>
+        {/if}
+        <h3 class="state-section-header">State at {accumulatedState.timestamp}</h3>
+        {#if accumulatedState.state.size === 0}
+          <div class="state-empty">No state mutations before this point</div>
+        {:else}
+          {#each [...accumulatedState.state.entries()].sort((a, b) => {
+            if (a[0] === source.name) return -1;
+            if (b[0] === source.name) return 1;
+            return a[0].localeCompare(b[0]);
+          }) as [sourceName, entries]}
+            <div class="state-group">
+              <div class="state-source-name">{sourceName}</div>
+              {#each [...entries.entries()] as [key, val]}
+                <div class="state-entry">
+                  <span class="state-key">{key}</span>
+                  <span class="state-value">{formatStateValue(val)}</span>
+                </div>
+              {/each}
             </div>
           {/each}
-          {#if Object.keys(match.extracted_state).length === 0}
-            <div class="state-empty">No state extracted</div>
-          {/if}
-        </div>
-      {/each}
+        {/if}
+      {/if}
     </div>
   {/if}
 </div>
@@ -717,6 +825,23 @@
     color: var(--text-muted);
     font-size: 12px;
     font-style: italic;
+  }
+
+  .state-section-divider {
+    border-top: 1px solid var(--border);
+    margin: 12px 0;
+  }
+
+  .state-section-header {
+    font-size: 13px;
+    margin: 0 0 8px 0;
+  }
+
+  .state-source-name {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 8px;
+    color: var(--cyan);
   }
 
   .selection-popup {
