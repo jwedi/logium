@@ -554,3 +554,11 @@ Expanded the RuleCreator modal to support full extraction rule CRUD (add/remove,
 **Status:** Done
 
 Added `dry_run_rule()` to `logium-core::engine` that streams a source file and evaluates a single rule with early break at `limit`. New `POST /api/projects/:pid/dry-run` endpoint in the server builds an ad-hoc `LogRule` from the request body and calls the engine function via `spawn_blocking`. RuleCreator now has a "Test Against Source" section with a source dropdown (filtered by `sourceTemplateId`), Run button, and scrollable results area showing matched log lines with extraction value chips. Default limit 20, capped at 100. 3 new Rust engine tests (match + limit, extraction values, invalid regex), 2 server deserialization tests, 3 frontend tests (source filtering, API call + result display, error handling).
+
+---
+
+### 40. Accumulated State Widget on Log Line Click
+
+**Status:** Done
+
+Extended LogViewer's state panel to show full accumulated cross-source state at any clicked line's timestamp. Timestamp resolution uses exact match timestamps for rule-matched lines and binary search over `matchTimestampIndex` for unmatched lines. State is reconstructed by replaying `state_changes` (passed as a new prop from AnalysisView using unfiltered `result`) up to the resolved timestamp. Panel shows "Extracted State" (matched lines only) and "State at {timestamp}" grouped by source (current source first). 5 new tests covering matched/unmatched lines, timestamp-bounded replay, source grouping, and no-timestamp edge case.

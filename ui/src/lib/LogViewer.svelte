@@ -6,6 +6,7 @@
     type LogRule,
     type RuleMatch,
     type PatternMatch,
+    type StateChange,
     type StateValue,
   } from './api';
   import RuleCreator from './RuleCreator.svelte';
@@ -15,12 +16,14 @@
     projectId,
     ruleMatches = [],
     patternMatches = [],
+    stateChanges = [],
     navigateTarget = null,
   }: {
     source: Source;
     projectId: number;
     ruleMatches?: RuleMatch[];
     patternMatches?: PatternMatch[];
+    stateChanges?: StateChange[];
     navigateTarget?: { raw: string; seq: number } | null;
   } = $props();
 
@@ -183,6 +186,72 @@
       }
     }
     return map;
+  });
+
+  // Sorted array of { lineIndex, timestamp } for timestamp resolution via binary search
+  let matchTimestampIndex = $derived.by(() => {
+    const entries: { lineIndex: number; timestamp: string }[] = [];
+    for (const m of ruleMatches) {
+      if (m.source_id !== source.id) continue;
+      const idx = lineContentIndex.get(m.log_line.raw.replace(/\r$/, '')) ?? -1;
+      if (idx >= 0) {
+        entries.push({ lineIndex: idx, timestamp: m.log_line.timestamp });
+      }
+    }
+    entries.sort((a, b) => a.lineIndex - b.lineIndex);
+    return entries;
+  });
+
+  function resolveTimestamp(lineIdx: number): string | null {
+    // Matched line: use exact timestamp
+    const matches = lineMatchMap.get(lineIdx);
+    if (matches && matches.length > 0) {
+      return matches[0].match.log_line.timestamp;
+    }
+    // Unmatched line: binary search for nearest matched line at or before this position
+    const arr = matchTimestampIndex;
+    if (arr.length === 0) return null;
+    let lo = 0;
+    let hi = arr.length - 1;
+    let best = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (arr[mid].lineIndex <= lineIdx) {
+        best = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    return best >= 0 ? arr[best].timestamp : null;
+  }
+
+  // Accumulated state at the selected line's timestamp
+  let accumulatedState = $derived.by(() => {
+    if (selectedLineIdx === null || stateChanges.length === 0) return null;
+    const ts = resolveTimestamp(selectedLineIdx);
+    if (ts === null) return null;
+    const stateMap = new Map<string, Map<string, StateValue>>();
+    for (const sc of stateChanges) {
+      if (sc.timestamp > ts) break;
+      if (sc.new_value === null) {
+        // Deletion
+        const sourceMap = stateMap.get(sc.source_name);
+        if (sourceMap) sourceMap.delete(sc.state_key);
+      } else {
+        let sourceMap = stateMap.get(sc.source_name);
+        if (!sourceMap) {
+          sourceMap = new Map();
+          stateMap.set(sc.source_name, sourceMap);
+        }
+        sourceMap.set(sc.state_key, sc.new_value);
+      }
+    }
+    // Remove empty sources
+    for (const [k, v] of stateMap) {
+      if (v.size === 0) stateMap.delete(k);
+    }
+    return { timestamp: ts, state: stateMap };
   });
 
   // Pattern match timestamps mapped to line indices
@@ -562,30 +631,57 @@
     </div>
   </div>
 
-  {#if selectedLineIdx !== null && lineMatchMap.has(selectedLineIdx)}
+  {#if selectedLineIdx !== null && (lineMatchMap.has(selectedLineIdx) || accumulatedState !== null)}
     <div class="state-panel">
-      <h3>Extracted State</h3>
       <button class="close-btn" onclick={() => (selectedLineIdx = null)}>x</button>
-      {#each lineMatchMap.get(selectedLineIdx)! as { ruleId, match }}
-        <div class="state-group">
-          <div class="state-rule-name">
-            Rule #{ruleId}
-            {#each allRules as r}
-              {#if r.id === ruleId}
-                - {r.name}{/if}
+      {#if lineMatchMap.has(selectedLineIdx)}
+        <h3>Extracted State</h3>
+        {#each lineMatchMap.get(selectedLineIdx)! as { ruleId, match }}
+          <div class="state-group">
+            <div class="state-rule-name">
+              Rule #{ruleId}
+              {#each allRules as r}
+                {#if r.id === ruleId}
+                  - {r.name}{/if}
+              {/each}
+            </div>
+            {#each Object.entries(match.extracted_state) as [key, val]}
+              <div class="state-entry">
+                <span class="state-key">{key}</span>
+                <span class="state-value">{formatStateValue(val)}</span>
+              </div>
             {/each}
+            {#if Object.keys(match.extracted_state).length === 0}
+              <div class="state-empty">No state extracted</div>
+            {/if}
           </div>
-          {#each Object.entries(match.extracted_state) as [key, val]}
-            <div class="state-entry">
-              <span class="state-key">{key}</span>
-              <span class="state-value">{formatStateValue(val)}</span>
+        {/each}
+      {/if}
+      {#if accumulatedState !== null}
+        {#if lineMatchMap.has(selectedLineIdx)}
+          <div class="state-section-divider"></div>
+        {/if}
+        <h3 class="state-section-header">State at {accumulatedState.timestamp}</h3>
+        {#if accumulatedState.state.size === 0}
+          <div class="state-empty">No state mutations before this point</div>
+        {:else}
+          {#each [...accumulatedState.state.entries()].sort((a, b) => {
+            if (a[0] === source.name) return -1;
+            if (b[0] === source.name) return 1;
+            return a[0].localeCompare(b[0]);
+          }) as [sourceName, entries]}
+            <div class="state-group">
+              <div class="state-source-name">{sourceName}</div>
+              {#each [...entries.entries()] as [key, val]}
+                <div class="state-entry">
+                  <span class="state-key">{key}</span>
+                  <span class="state-value">{formatStateValue(val)}</span>
+                </div>
+              {/each}
             </div>
           {/each}
-          {#if Object.keys(match.extracted_state).length === 0}
-            <div class="state-empty">No state extracted</div>
-          {/if}
-        </div>
-      {/each}
+        {/if}
+      {/if}
     </div>
   {/if}
 </div>
@@ -729,6 +825,23 @@
     color: var(--text-muted);
     font-size: 12px;
     font-style: italic;
+  }
+
+  .state-section-divider {
+    border-top: 1px solid var(--border);
+    margin: 12px 0;
+  }
+
+  .state-section-header {
+    font-size: 13px;
+    margin: 0 0 8px 0;
+  }
+
+  .state-source-name {
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 8px;
+    color: var(--cyan);
   }
 
   .selection-popup {

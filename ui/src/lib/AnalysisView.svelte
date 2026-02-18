@@ -551,6 +551,7 @@
           {projectId}
           ruleMatches={sourceRuleMatches}
           patternMatches={filteredResult.pattern_matches}
+          stateChanges={result?.state_changes ?? []}
           {navigateTarget}
         />
       </div>
