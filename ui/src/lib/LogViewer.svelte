@@ -21,7 +21,7 @@
     projectId: number;
     ruleMatches?: RuleMatch[];
     patternMatches?: PatternMatch[];
-    navigateTarget?: string | null;
+    navigateTarget?: { raw: string; seq: number } | null;
   } = $props();
 
   const LINE_HEIGHT = 22;
@@ -51,6 +51,9 @@
   // Context expansion state
   let expandedLines: Set<number> = $state(new Set());
   let contextSize: number = $state(5);
+
+  // Guard: when true, the filter-reset effect should not scroll to top
+  let navigateInProgress = false;
 
   // Filter: compiled regex
   let filterRegex: RegExp | null = $derived.by(() => {
@@ -111,10 +114,12 @@
   });
 
   // Reverse lookup: line content -> first occurrence index (O(M) build, O(1) lookup)
+  // Strip trailing \r so Windows-formatted files match engine output (which strips \r)
   let lineContentIndex = $derived.by(() => {
     const map = new Map<string, number>();
     for (let i = 0; i < lines.length; i++) {
-      if (!map.has(lines[i])) map.set(lines[i], i);
+      const key = lines[i].replace(/\r$/, '');
+      if (!map.has(key)) map.set(key, i);
     }
     return map;
   });
@@ -170,8 +175,8 @@
     const map = new Map<number, { ruleId: number; match: RuleMatch }[]>();
     for (const m of ruleMatches) {
       if (m.source_id !== source.id) continue;
-      // Try to find the line index by raw content match
-      const idx = lineContentIndex.get(m.log_line.raw) ?? -1;
+      // Strip trailing \r to match lineContentIndex keys
+      const idx = lineContentIndex.get(m.log_line.raw.replace(/\r$/, '')) ?? -1;
       if (idx >= 0) {
         if (!map.has(idx)) map.set(idx, []);
         map.get(idx)!.push({ ruleId: m.rule_id, match: m });
@@ -386,24 +391,31 @@
     currentMatchIdx = 0;
   });
 
-  // Navigate to a specific line when navigateTarget is set (from timeline click)
+  // Navigate to a specific line when navigateTarget is set (from timeline/histogram click)
   $effect(() => {
-    if (navigateTarget && lines.length > 0) {
-      const origIdx = lineContentIndex.get(navigateTarget) ?? -1;
-      if (origIdx >= 0 && container) {
-        selectedLineIdx = origIdx;
-        let filteredPos = filteredIndices.indexOf(origIdx);
-        if (filteredPos < 0 && filterQuery) {
-          filterQuery = '';
-          tick().then(() => {
-            if (container)
-              container.scrollTop = origIdx * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
-          });
-          return;
+    if (!navigateTarget || lines.length === 0) return;
+    const _seq = navigateTarget.seq; // read seq so Svelte re-fires on every new request
+    const raw = navigateTarget.raw;
+    const origIdx = lineContentIndex.get(raw) ?? -1;
+    if (origIdx < 0 || !container) return;
+
+    selectedLineIdx = origIdx;
+    let filteredPos = filteredIndices.indexOf(origIdx);
+    if (filteredPos < 0 && filterQuery) {
+      navigateInProgress = true;
+      filterQuery = '';
+      tick().then(() => {
+        if (container) {
+          container.scrollTop = origIdx * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
+          scrollTop = container.scrollTop;
         }
-        if (filteredPos >= 0)
-          container.scrollTop = filteredPos * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
-      }
+        navigateInProgress = false;
+      });
+      return;
+    }
+    if (filteredPos >= 0) {
+      container.scrollTop = filteredPos * LINE_HEIGHT - containerHeight / 2 + LINE_HEIGHT / 2;
+      scrollTop = container.scrollTop;
     }
   });
 
@@ -412,7 +424,7 @@
     filterQuery;
     filterIsRegex;
     expandedLines = new Set();
-    if (container) {
+    if (container && !navigateInProgress) {
       container.scrollTop = 0;
       scrollTop = 0;
     }

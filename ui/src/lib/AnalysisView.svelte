@@ -17,6 +17,7 @@
     type TimeRange,
   } from './api';
   import LogViewer from './LogViewer.svelte';
+  import EventDensityHistogram from './EventDensityHistogram.svelte';
   import TimelineView from './TimelineView.svelte';
   import StateEvolutionView from './StateEvolutionView.svelte';
   import ErrorClusteringView from './ErrorClusteringView.svelte';
@@ -42,7 +43,16 @@
   let timeStart: string = $state('');
   let timeEnd: string = $state('');
 
-  let navigateTarget: string | null = $state(null);
+  interface NavigateTarget {
+    raw: string;
+    seq: number;
+  }
+  let navigateTarget: NavigateTarget | null = $state(null);
+  let navigateSeq = 0; // plain variable — not $state, so incrementing doesn't trigger effects on its own
+
+  function requestNavigate(raw: string) {
+    navigateTarget = { raw, seq: ++navigateSeq };
+  }
 
   let filterRuleId: number | null = $state(null);
   let filterSourceId: number | null = $state(null);
@@ -132,7 +142,7 @@
   function handleNavigate(sourceId: number, rawLine: string) {
     viewMode = 'table';
     selectedSourceId = sourceId;
-    navigateTarget = rawLine;
+    requestNavigate(rawLine);
   }
 
   function formatStateValue(sv: StateValue): string {
@@ -510,7 +520,7 @@
             <button
               class:active={selectedSourceId === src.id}
               onclick={() => {
-                selectedSourceId = src.id;
+                selectedSourceId = selectedSourceId === src.id ? null : src.id;
                 navigateTarget = null;
               }}
             >
@@ -527,6 +537,14 @@
     {/if}
 
     {#if selectedSource}
+      {#if sourceRuleMatches.length > 0}
+        <EventDensityHistogram
+          ruleMatches={sourceRuleMatches}
+          onBucketClick={(match) => {
+            requestNavigate(match.log_line.raw);
+          }}
+        />
+      {/if}
       <div class="viewer-section">
         <LogViewer
           source={selectedSource}
@@ -536,6 +554,13 @@
           {navigateTarget}
         />
       </div>
+    {:else if filteredResult.rule_matches.length > 0}
+      <EventDensityHistogram
+        ruleMatches={filteredResult.rule_matches}
+        onBucketClick={(match) => {
+          handleNavigate(match.source_id, match.log_line.raw);
+        }}
+      />
     {/if}
 
     {#if filteredResult.pattern_matches.length > 0}
@@ -573,20 +598,23 @@
       </div>
     {/if}
 
-    {#if filteredResult.rule_matches.length > 0 && !selectedSource}
+    {@const visibleMatches = selectedSource ? sourceRuleMatches : filteredResult.rule_matches}
+    {#if visibleMatches.length > 0}
       <div class="rule-matches-section">
-        <h3>Rule Matches</h3>
+        <h3>Rule Matches ({visibleMatches.length})</h3>
         <div class="match-table">
-          {#each filteredResult.rule_matches.slice(0, 100) as rm}
+          {#each visibleMatches.slice(0, 100) as rm}
             <div class="match-row">
               <span class="badge">{getRuleName(rm.rule_id)}</span>
-              <span class="badge">{getSourceName(rm.source_id)}</span>
+              {#if !selectedSource}
+                <span class="badge">{getSourceName(rm.source_id)}</span>
+              {/if}
               <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
             </div>
           {/each}
-          {#if filteredResult.rule_matches.length > 100}
+          {#if visibleMatches.length > 100}
             <div class="text-muted">
-              ...and {filteredResult.rule_matches.length - 100} more matches
+              ...and {visibleMatches.length - 100} more matches
             </div>
           {/if}
         </div>

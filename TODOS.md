@@ -245,13 +245,9 @@ Save analysis results and diff two runs: new matches, disappeared matches, state
 
 ## 26. Event Density Histogram
 
-Small histogram above LogViewer showing event/match density over time. Click a time bucket to jump to that region. Helps visually identify "when did things go wrong."
+**Status:** Done
 
-- Time-bucketed bar chart of match counts
-- Click a bucket to scroll LogViewer to that time
-- Updates live during streaming analysis
-
-**Inspiration:** Kibana Discover's histogram, Grafana's log volume chart.
+SVG bar chart (`EventDensityHistogram.svelte`) rendered above LogViewer in table mode. Buckets computed via single-pass floor division with adaptive bucket count (10–80 based on container width). Click a bar to navigate to that time region's first match. Hover tooltip shows time range and count. Appears in two locations: above LogViewer when a source is selected (using `sourceRuleMatches`), and above the rule matches table when no source is selected (using `filteredResult.rule_matches` with cross-source navigation). Handles edge cases: single timestamp, invalid timestamps filtered out, empty matches render nothing. 6 new tests.
 
 ---
 
