@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { RuleMatch, PatternMatch, StateValue, Source, LogRule, Pattern } from './api';
+  import { formatTimestampMs } from './formatUtils';
 
   interface TimelineEvent {
     id: number;
@@ -50,8 +51,7 @@
   }
 
   function formatTimestamp(ms: number): string {
-    const d = new Date(ms);
-    return d.toISOString().replace('T', ' ').replace('Z', '');
+    return formatTimestampMs(ms);
   }
 </script>
 

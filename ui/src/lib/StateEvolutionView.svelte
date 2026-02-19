@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { StateChange, Source, LogRule, StateValue } from './api';
+  import { formatTimestamp } from './formatUtils';
 
   let {
     stateChanges,
@@ -76,7 +77,7 @@
         <tbody>
           {#each filteredChanges as sc}
             <tr>
-              <td class="ts">{sc.timestamp}</td>
+              <td class="ts" title={sc.timestamp}>{formatTimestamp(sc.timestamp)}</td>
               <td class="source">{sc.source_name}</td>
               <td class="key">{sc.state_key}</td>
               <td class="change">

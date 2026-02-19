@@ -23,6 +23,7 @@
   import ErrorClusteringView from './ErrorClusteringView.svelte';
   import { getInvalidationStamp } from './analysisInvalidation.svelte';
   import { getCachedAnalysis, setCachedAnalysis } from './analysisCache.svelte';
+  import { formatTimestamp, formatDatetimeLocal } from './formatUtils';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -42,6 +43,17 @@
 
   let timeStart: string = $state('');
   let timeEnd: string = $state('');
+  let showTimeRange = $state(false);
+
+  function formatTimeRangeLabel(): string {
+    if (!timeStart && !timeEnd) return 'Time Range: All';
+    if (timeStart && timeEnd)
+      return `${formatDatetimeLocal(timeStart)} – ${formatDatetimeLocal(timeEnd)}`;
+    if (timeStart) return `From ${formatDatetimeLocal(timeStart)}`;
+    return `Until ${formatDatetimeLocal(timeEnd)}`;
+  }
+
+  let hasTimeRange = $derived(!!(timeStart || timeEnd));
 
   interface NavigateTarget {
     raw: string;
@@ -139,6 +151,20 @@
     return sourceList.find((s) => s.id === id)?.name ?? `Source #${id}`;
   }
 
+  function pmSourceCount(pm: PatternMatch): number {
+    return Object.keys(pm.state_snapshot).length;
+  }
+
+  function pmKeySummary(pm: PatternMatch): string {
+    const keys: string[] = [];
+    for (const stateMap of Object.values(pm.state_snapshot)) {
+      for (const [k, v] of Object.entries(stateMap)) {
+        keys.push(`${k}=${formatStateValue(v.value)}`);
+      }
+    }
+    return keys.slice(0, 3).join(', ') + (keys.length > 3 ? '...' : '');
+  }
+
   function handleNavigate(sourceId: number, rawLine: string) {
     viewMode = 'table';
     selectedSourceId = sourceId;
@@ -153,84 +179,11 @@
     return '?';
   }
 
-  // Virtual scroll for pattern matches
-  const PM_PADDING = 32; // .card padding: 16px * 2
-  const PM_BORDER = 2; // .card border: 1px * 2
-  const PM_HEADER = 29; // .pm-header height (~21px text + 8px margin-bottom)
-  const PM_SOURCE_HEADER = 22; // .pm-source-name line height
-  const PM_ENTRY = 22; // .pm-entry height (12px font + 2px padding * 2 + flex spacing)
-  const PM_SOURCE_MARGIN = 8; // .pm-source margin-bottom
-  const PM_CARD_MARGIN = 8; // .pattern-match margin-bottom
+  let expandedPmId: string | null = $state(null);
 
-  function estimatePmHeight(pm: PatternMatch): number {
-    let h = PM_PADDING + PM_BORDER + PM_HEADER;
-    for (const [, stateMap] of Object.entries(pm.state_snapshot)) {
-      h += PM_SOURCE_HEADER + Object.keys(stateMap).length * PM_ENTRY + PM_SOURCE_MARGIN;
-    }
-    return h + PM_CARD_MARGIN;
+  function pmId(pm: PatternMatch): string {
+    return `${pm.pattern_id}-${pm.timestamp}`;
   }
-
-  let pmScrollTop = $state(0);
-  let pmContainerHeight = $state(400);
-  let pmContainer: HTMLDivElement | undefined = $state();
-
-  const PM_OVERSCAN = 5;
-
-  let pmOffsets = $derived.by(() => {
-    const pms = filteredResult.pattern_matches;
-    const offsets = new Array<number>(pms.length + 1);
-    offsets[0] = 0;
-    for (let i = 0; i < pms.length; i++) {
-      offsets[i + 1] = offsets[i] + estimatePmHeight(pms[i]);
-    }
-    return offsets;
-  });
-
-  let pmTotalHeight = $derived(pmOffsets[pmOffsets.length - 1] ?? 0);
-
-  let pmStartIdx = $derived.by(() => {
-    const offsets = pmOffsets;
-    let lo = 0,
-      hi = offsets.length - 2;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (offsets[mid + 1] <= pmScrollTop) lo = mid + 1;
-      else hi = mid;
-    }
-    return Math.max(0, lo - PM_OVERSCAN);
-  });
-
-  let pmEndIdx = $derived.by(() => {
-    const offsets = pmOffsets;
-    const bottom = pmScrollTop + pmContainerHeight;
-    let lo = pmStartIdx,
-      hi = offsets.length - 2;
-    while (lo < hi) {
-      const mid = (lo + hi) >>> 1;
-      if (offsets[mid] < bottom) lo = mid + 1;
-      else hi = mid;
-    }
-    return Math.min(offsets.length - 1, lo + PM_OVERSCAN);
-  });
-
-  let pmVisibleMatches = $derived(filteredResult.pattern_matches.slice(pmStartIdx, pmEndIdx));
-
-  let pmOffsetY = $derived(pmOffsets[pmStartIdx] ?? 0);
-
-  function onPmScroll(e: Event) {
-    pmScrollTop = (e.target as HTMLDivElement).scrollTop;
-  }
-
-  $effect(() => {
-    if (!pmContainer) return;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        pmContainerHeight = entry.contentRect.height;
-      }
-    });
-    ro.observe(pmContainer);
-    return () => ro.disconnect();
-  });
 
   async function load() {
     try {
@@ -365,6 +318,51 @@
   });
 </script>
 
+{#snippet patternMatchesCompact()}
+  {#if filteredResult.pattern_matches.length > 0}
+    <div class="pattern-matches-section">
+      <h3>Pattern Matches ({filteredResult.pattern_matches.length})</h3>
+      <div class="pm-compact-list">
+        {#each filteredResult.pattern_matches as pm}
+          {@const id = pmId(pm)}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <div
+            class="pm-compact-row"
+            class:expanded={expandedPmId === id}
+            role="button"
+            tabindex="0"
+            onclick={() => (expandedPmId = expandedPmId === id ? null : id)}
+          >
+            <span class="pm-expand-icon">{expandedPmId === id ? '\u25BC' : '\u25B6'}</span>
+            <span class="pm-name">{getPatternName(pm.pattern_id)}</span>
+            <span class="pm-time" title={pm.timestamp}>{formatTimestamp(pm.timestamp)}</span>
+            <span class="pm-sources-count">{pmSourceCount(pm)} src</span>
+            <span class="pm-key-summary">{pmKeySummary(pm)}</span>
+          </div>
+          {#if expandedPmId === id}
+            <div class="pm-expanded-detail card">
+              {#each Object.entries(pm.state_snapshot) as [sourceName, stateMap]}
+                <div class="pm-source">
+                  <span class="pm-source-name">{sourceName}</span>
+                  {#each Object.entries(stateMap) as [key, val]}
+                    <div class="pm-entry">
+                      <span class="state-key">{key}</span>
+                      <span class="state-value">{formatStateValue(val.value)}</span>
+                      <span class="state-set-at" title={val.set_at}
+                        >{formatTimestamp(val.set_at)}</span
+                      >
+                    </div>
+                  {/each}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        {/each}
+      </div>
+    </div>
+  {/if}
+{/snippet}
+
 <div class="header-row">
   <h2>Analysis</h2>
   <div class="header-actions">
@@ -395,16 +393,27 @@
   </div>
 {/if}
 
-<div class="time-range-row">
-  <label>From <input type="datetime-local" bind:value={timeStart} step="1" /></label>
-  <label>To <input type="datetime-local" bind:value={timeEnd} step="1" /></label>
-  {#if timeStart || timeEnd}
-    <button
-      onclick={() => {
-        timeStart = '';
-        timeEnd = '';
-      }}>Clear</button
-    >
+<div class="time-range-toggle">
+  <button
+    class="time-range-chip"
+    class:active={hasTimeRange}
+    onclick={() => (showTimeRange = !showTimeRange)}
+  >
+    {formatTimeRangeLabel()}
+  </button>
+  {#if showTimeRange}
+    <div class="time-range-inputs">
+      <label>From <input type="datetime-local" bind:value={timeStart} step="1" /></label>
+      <label>To <input type="datetime-local" bind:value={timeEnd} step="1" /></label>
+      {#if hasTimeRange}
+        <button
+          onclick={() => {
+            timeStart = '';
+            timeEnd = '';
+          }}>Clear</button
+        >
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -464,10 +473,17 @@
           </div>
         </div>
         {#if filterRuleId !== null || filterSourceId !== null}
-          <div class="filter-status">
-            <span
-              >Showing {filteredResult.rule_matches.length} of {result.rule_matches.length} matches</span
-            >
+          <div class="filter-status-banner">
+            <span>
+              Showing <strong>{filteredResult.rule_matches.length}</strong> of
+              <strong>{result.rule_matches.length}</strong> matches
+              {#if filterRuleId !== null}
+                &middot; {getRuleName(filterRuleId)}
+              {/if}
+              {#if filterSourceId !== null}
+                &middot; {getSourceName(filterSourceId)}
+              {/if}
+            </span>
             <button
               onclick={() => {
                 filterRuleId = null;
@@ -513,11 +529,12 @@
 
   {#if viewMode === 'table'}
     {#if sourceList.length > 0}
-      <div class="source-selector">
-        <label>View source</label>
-        <div class="source-buttons">
+      <div class="source-file-selector">
+        <span class="source-file-label">Log File</span>
+        <div class="source-file-tabs">
           {#each sourceList as src}
             <button
+              class="source-file-tab"
               class:active={selectedSourceId === src.id}
               onclick={() => {
                 selectedSourceId = selectedSourceId === src.id ? null : src.id;
@@ -526,7 +543,7 @@
             >
               {src.name}
               {#if filteredResult.rule_matches.filter((m) => m.source_id === src.id).length > 0}
-                <span class="match-count"
+                <span class="source-file-count"
                   >{filteredResult.rule_matches.filter((m) => m.source_id === src.id).length}</span
                 >
               {/if}
@@ -537,89 +554,82 @@
     {/if}
 
     {#if selectedSource}
-      {#if sourceRuleMatches.length > 0}
-        <EventDensityHistogram
-          ruleMatches={sourceRuleMatches}
-          onBucketClick={(match) => {
-            requestNavigate(match.log_line.raw);
-          }}
-        />
-      {/if}
-      <div class="viewer-section">
-        <LogViewer
-          source={selectedSource}
-          {projectId}
-          ruleMatches={sourceRuleMatches}
-          patternMatches={filteredResult.pattern_matches}
-          stateChanges={result?.state_changes ?? []}
-          {navigateTarget}
-        />
-      </div>
-    {:else if filteredResult.rule_matches.length > 0}
-      <EventDensityHistogram
-        ruleMatches={filteredResult.rule_matches}
-        onBucketClick={(match) => {
-          handleNavigate(match.source_id, match.log_line.raw);
-        }}
-      />
-    {/if}
-
-    {#if filteredResult.pattern_matches.length > 0}
-      <div class="pattern-matches-section">
-        <h3>Pattern Matches ({filteredResult.pattern_matches.length})</h3>
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="pm-scroll-container" bind:this={pmContainer} onscroll={onPmScroll}>
-          <div class="pm-scroll-spacer" style="height: {pmTotalHeight}px;">
-            <div class="pm-visible-cards" style="transform: translateY({pmOffsetY}px);">
-              {#each pmVisibleMatches as pm}
-                <div class="pattern-match card">
-                  <div class="pm-header">
-                    <span class="pm-name">{getPatternName(pm.pattern_id)}</span>
-                    <span class="pm-time">{pm.timestamp}</span>
-                  </div>
-                  <div class="pm-state">
-                    {#each Object.entries(pm.state_snapshot) as [sourceName, stateMap]}
-                      <div class="pm-source">
-                        <span class="pm-source-name">{sourceName}</span>
-                        {#each Object.entries(stateMap) as [key, val]}
-                          <div class="pm-entry">
-                            <span class="state-key">{key}</span>
-                            <span class="state-value">{formatStateValue(val.value)}</span>
-                            <span class="state-set-at">{val.set_at}</span>
-                          </div>
-                        {/each}
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              {/each}
-            </div>
+      <div class="split-layout">
+        <div class="split-top">
+          {#if sourceRuleMatches.length > 0}
+            <EventDensityHistogram
+              ruleMatches={sourceRuleMatches}
+              onBucketClick={(match) => {
+                requestNavigate(match.log_line.raw);
+              }}
+            />
+          {/if}
+          <div class="viewer-section">
+            <LogViewer
+              source={selectedSource}
+              {projectId}
+              ruleMatches={sourceRuleMatches}
+              patternMatches={filteredResult.pattern_matches}
+              stateChanges={result?.state_changes ?? []}
+              {navigateTarget}
+            />
           </div>
         </div>
-      </div>
-    {/if}
+        <div class="split-bottom">
+          {@render patternMatchesCompact()}
 
-    {@const visibleMatches = selectedSource ? sourceRuleMatches : filteredResult.rule_matches}
-    {#if visibleMatches.length > 0}
-      <div class="rule-matches-section">
-        <h3>Rule Matches ({visibleMatches.length})</h3>
-        <div class="match-table">
-          {#each visibleMatches.slice(0, 100) as rm}
-            <div class="match-row">
-              <span class="badge">{getRuleName(rm.rule_id)}</span>
-              {#if !selectedSource}
-                <span class="badge">{getSourceName(rm.source_id)}</span>
-              {/if}
-              <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
-            </div>
-          {/each}
-          {#if visibleMatches.length > 100}
-            <div class="text-muted">
-              ...and {visibleMatches.length - 100} more matches
+          {#if sourceRuleMatches.length > 0}
+            <div class="rule-matches-section">
+              <h3>Rule Matches ({sourceRuleMatches.length})</h3>
+              <div class="match-table">
+                {#each sourceRuleMatches.slice(0, 100) as rm}
+                  <div class="match-row">
+                    <span class="badge">{getRuleName(rm.rule_id)}</span>
+                    <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
+                  </div>
+                {/each}
+                {#if sourceRuleMatches.length > 100}
+                  <div class="text-muted">
+                    ...and {sourceRuleMatches.length - 100} more matches
+                  </div>
+                {/if}
+              </div>
             </div>
           {/if}
         </div>
       </div>
+    {:else}
+      {#if filteredResult.rule_matches.length > 0}
+        <EventDensityHistogram
+          ruleMatches={filteredResult.rule_matches}
+          onBucketClick={(match) => {
+            handleNavigate(match.source_id, match.log_line.raw);
+          }}
+        />
+      {/if}
+
+      {@render patternMatchesCompact()}
+
+      {@const visibleMatches = filteredResult.rule_matches}
+      {#if visibleMatches.length > 0}
+        <div class="rule-matches-section">
+          <h3>Rule Matches ({visibleMatches.length})</h3>
+          <div class="match-table">
+            {#each visibleMatches.slice(0, 100) as rm}
+              <div class="match-row">
+                <span class="badge">{getRuleName(rm.rule_id)}</span>
+                <span class="badge">{getSourceName(rm.source_id)}</span>
+                <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
+              </div>
+            {/each}
+            {#if visibleMatches.length > 100}
+              <div class="text-muted">
+                ...and {visibleMatches.length - 100} more matches
+              </div>
+            {/if}
+          </div>
+        </div>
+      {/if}
     {/if}
   {:else if viewMode === 'timeline'}
     <TimelineView
@@ -687,15 +697,35 @@
     padding: 8px 0;
   }
 
-  .time-range-row {
+  .time-range-toggle {
     display: flex;
     align-items: center;
     gap: 12px;
     margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .time-range-chip {
+    padding: 4px 12px;
+    font-size: 12px;
+    border-radius: 12px;
+    font-family: var(--font-mono);
+  }
+
+  .time-range-chip.active {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+  }
+
+  .time-range-inputs {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     font-size: 13px;
   }
 
-  .time-range-row input {
+  .time-range-inputs input {
     font-family: var(--font-mono);
     font-size: 12px;
     padding: 4px 8px;
@@ -735,47 +765,94 @@
   .stat-label {
     font-size: 12px;
     color: var(--text-dim);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
 
   .view-tabs {
     display: flex;
-    gap: 4px;
+    gap: 0;
     margin-bottom: 16px;
+    border-bottom: 1px solid var(--border);
   }
 
   .view-tabs button {
-    padding: 6px 16px;
+    padding: 8px 20px;
     font-size: 13px;
     border-radius: var(--radius) var(--radius) 0 0;
-    border-bottom: 2px solid transparent;
+    border: 1px solid transparent;
+    border-bottom: 3px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    margin-bottom: -1px;
+  }
+
+  .view-tabs button:hover {
+    color: var(--text);
+    background: var(--bg-hover);
   }
 
   .view-tabs button.active {
     background: var(--bg-secondary);
+    border-color: var(--border);
     border-bottom-color: var(--accent);
     color: var(--accent);
+    font-weight: 600;
   }
 
-  .source-selector {
-    margin-bottom: 16px;
-  }
-
-  .source-buttons {
+  .source-file-selector {
     display: flex;
-    gap: 8px;
-    margin-top: 4px;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
   }
 
-  .source-buttons button.active {
+  .source-file-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .source-file-tabs {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .source-file-tab {
+    padding: 6px 16px;
+    font-size: 13px;
+    border: none;
+    border-right: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--bg);
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .source-file-tab:last-child {
+    border-right: none;
+  }
+
+  .source-file-tab:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+  }
+
+  .source-file-tab.active {
     background: var(--accent);
     color: var(--bg);
-    border-color: var(--accent);
   }
 
-  .match-count {
+  .source-file-count {
     display: inline-block;
-    background: var(--accent);
-    color: var(--bg);
+    background: rgba(255, 255, 255, 0.2);
     font-size: 11px;
     padding: 0 6px;
     border-radius: 8px;
@@ -783,9 +860,38 @@
     font-weight: 600;
   }
 
-  .source-buttons button.active .match-count {
-    background: var(--bg);
-    color: var(--accent);
+  .source-file-tab.active .source-file-count {
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .split-layout {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 300px);
+    min-height: 400px;
+  }
+
+  .split-top {
+    flex: 3;
+    min-height: 200px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .split-top .viewer-section {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .split-bottom {
+    flex: 2;
+    min-height: 120px;
+    overflow-y: auto;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    margin-top: 8px;
   }
 
   .viewer-section {
@@ -797,25 +903,74 @@
     margin-top: 24px;
   }
 
-  .pattern-match {
-    margin-bottom: 8px;
+  .pm-compact-list {
+    max-height: 500px;
+    overflow-y: auto;
   }
 
-  .pm-header {
+  .split-bottom .pm-compact-list {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .pm-compact-row {
     display: flex;
-    justify-content: space-between;
-    margin-bottom: 8px;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 10px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--bg-secondary);
+    cursor: pointer;
+  }
+
+  .pm-compact-row:hover {
+    background: var(--bg-hover);
+  }
+
+  .pm-compact-row.expanded {
+    background: var(--bg-secondary);
+  }
+
+  .pm-expand-icon {
+    font-size: 10px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    width: 12px;
   }
 
   .pm-name {
     font-weight: 600;
     color: var(--purple);
+    flex-shrink: 0;
   }
 
   .pm-time {
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-dim);
+    flex-shrink: 0;
+  }
+
+  .pm-sources-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .pm-key-summary {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .pm-expanded-detail {
+    margin: 0 0 4px 24px;
+    padding: 12px;
   }
 
   .pm-source {
@@ -884,8 +1039,8 @@
   }
 
   .filter-facets {
-    margin-top: 12px;
-    padding-top: 12px;
+    margin-top: 16px;
+    padding-top: 16px;
     border-top: 1px solid var(--border);
   }
 
@@ -932,29 +1087,22 @@
     background: rgba(0, 0, 0, 0.2);
   }
 
-  .filter-status {
+  .filter-status-banner {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 12px;
-    margin-top: 8px;
+    margin-top: 12px;
+    padding: 8px 12px;
     font-size: 12px;
-    color: var(--text-dim);
+    color: var(--accent);
+    background: rgba(122, 162, 247, 0.08);
+    border: 1px solid rgba(122, 162, 247, 0.2);
+    border-radius: var(--radius);
   }
 
-  .pm-scroll-container {
-    max-height: 600px;
-    overflow-y: auto;
-    position: relative;
-  }
-
-  .pm-scroll-spacer {
-    position: relative;
-  }
-
-  .pm-visible-cards {
-    position: absolute;
-    left: 0;
-    right: 0;
+  .filter-status-banner strong {
+    font-weight: 700;
   }
 
   .checklist {

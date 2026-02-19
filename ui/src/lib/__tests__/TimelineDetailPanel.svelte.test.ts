@@ -151,10 +151,10 @@ describe('TimelineDetailPanel', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('formats timestamp from ms to ISO-like string', () => {
+  it('formats timestamp from ms to human-readable string', () => {
     const ts = Date.parse('2024-01-15T10:30:00.000Z');
     renderPanel({ event: makeRuleTimelineEvent({ timestamp: ts }) });
-    expect(screen.getByText('2024-01-15 10:30:00.000')).toBeInTheDocument();
+    expect(screen.getByText('Jan 15, 10:30:00')).toBeInTheDocument();
   });
 
   it('looks up pattern name from patternList', () => {

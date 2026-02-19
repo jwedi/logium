@@ -111,8 +111,20 @@
     onEventClick(item.events[0]);
   }
 
+  function clusterRadius(count: number): number {
+    if (count <= 1) return DOT_RADIUS;
+    return DOT_RADIUS + Math.min(Math.log2(count) * 2, 6);
+  }
+
   function dotColor(item: ClusterOrDot): string {
-    if (item.isCluster) return 'var(--text-dim)';
+    if (item.isCluster) {
+      // Use rule color if all events share the same rule
+      const firstRuleId = item.events[0].ruleId;
+      if (firstRuleId !== undefined && item.events.every((e) => e.ruleId === firstRuleId)) {
+        return `var(--rule-border-${item.events[0].colorIndex})`;
+      }
+      return 'var(--text-dim)';
+    }
     const ev = item.events[0];
     if (ev.type === 'pattern') return 'var(--purple)';
     return `var(--rule-border-${ev.colorIndex})`;
@@ -167,13 +179,25 @@
         />
       {/if}
       <circle
+        class="hover-ring"
         {cx}
         cy={item.y}
-        r={item.isCluster ? DOT_RADIUS + 1 : DOT_RADIUS}
+        r={(item.isCluster ? clusterRadius(item.events.length) : DOT_RADIUS) + 2}
+        fill="none"
+        stroke="var(--accent)"
+        stroke-width="1.5"
+        opacity="0"
+      />
+      <circle
+        {cx}
+        cy={item.y}
+        r={item.isCluster ? clusterRadius(item.events.length) : DOT_RADIUS}
         fill={dotColor(item)}
         opacity={item.isCluster ? 0.8 : 0.7}
       >
-        {#if getStateTooltip(item)}
+        {#if item.isCluster}
+          <title>{item.events.length} events</title>
+        {:else if getStateTooltip(item)}
           <title>{getStateTooltip(item)}</title>
         {/if}
       </circle>
@@ -187,16 +211,16 @@
           class="state-label">{getStateLabel(item)}</text
         >
       {/if}
-      {#if item.isCluster}
-        <text
-          x={cx}
-          y={item.y + 3.5}
-          text-anchor="middle"
-          fill="var(--bg)"
-          font-size="8"
-          font-weight="700">{item.events.length}</text
-        >
-      {/if}
     </g>
   {/each}
 </g>
+
+<style>
+  .event-dot .hover-ring {
+    transition: opacity 0.15s;
+  }
+
+  .event-dot:hover .hover-ring {
+    opacity: 0.3 !important;
+  }
+</style>

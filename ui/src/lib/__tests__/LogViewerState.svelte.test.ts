@@ -123,7 +123,7 @@ describe('LogViewer Accumulated State', () => {
       // Should show "Extracted State" header
       expect(screen.getByText('Extracted State')).toBeInTheDocument();
       // Should show accumulated state section with timestamp
-      expect(screen.getByText('State at 2024-01-15T10:30:02.000')).toBeInTheDocument();
+      expect(screen.getByText('State at Jan 15, 10:30:02')).toBeInTheDocument();
     });
   });
 

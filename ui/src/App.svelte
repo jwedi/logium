@@ -62,16 +62,45 @@
     applyRoute(parseRoute(window.location.pathname));
   });
 
-  const navItems: { view: View; label: string; requiresProject: boolean }[] = [
-    { view: 'projects', label: 'Projects', requiresProject: false },
-    { view: 'sources', label: 'Sources', requiresProject: true },
-    { view: 'templates', label: 'Templates', requiresProject: true },
-    { view: 'ts-templates', label: 'Timestamp Templates', requiresProject: true },
-    { view: 'rules', label: 'Rules', requiresProject: true },
-    { view: 'rulesets', label: 'Rulesets', requiresProject: true },
-    { view: 'patterns', label: 'Patterns', requiresProject: true },
-    { view: 'analysis', label: 'Analysis', requiresProject: true },
+  interface NavItem {
+    view: View;
+    label: string;
+    requiresProject: boolean;
+  }
+
+  interface NavSection {
+    title: string | null;
+    items: NavItem[];
+  }
+
+  const navSections: NavSection[] = [
+    {
+      title: null,
+      items: [{ view: 'projects', label: 'Projects', requiresProject: false }],
+    },
+    {
+      title: 'Data',
+      items: [
+        { view: 'sources', label: 'Sources', requiresProject: true },
+        { view: 'templates', label: 'Templates', requiresProject: true },
+        { view: 'ts-templates', label: 'Timestamps', requiresProject: true },
+      ],
+    },
+    {
+      title: 'Detection',
+      items: [
+        { view: 'rules', label: 'Rules', requiresProject: true },
+        { view: 'rulesets', label: 'Rulesets', requiresProject: true },
+        { view: 'patterns', label: 'Patterns', requiresProject: true },
+      ],
+    },
+    {
+      title: null,
+      items: [{ view: 'analysis', label: 'Analysis', requiresProject: true }],
+    },
   ];
+
+  const navItems = navSections.flatMap((s) => s.items);
 
   async function loadProjects() {
     loading = true;
@@ -142,18 +171,26 @@
     {/if}
 
     <nav class="sidebar-nav">
-      {#each navItems as item}
-        {#if !item.requiresProject || currentProjectId}
-          <button
-            class="nav-item"
-            class:active={currentView === item.view}
-            onclick={() => {
-              if (item.view === 'projects') navigate('/');
-              else if (currentProjectId) navigate(`/projects/${currentProjectId}/${item.view}`);
-            }}
-          >
-            {item.label}
-          </button>
+      {#each navSections as section}
+        {#if !section.items[0].requiresProject || currentProjectId}
+          {#if section.title}
+            <span class="nav-section-title">{section.title}</span>
+          {/if}
+          {#each section.items as item}
+            {#if !item.requiresProject || currentProjectId}
+              <button
+                class="nav-item"
+                class:active={currentView === item.view}
+                class:nav-analysis={item.view === 'analysis'}
+                onclick={() => {
+                  if (item.view === 'projects') navigate('/');
+                  else if (currentProjectId) navigate(`/projects/${currentProjectId}/${item.view}`);
+                }}
+              >
+                {item.label}
+              </button>
+            {/if}
+          {/each}
         {/if}
       {/each}
     </nav>
@@ -260,6 +297,15 @@
     flex: 1;
   }
 
+  .nav-section-title {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 12px 12px 4px;
+    font-weight: 600;
+  }
+
   .nav-item {
     text-align: left;
     border: none;
@@ -279,6 +325,20 @@
   .nav-item.active {
     background: var(--bg-tertiary);
     color: var(--accent);
+  }
+
+  .nav-item.nav-analysis {
+    margin-top: auto;
+    border-top: 1px solid var(--border);
+    padding: 10px 12px;
+    border-left: 2px solid transparent;
+    background: rgba(122, 162, 247, 0.06);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  .nav-item.nav-analysis.active {
+    border-left-color: var(--accent);
   }
 
   .sidebar-error {
