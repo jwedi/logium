@@ -447,7 +447,9 @@ describe('AnalysisView', () => {
     await tick();
 
     // Should show filter status
-    expect(screen.getByText(/Showing 1 of 2 matches/)).toBeInTheDocument();
+    const banner = document.querySelector('.filter-status-banner');
+    expect(banner).toBeTruthy();
+    expect(banner!.textContent).toMatch(/Showing\s+1\s+of\s+2\s+matches/);
   });
 
   it('clicking the same chip again clears the filter', async () => {

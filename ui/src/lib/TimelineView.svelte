@@ -242,7 +242,7 @@
       {#each sourceLanes as lane}
         <div class="lane-header" style="width: {laneWidth}px">
           <span class="lane-name">{lane.sourceName}</span>
-          <span class="lane-count">{lane.events.length}</span>
+          <span class="lane-count-badge">{lane.events.length}</span>
         </div>
       {/each}
     </div>
@@ -259,6 +259,13 @@
             {scrollTop}
             {viewportHeight}
           />
+          <!-- Pattern labels in axis gutter -->
+          {#each patternEvents as pev}
+            {@const y = (pev.timestamp - domain.minTime) / msPerPixel}
+            <button class="pattern-label" style="top: {y - 10}px" onclick={() => onEventClick(pev)}
+              >{getPatternName(pev.patternId!)}</button
+            >
+          {/each}
         </div>
 
         <!-- Swimlanes SVG -->
@@ -275,18 +282,42 @@
             />
           {/each}
 
+          <!-- Lane divider lines -->
+          {#each sourceLanes as _, i}
+            {#if i > 0}
+              <line
+                x1={i * laneWidth}
+                y1="0"
+                x2={i * laneWidth}
+                y2={totalHeight}
+                stroke="var(--border)"
+                stroke-width="1"
+                opacity="0.3"
+              />
+            {/if}
+          {/each}
+
           <!-- Pattern bands (visual only, behind swimlanes) -->
           {#each patternEvents as pev}
             {@const y = (pev.timestamp - domain.minTime) / msPerPixel}
             <rect
               x="0"
-              y={y - 1}
+              y={y - 2}
               width={swimlanesWidth}
-              height="3"
+              height="5"
               fill="var(--purple)"
-              opacity="0.2"
-              rx="1"
+              opacity="0.35"
+              rx="2"
             />
+            <!-- Diamond markers at lane intersections -->
+            {#each sourceLanes as _, li}
+              {@const dx = li * laneWidth + laneWidth / 2}
+              <polygon
+                points="{dx},{y - 4} {dx + 4},{y} {dx},{y + 4} {dx - 4},{y}"
+                fill="var(--purple)"
+                opacity="0.3"
+              />
+            {/each}
           {/each}
 
           <!-- Per-source swimlanes -->
@@ -313,14 +344,6 @@
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <g onclick={() => onEventClick(pev)} role="button" tabindex="0" style="cursor: pointer">
               <rect x="0" y={y - 8} width={swimlanesWidth} height="16" fill="transparent" />
-              <text
-                x="4"
-                y={y - 4}
-                fill="var(--purple)"
-                font-size="9"
-                font-family="var(--font-mono)"
-                opacity="0.7">{getPatternName(pev.patternId!)}</text
-              >
             </g>
           {/each}
         </svg>
@@ -354,8 +377,15 @@
     display: flex;
     gap: 4px;
     align-items: center;
-    padding: 8px 0;
+    padding: 6px 8px;
     flex-shrink: 0;
+    position: sticky;
+    right: 0;
+    align-self: flex-end;
+    z-index: 2;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
   }
 
   .zoom-controls button {
@@ -397,12 +427,13 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 6px 4px;
-    gap: 2px;
+    padding: 8px 4px;
+    gap: 4px;
+    border-bottom: 1px solid var(--border);
   }
 
   .lane-name {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--cyan);
     overflow: hidden;
@@ -412,10 +443,14 @@
     text-align: center;
   }
 
-  .lane-count {
+  .lane-count-badge {
     font-size: 10px;
-    color: var(--text-muted);
+    color: var(--text-dim);
     font-family: var(--font-mono);
+    background: var(--bg-tertiary);
+    padding: 1px 6px;
+    border-radius: 8px;
+    line-height: 1.4;
   }
 
   .scroll-area {
@@ -442,9 +477,32 @@
     left: 0;
     z-index: 1;
     background: var(--bg);
+    overflow: visible;
   }
 
   .swimlanes-svg {
     display: block;
+  }
+
+  .pattern-label {
+    position: absolute;
+    left: 4px;
+    right: 4px;
+    background: rgba(187, 154, 247, 0.15);
+    color: var(--purple);
+    font-size: 9px;
+    font-family: var(--font-mono);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: left;
+  }
+
+  .pattern-label:hover {
+    background: rgba(187, 154, 247, 0.25);
   }
 </style>

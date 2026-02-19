@@ -10,6 +10,7 @@
     type StateValue,
   } from './api';
   import RuleCreator from './RuleCreator.svelte';
+  import { formatTimestamp } from './formatUtils';
 
   let {
     source,
@@ -661,7 +662,9 @@
         {#if lineMatchMap.has(selectedLineIdx)}
           <div class="state-section-divider"></div>
         {/if}
-        <h3 class="state-section-header">State at {accumulatedState.timestamp}</h3>
+        <h3 class="state-section-header" title={accumulatedState.timestamp}>
+          State at {formatTimestamp(accumulatedState.timestamp)}
+        </h3>
         {#if accumulatedState.state.size === 0}
           <div class="state-empty">No state mutations before this point</div>
         {:else}

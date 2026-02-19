@@ -562,3 +562,101 @@ Added `dry_run_rule()` to `logium-core::engine` that streams a source file and e
 **Status:** Done
 
 Extended LogViewer's state panel to show full accumulated cross-source state at any clicked line's timestamp. Timestamp resolution uses exact match timestamps for rule-matched lines and binary search over `matchTimestampIndex` for unmatched lines. State is reconstructed by replaying `state_changes` (passed as a new prop from AnalysisView using unfiltered `result`) up to the resolved timestamp. Panel shows "Extracted State" (matched lines only) and "State at {timestamp}" grouped by source (current source first). 5 new tests covering matched/unmatched lines, timestamp-bounded replay, source grouping, and no-timestamp edge case.
+
+---
+
+## UI/UX Improvements
+
+### 41. Sidebar Navigation Grouping
+
+**Status:** Done
+
+Grouped sidebar nav items into labeled sections: Data (Sources, Templates, Timestamps), Detection (Rules, Rulesets, Patterns), with Analysis as a standalone item at the bottom. Added section divider headers with uppercase labels. Analysis nav item has a left accent border when active. Shortened "Timestamp Templates" to "Timestamps" in nav.
+
+---
+
+### 42. Deduplicate Source Selection vs Source Facet Filters
+
+**Status:** Done
+
+Restyled the source file selector as a segmented control (connected tab bar with shared border) visually distinct from the facet filter chips. Added "Log File" label. Segmented tabs use solid connected styling while facet chips remain rounded pills.
+
+---
+
+### 43. Histogram Title, Y-Axis Label, and Polish
+
+**Status:** Done
+
+Added "Match Density" title above the histogram, Y-axis with max count label and "0" baseline, a vertical axis line, and wrapped the histogram in a `.card` container for visual containment. X-axis labels shifted to account for Y-axis width.
+
+---
+
+### 44. Stronger Tab Styling for View Mode Tabs
+
+**Status:** Done
+
+Reworked view mode tabs (Table/Timeline/State Evolution/Clusters) with a baseline border, transparent inactive backgrounds with dim text, solid secondary background + accent bottom border for active state, and hover effects. Increased padding for better touch targets.
+
+---
+
+### 45. Collapse Time Range into Expandable Row
+
+**Status:** Done
+
+Replaced always-visible FROM/TO datetime inputs with a collapsible "Time Range: All" chip. Clicking expands the datetime inputs inline. When a range is active, the chip shows a formatted date range (e.g. "Jun 15, 14:00 – Jul 27, 08:30") with accent styling.
+
+---
+
+### 46. Human-Readable Timestamps Throughout
+
+**Status:** Done
+
+Created `formatTimestamp()` utility in `ui/src/lib/formatUtils.ts` that converts ISO timestamps to "Jun 22, 13:16:30" format. Applied across AnalysisView (pattern match timestamps, state set_at), StateEvolutionView (timestamp column), LogViewer (accumulated state header), and TimelineDetailPanel. Full ISO strings preserved as `title` tooltips.
+
+---
+
+### 47. Results Card Visual Hierarchy Cleanup
+
+**Status:** Done
+
+Increased stat label font weight and added uppercase/letter-spacing. Added more spacing between stats and facet sections. Replaced plain-text filter status with a colored banner showing filtered count, active filter names, and a Clear button.
+
+---
+
+### 48. Pattern Matches Section Compactness
+
+**Status:** Done
+
+Replaced virtual-scroll card layout with compact rows (~30px each) showing pattern name, timestamp, source count, and key summary. Click to expand shows full state snapshot details inline. Removed virtual scroll machinery (now a simple scrollable list capped at 500px).
+
+---
+
+### 49. Pin LogViewer Above Scrolling Sections
+
+**Status:** Done
+
+When a source is selected, the table view splits into a pinned top section (histogram + LogViewer, 60% height) and a scrollable bottom section (pattern matches + rule matches). LogViewer no longer scrolls away when viewing matches. No-source view retains the original single-column layout.
+
+---
+
+### 50. Make Analysis Sidebar Tab More Prominent
+
+**Status:** Done
+
+Added visual separator (border-top), subtle accent background tint (`rgba(122, 162, 247, 0.06)`), increased font size (14px) and weight (600), and larger padding (10px 12px) to the Analysis nav item. Active state unchanged.
+
+---
+
+### 51. Timeline: Replace Cluster Count Numbers with Scaled Dots
+
+**Status:** Done
+
+Removed confusing count numbers from cluster dots. Cluster radius now scales logarithmically: `5 + min(log2(count) * 2, 6)` px. Hover tooltip shows "{count} events". Clusters use the rule color when all events share the same rule (previously always gray). Tests updated for new rendering.
+
+---
+
+### 52. Timeline Visual Polish
+
+**Status:** Done
+
+(a) Pattern bands: increased height to 5px, opacity to 0.35, added diamond markers at lane intersections, pattern labels moved to axis gutter with pill styling. (b) Lane headers: added bottom border, count shown in pill badge, increased font size to 12px. (c) Dot hover: added hover-ring circle with accent stroke that fades in on hover. (d) Lane dividers: added vertical separator lines between lanes. (e) Zoom controls: styled as a card with background/border/radius, positioned to the right with sticky behavior.

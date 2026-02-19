@@ -70,6 +70,7 @@
 
   let maxCount = $derived(buckets.reduce((m, b) => Math.max(m, b.count), 0));
 
+  const Y_LABEL_WIDTH = 32;
   const BAR_AREA_HEIGHT = 60;
   const LABEL_HEIGHT = 20;
   const TOTAL_HEIGHT = BAR_AREA_HEIGHT + LABEL_HEIGHT;
@@ -96,15 +97,19 @@
     return `${mo}/${dd} ${d.toISOString().slice(11, 19)}`;
   }
 
+  function chartWidth(): number {
+    const w = containerWidth > 0 ? containerWidth : 600;
+    return w - Y_LABEL_WIDTH;
+  }
+
   function barWidth(total: number): number {
     if (total <= 0) return 0;
-    const w = containerWidth > 0 ? containerWidth : 600;
-    return Math.max(1, (w - PAD_X * 2) / total - GAP);
+    return Math.max(1, (chartWidth() - PAD_X * 2) / total - GAP);
   }
 
   function barX(idx: number, total: number): number {
     const bw = barWidth(total) + GAP;
-    return PAD_X + idx * bw;
+    return Y_LABEL_WIDTH + PAD_X + idx * bw;
   }
 
   function barHeight(count: number): number {
@@ -123,22 +128,49 @@
     if (buckets.length === 0) return [];
     const first = buckets[0];
     const last = buckets[buckets.length - 1];
+    const cw = chartWidth();
     if (buckets.length === 1) {
-      return [{ x: PAD_X, text: formatLabel(first.startMs) }];
+      return [{ x: Y_LABEL_WIDTH + PAD_X, text: formatLabel(first.startMs) }];
     }
-    const w = containerWidth > 0 ? containerWidth : 600;
     const mid = (first.startMs + last.endMs) / 2;
     return [
-      { x: PAD_X, text: formatLabel(first.startMs) },
-      { x: w / 2, text: formatLabel(mid) },
-      { x: w - PAD_X, text: formatLabel(last.endMs) },
+      { x: Y_LABEL_WIDTH + PAD_X, text: formatLabel(first.startMs) },
+      { x: Y_LABEL_WIDTH + cw / 2, text: formatLabel(mid) },
+      { x: Y_LABEL_WIDTH + cw - PAD_X, text: formatLabel(last.endMs) },
     ];
   });
 </script>
 
 {#if buckets.length > 0}
-  <div class="density-histogram" bind:clientWidth={containerWidth}>
+  <div class="density-histogram card" bind:clientWidth={containerWidth}>
+    <span class="histogram-title">Match Density</span>
     <svg width="100%" height={TOTAL_HEIGHT}>
+      <!-- Y-axis max count label -->
+      <text
+        x={Y_LABEL_WIDTH - 4}
+        y="10"
+        fill="var(--text-muted)"
+        font-size="10"
+        font-family="var(--font-mono)"
+        text-anchor="end">{maxCount}</text
+      >
+      <text
+        x={Y_LABEL_WIDTH - 4}
+        y={BAR_AREA_HEIGHT}
+        fill="var(--text-muted)"
+        font-size="10"
+        font-family="var(--font-mono)"
+        text-anchor="end">0</text
+      >
+      <!-- Y-axis line -->
+      <line
+        x1={Y_LABEL_WIDTH}
+        y1="0"
+        x2={Y_LABEL_WIDTH}
+        y2={BAR_AREA_HEIGHT}
+        stroke="var(--border)"
+        stroke-width="1"
+      />
       {#each buckets as bucket, i}
         {@const bw = barWidth(buckets.length)}
         {@const bx = barX(i, buckets.length)}
@@ -173,7 +205,7 @@
           fill="var(--text-muted)"
           font-size="10"
           font-family="var(--font-mono)"
-          text-anchor={label.x <= PAD_X + 1
+          text-anchor={label.x <= Y_LABEL_WIDTH + PAD_X + 1
             ? 'start'
             : label.x >= (containerWidth || 600) - PAD_X - 1
               ? 'end'
@@ -186,7 +218,7 @@
       <div
         class="tooltip"
         style="left: {barX(hoveredIdx, buckets.length) +
-          barWidth(buckets.length) / 2}px; top: {BAR_AREA_HEIGHT - barHeight(hb.count) - 4}px;"
+          barWidth(buckets.length) / 2}px; top: {BAR_AREA_HEIGHT - barHeight(hb.count) + 16}px;"
       >
         <div>{formatTooltipTime(hb.startMs)} – {formatTooltipTime(hb.endMs)}</div>
         <div>{hb.count} match{hb.count !== 1 ? 'es' : ''}</div>
@@ -199,6 +231,16 @@
   .density-histogram {
     position: relative;
     margin-bottom: 8px;
+    padding: 10px 12px 8px;
+  }
+
+  .histogram-title {
+    display: block;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
   }
 
   .bar {

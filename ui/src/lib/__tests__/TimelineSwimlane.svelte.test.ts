@@ -57,13 +57,12 @@ describe('TimelineSwimlane', () => {
       msPerPixel: 1,
       viewportHeight: 600,
     });
-    // Each non-clustered event gets exactly one main circle
+    // Each non-clustered event gets a hover-ring + main circle = 2 per event
     const circles = container.querySelectorAll('circle');
-    // 5 events, each with one circle
-    expect(circles.length).toBe(5);
+    expect(circles.length).toBe(10);
   });
 
-  it('clusters events within 3px into a single dot with count badge', () => {
+  it('clusters events within 3px into a single scaled dot with tooltip', () => {
     const events = makeClusteredEvents(4, 100); // 100, 101, 102, 103ms → all within 3px
     const { container } = renderSwimlane({
       events,
@@ -71,13 +70,16 @@ describe('TimelineSwimlane', () => {
       msPerPixel: 1,
       viewportHeight: 600,
     });
-    // Cluster = 1 main circle + no selection ring
+    // Cluster = 1 hover-ring + 1 main circle
     const circles = container.querySelectorAll('circle');
-    expect(circles.length).toBe(1);
-    // Count badge text
+    expect(circles.length).toBe(2);
+    // No count text — scaled dots use tooltips instead
     const texts = container.querySelectorAll('text');
-    expect(texts.length).toBe(1);
-    expect(texts[0].textContent).toBe('4');
+    expect(texts.length).toBe(0);
+    // Tooltip shows event count
+    const title = container.querySelector('title');
+    expect(title).toBeInTheDocument();
+    expect(title!.textContent).toBe('4 events');
   });
 
   it('binary search limits rendering to visible events only', () => {
@@ -138,9 +140,11 @@ describe('TimelineSwimlane', () => {
       viewportHeight: 600,
       selectedEventId: events[1].id,
     });
-    // Selected event should have an extra circle with accent stroke
-    const accentCircles = container.querySelectorAll('circle[stroke="var(--accent)"]');
-    expect(accentCircles.length).toBe(1);
+    // Selected event should have a selection ring (stroke-width=2, not hover ring stroke-width=1.5)
+    const selectionRings = container.querySelectorAll(
+      'circle[stroke="var(--accent)"][stroke-width="2"]',
+    );
+    expect(selectionRings.length).toBe(1);
   });
 
   it('no selection ring when selectedEventId is null', () => {
@@ -152,8 +156,11 @@ describe('TimelineSwimlane', () => {
       viewportHeight: 600,
       selectedEventId: null,
     });
-    const accentCircles = container.querySelectorAll('circle[stroke="var(--accent)"]');
-    expect(accentCircles.length).toBe(0);
+    // Only hover rings (stroke-width=1.5) should exist, no selection rings (stroke-width=2)
+    const selectionRings = container.querySelectorAll(
+      'circle[stroke="var(--accent)"][stroke-width="2"]',
+    );
+    expect(selectionRings.length).toBe(0);
   });
 
   it('pattern events use purple fill', () => {
@@ -164,9 +171,9 @@ describe('TimelineSwimlane', () => {
       msPerPixel: 1,
       viewportHeight: 600,
     });
-    const circles = container.querySelectorAll('circle');
-    expect(circles.length).toBe(1);
-    expect(circles[0].getAttribute('fill')).toBe('var(--purple)');
+    // 2 circles: hover-ring (fill=none) + main (fill=purple)
+    const mainCircle = container.querySelector('circle[fill="var(--purple)"]');
+    expect(mainCircle).toBeInTheDocument();
   });
 
   it('rule events use rule-border color based on colorIndex', () => {
@@ -177,9 +184,9 @@ describe('TimelineSwimlane', () => {
       msPerPixel: 1,
       viewportHeight: 600,
     });
-    const circles = container.querySelectorAll('circle');
-    expect(circles.length).toBe(1);
-    expect(circles[0].getAttribute('fill')).toBe('var(--rule-border-3)');
+    // 2 circles: hover-ring (fill=none) + main (fill=rule-border-3)
+    const mainCircle = container.querySelector('circle[fill="var(--rule-border-3)"]');
+    expect(mainCircle).toBeInTheDocument();
   });
 
   // --- State annotations ---

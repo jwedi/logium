@@ -55,7 +55,7 @@ describe('TimelineView', () => {
     expect(screen.getByText('nginx.log')).toBeInTheDocument();
     expect(screen.getByText('app.log')).toBeInTheDocument();
     // Check lane counts via class selector to avoid collision with cluster badges
-    const laneCounts = container.querySelectorAll('.lane-count');
+    const laneCounts = container.querySelectorAll('.lane-count-badge');
     const countTexts = Array.from(laneCounts).map((el) => el.textContent);
     expect(countTexts).toContain('2');
     expect(countTexts).toContain('1');
