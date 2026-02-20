@@ -512,121 +512,123 @@
 
 <svelte:window onkeydown={onSearchKeydown} />
 
-<div class="log-viewer-wrapper">
-  <div class="log-viewer-column">
-    <div class="filter-bar">
-      <input bind:value={filterQuery} placeholder="Filter lines..." />
-      <button
-        class="search-toggle"
-        class:active={filterIsRegex}
-        onclick={() => (filterIsRegex = !filterIsRegex)}
-        title="Toggle filter regex">.*</button
-      >
-      <span class="filter-count">
-        {filterQuery ? `${baseFilteredIndices.length} of ${lines.length} lines` : ''}
-      </span>
-      {#if filterQuery}
-        <button
-          onclick={() => {
-            filterQuery = '';
-          }}
-          title="Clear filter">&#x2715;</button
-        >
-      {/if}
-      {#if filterQuery && lineMatchMap.size > 0}
-        <span class="context-controls">
-          <label title="Context lines around expanded matches">
-            Ctx:
-            <input
-              type="number"
-              min="1"
-              max="50"
-              bind:value={contextSize}
-              class="context-size-input"
-            />
-          </label>
-          <button onclick={expandAll} title="Expand all matches">&#x25BC; All</button>
-          <button onclick={collapseAll} title="Collapse all matches">&#x25B2; All</button>
-        </span>
-      {/if}
-    </div>
-    {#if searchOpen}
-      <div class="search-bar">
-        <input
-          bind:this={searchInput}
-          bind:value={searchQuery}
-          onkeydown={onSearchInputKeydown}
-          placeholder="Search..."
-        />
+<div class="log-viewer-root">
+  <div class="log-viewer-wrapper">
+    <div class="log-viewer-column">
+      <div class="filter-bar">
+        <input bind:value={filterQuery} placeholder="Filter lines..." />
         <button
           class="search-toggle"
-          class:active={searchIsRegex}
-          onclick={() => (searchIsRegex = !searchIsRegex)}
-          title="Toggle regex">.*</button
+          class:active={filterIsRegex}
+          onclick={() => (filterIsRegex = !filterIsRegex)}
+          title="Toggle filter regex">.*</button
         >
-        <span class="match-count">
-          {searchMatches.length > 0
-            ? `${currentMatchIdx + 1} of ${searchMatches.length}`
-            : searchQuery
-              ? 'No matches'
-              : ''}
+        <span class="filter-count">
+          {filterQuery ? `${baseFilteredIndices.length} of ${lines.length} lines` : ''}
         </span>
-        <button onclick={prevMatch} title="Previous match">&#x2191;</button>
-        <button onclick={nextMatch} title="Next match">&#x2193;</button>
-        <button onclick={closeSearch} title="Close search">&#x2715;</button>
+        {#if filterQuery}
+          <button
+            onclick={() => {
+              filterQuery = '';
+            }}
+            title="Clear filter">&#x2715;</button
+          >
+        {/if}
+        {#if filterQuery && lineMatchMap.size > 0}
+          <span class="context-controls">
+            <label title="Context lines around expanded matches">
+              Ctx:
+              <input
+                type="number"
+                min="1"
+                max="50"
+                bind:value={contextSize}
+                class="context-size-input"
+              />
+            </label>
+            <button onclick={expandAll} title="Expand all matches">&#x25BC; All</button>
+            <button onclick={collapseAll} title="Collapse all matches">&#x25B2; All</button>
+          </span>
+        {/if}
       </div>
-    {/if}
-
-    <div
-      class="log-viewer"
-      bind:this={container}
-      onscroll={onScroll}
-      onmouseup={onMouseUp}
-      role="log"
-    >
-      <div class="scroll-spacer" style="height: {totalHeight}px">
-        <div class="visible-lines" style="transform: translateY({offsetY}px)">
-          {#each visibleLines as entry, i}
-            {@const globalIdx = entry.origIdx}
-            {@const matches = lineMatchMap.get(globalIdx)}
-            <div
-              class="log-line"
-              class:highlighted={!!matches}
-              class:selected={selectedLineIdx === globalIdx}
-              class:context-line={contextLineSet.has(globalIdx)}
-              class:gap-before={entry.gapBefore}
-              class:current-search-match={searchMatches.length > 0 &&
-                filteredIndices[searchMatches[currentMatchIdx]] === globalIdx}
-              style={matches
-                ? `background: var(--rule-color-${getRuleColor(matches[0].ruleId)}); border-left: 3px solid var(--rule-border-${getRuleColor(matches[0].ruleId)})`
+      {#if searchOpen}
+        <div class="search-bar">
+          <input
+            bind:this={searchInput}
+            bind:value={searchQuery}
+            onkeydown={onSearchInputKeydown}
+            placeholder="Search..."
+          />
+          <button
+            class="search-toggle"
+            class:active={searchIsRegex}
+            onclick={() => (searchIsRegex = !searchIsRegex)}
+            title="Toggle regex">.*</button
+          >
+          <span class="match-count">
+            {searchMatches.length > 0
+              ? `${currentMatchIdx + 1} of ${searchMatches.length}`
+              : searchQuery
+                ? 'No matches'
                 : ''}
-              onclick={() => onLineClick(globalIdx)}
-              role="button"
-              tabindex="0"
-            >
-              {#if filterQuery && matches}
-                <button
-                  class="expand-toggle"
-                  onclick={(e) => toggleExpand(globalIdx, e)}
-                  title={expandedLines.has(globalIdx) ? 'Collapse context' : 'Expand context'}
-                  >{expandedLines.has(globalIdx) ? '\u25BC' : '\u25B6'}</button
-                >
-              {:else}
-                <span class="expand-spacer"></span>
-              {/if}
-              <span class="line-number">{globalIdx + 1}</span>
-              <span class="line-content"
-                >{#if filterQuery || searchMatchSet.has(globalIdx)}{#each splitLineByRegex(entry.text, filterRegex) as seg}{#if seg.isMatch}<mark
-                        class="filter-highlight"
-                        >{#if searchMatchSet.has(globalIdx)}{#each splitLineByRegex(seg.text, searchRegex) as sseg}{#if sseg.isMatch}<mark
-                                class="search-highlight">{sseg.text}</mark
-                              >{:else}{sseg.text}{/if}{/each}{:else}{seg.text}{/if}</mark
-                      >{:else if searchMatchSet.has(globalIdx)}{#each splitLineByRegex(seg.text, searchRegex) as sseg}{#if sseg.isMatch}<mark
-                            class="search-highlight">{sseg.text}</mark
-                          >{:else}{sseg.text}{/if}{/each}{:else}{seg.text}{/if}{/each}{:else}{entry.text}{/if}</span
+          </span>
+          <button onclick={prevMatch} title="Previous match">&#x2191;</button>
+          <button onclick={nextMatch} title="Next match">&#x2193;</button>
+          <button onclick={closeSearch} title="Close search">&#x2715;</button>
+        </div>
+      {/if}
+
+      <div
+        class="log-viewer"
+        bind:this={container}
+        onscroll={onScroll}
+        onmouseup={onMouseUp}
+        role="log"
+      >
+        <div class="scroll-spacer" style="height: {totalHeight}px">
+          <div class="visible-lines" style="transform: translateY({offsetY}px)">
+            {#each visibleLines as entry, i}
+              {@const globalIdx = entry.origIdx}
+              {@const matches = lineMatchMap.get(globalIdx)}
+              <div
+                class="log-line"
+                class:highlighted={!!matches}
+                class:selected={selectedLineIdx === globalIdx}
+                class:context-line={contextLineSet.has(globalIdx)}
+                class:gap-before={entry.gapBefore}
+                class:current-search-match={searchMatches.length > 0 &&
+                  filteredIndices[searchMatches[currentMatchIdx]] === globalIdx}
+                style={matches
+                  ? `background: var(--rule-color-${getRuleColor(matches[0].ruleId)}); border-left: 3px solid var(--rule-border-${getRuleColor(matches[0].ruleId)})`
+                  : ''}
+                onclick={() => onLineClick(globalIdx)}
+                role="button"
+                tabindex="0"
               >
-            </div>
-          {/each}
+                {#if filterQuery && matches}
+                  <button
+                    class="expand-toggle"
+                    onclick={(e) => toggleExpand(globalIdx, e)}
+                    title={expandedLines.has(globalIdx) ? 'Collapse context' : 'Expand context'}
+                    >{expandedLines.has(globalIdx) ? '\u25BC' : '\u25B6'}</button
+                  >
+                {:else}
+                  <span class="expand-spacer"></span>
+                {/if}
+                <span class="line-number">{globalIdx + 1}</span>
+                <span class="line-content"
+                  >{#if filterQuery || searchMatchSet.has(globalIdx)}{#each splitLineByRegex(entry.text, filterRegex) as seg}{#if seg.isMatch}<mark
+                          class="filter-highlight"
+                          >{#if searchMatchSet.has(globalIdx)}{#each splitLineByRegex(seg.text, searchRegex) as sseg}{#if sseg.isMatch}<mark
+                                  class="search-highlight">{sseg.text}</mark
+                                >{:else}{sseg.text}{/if}{/each}{:else}{seg.text}{/if}</mark
+                        >{:else if searchMatchSet.has(globalIdx)}{#each splitLineByRegex(seg.text, searchRegex) as sseg}{#if sseg.isMatch}<mark
+                              class="search-highlight">{sseg.text}</mark
+                            >{:else}{sseg.text}{/if}{/each}{:else}{seg.text}{/if}{/each}{:else}{entry.text}{/if}</span
+                >
+              </div>
+            {/each}
+          </div>
         </div>
       </div>
     </div>
@@ -704,10 +706,14 @@
 {/if}
 
 <style>
+  .log-viewer-root {
+    position: relative;
+    height: 100%;
+  }
+
   .log-viewer-wrapper {
     display: flex;
-    gap: 0;
-    height: calc(100vh - 200px);
+    height: 100%;
     min-height: 400px;
   }
 
@@ -773,15 +779,18 @@
   }
 
   .state-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
     width: 300px;
-    min-width: 300px;
+    max-height: calc(100vh - 160px);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-left: none;
-    border-radius: 0 var(--radius) var(--radius) 0;
+    border-radius: var(--radius);
     padding: 16px;
     overflow-y: auto;
-    position: relative;
+    z-index: 10;
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
   }
 
   .close-btn {
