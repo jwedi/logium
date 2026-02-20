@@ -35,7 +35,7 @@
   let running = $state(false);
   let error: string | null = $state(null);
   let selectedSourceId: number | null = $state(null);
-  let viewMode: 'table' | 'timeline' | 'state' | 'clusters' = $state('table');
+  let viewMode: 'table' | 'logs' | 'timeline' | 'state' | 'clusters' = $state('table');
   let linesProcessed: number = $state(0);
   let autoTriggered = $state(false);
   let currentHandle: { close: () => void } | null = $state(null);
@@ -166,7 +166,7 @@
   }
 
   function handleNavigate(sourceId: number, rawLine: string) {
-    viewMode = 'table';
+    viewMode = 'logs';
     selectedSourceId = sourceId;
     requestNavigate(rawLine);
   }
@@ -505,6 +505,13 @@
       }}>Table</button
     >
     <button
+      class:active={viewMode === 'logs'}
+      onclick={() => {
+        viewMode = 'logs';
+        navigateTarget = null;
+      }}>Logs</button
+    >
+    <button
       class:active={viewMode === 'timeline'}
       onclick={() => {
         viewMode = 'timeline';
@@ -528,6 +535,38 @@
   </div>
 
   {#if viewMode === 'table'}
+    {#if filteredResult.rule_matches.length > 0}
+      <EventDensityHistogram
+        ruleMatches={filteredResult.rule_matches}
+        onBucketClick={(match) => {
+          handleNavigate(match.source_id, match.log_line.raw);
+        }}
+      />
+    {/if}
+
+    {@render patternMatchesCompact()}
+
+    {@const visibleMatches = filteredResult.rule_matches}
+    {#if visibleMatches.length > 0}
+      <div class="rule-matches-section">
+        <h3>Rule Matches ({visibleMatches.length})</h3>
+        <div class="match-table">
+          {#each visibleMatches.slice(0, 100) as rm}
+            <div class="match-row">
+              <span class="badge">{getRuleName(rm.rule_id)}</span>
+              <span class="badge">{getSourceName(rm.source_id)}</span>
+              <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
+            </div>
+          {/each}
+          {#if visibleMatches.length > 100}
+            <div class="text-muted">
+              ...and {visibleMatches.length - 100} more matches
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
+  {:else if viewMode === 'logs'}
     {#if sourceList.length > 0}
       <div class="source-file-selector">
         <span class="source-file-label">Log File</span>
@@ -554,82 +593,28 @@
     {/if}
 
     {#if selectedSource}
-      <div class="split-layout">
-        <div class="split-top">
-          {#if sourceRuleMatches.length > 0}
-            <EventDensityHistogram
-              ruleMatches={sourceRuleMatches}
-              onBucketClick={(match) => {
-                requestNavigate(match.log_line.raw);
-              }}
-            />
-          {/if}
-          <div class="viewer-section">
-            <LogViewer
-              source={selectedSource}
-              {projectId}
-              ruleMatches={sourceRuleMatches}
-              patternMatches={filteredResult.pattern_matches}
-              stateChanges={result?.state_changes ?? []}
-              {navigateTarget}
-            />
-          </div>
-        </div>
-        <div class="split-bottom">
-          {@render patternMatchesCompact()}
-
-          {#if sourceRuleMatches.length > 0}
-            <div class="rule-matches-section">
-              <h3>Rule Matches ({sourceRuleMatches.length})</h3>
-              <div class="match-table">
-                {#each sourceRuleMatches.slice(0, 100) as rm}
-                  <div class="match-row">
-                    <span class="badge">{getRuleName(rm.rule_id)}</span>
-                    <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
-                  </div>
-                {/each}
-                {#if sourceRuleMatches.length > 100}
-                  <div class="text-muted">
-                    ...and {sourceRuleMatches.length - 100} more matches
-                  </div>
-                {/if}
-              </div>
-            </div>
-          {/if}
+      <div class="logs-view">
+        {#if sourceRuleMatches.length > 0}
+          <EventDensityHistogram
+            ruleMatches={sourceRuleMatches}
+            onBucketClick={(match) => {
+              requestNavigate(match.log_line.raw);
+            }}
+          />
+        {/if}
+        <div class="log-viewer-container">
+          <LogViewer
+            source={selectedSource}
+            {projectId}
+            ruleMatches={sourceRuleMatches}
+            patternMatches={filteredResult.pattern_matches}
+            stateChanges={result?.state_changes ?? []}
+            {navigateTarget}
+          />
         </div>
       </div>
     {:else}
-      {#if filteredResult.rule_matches.length > 0}
-        <EventDensityHistogram
-          ruleMatches={filteredResult.rule_matches}
-          onBucketClick={(match) => {
-            handleNavigate(match.source_id, match.log_line.raw);
-          }}
-        />
-      {/if}
-
-      {@render patternMatchesCompact()}
-
-      {@const visibleMatches = filteredResult.rule_matches}
-      {#if visibleMatches.length > 0}
-        <div class="rule-matches-section">
-          <h3>Rule Matches ({visibleMatches.length})</h3>
-          <div class="match-table">
-            {#each visibleMatches.slice(0, 100) as rm}
-              <div class="match-row">
-                <span class="badge">{getRuleName(rm.rule_id)}</span>
-                <span class="badge">{getSourceName(rm.source_id)}</span>
-                <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
-              </div>
-            {/each}
-            {#if visibleMatches.length > 100}
-              <div class="text-muted">
-                ...and {visibleMatches.length - 100} more matches
-              </div>
-            {/if}
-          </div>
-        </div>
-      {/if}
+      <div class="text-muted">Select a log source above</div>
     {/if}
   {:else if viewMode === 'timeline'}
     <TimelineView
@@ -864,38 +849,17 @@
     background: rgba(0, 0, 0, 0.2);
   }
 
-  .split-layout {
+  .logs-view {
     display: flex;
     flex-direction: column;
     height: calc(100vh - 300px);
     min-height: 400px;
   }
 
-  .split-top {
-    flex: 3;
-    min-height: 200px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .split-top .viewer-section {
+  .log-viewer-container {
     flex: 1;
     min-height: 0;
     overflow: hidden;
-  }
-
-  .split-bottom {
-    flex: 2;
-    min-height: 120px;
-    overflow-y: auto;
-    border-top: 1px solid var(--border);
-    padding-top: 12px;
-    margin-top: 8px;
-  }
-
-  .viewer-section {
-    margin-bottom: 24px;
   }
 
   .pattern-matches-section,
@@ -906,11 +870,6 @@
   .pm-compact-list {
     max-height: 500px;
     overflow-y: auto;
-  }
-
-  .split-bottom .pm-compact-list {
-    max-height: none;
-    overflow-y: visible;
   }
 
   .pm-compact-row {
