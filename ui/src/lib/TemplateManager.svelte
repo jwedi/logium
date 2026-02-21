@@ -6,6 +6,7 @@
     type TimestampTemplate,
   } from './api';
   import { validateRegex } from './regexUtils';
+  import RegexPresetDropdown from './RegexPresetDropdown.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -158,12 +159,22 @@
       <input type="text" bind:value={newLineDelimiter} />
     </div>
     <div class="field">
-      <label>Content Regex (optional)</label>
+      <label
+        >Content Regex (optional) <RegexPresetDropdown
+          fieldType="content_regex"
+          onSelect={(p) => (newContentRegex = p)}
+        /></label
+      >
       <input type="text" bind:value={newContentRegex} placeholder="Regex to extract content..." />
       {#if newContentRegexError}<span class="field-error">{newContentRegexError}</span>{/if}
     </div>
     <div class="field">
-      <label>Continuation Regex (optional)</label>
+      <label
+        >Continuation Regex (optional) <RegexPresetDropdown
+          fieldType="continuation_regex"
+          onSelect={(p) => (newContinuationRegex = p)}
+        /></label
+      >
       <input
         type="text"
         bind:value={newContinuationRegex}
@@ -181,12 +192,22 @@
       />
     </div>
     <div class="field">
-      <label>File Name Regex (optional)</label>
+      <label
+        >File Name Regex (optional) <RegexPresetDropdown
+          fieldType="file_name_regex"
+          onSelect={(p) => (newFileNameRegex = p)}
+        /></label
+      >
       <input type="text" bind:value={newFileNameRegex} placeholder="e.g. nginx.*\.log$" />
       {#if newFileNameRegexError}<span class="field-error">{newFileNameRegexError}</span>{/if}
     </div>
     <div class="field">
-      <label>Log Content Regex (optional)</label>
+      <label
+        >Log Content Regex (optional) <RegexPresetDropdown
+          fieldType="log_content_regex"
+          onSelect={(p) => (newLogContentRegex = p)}
+        /></label
+      >
       <input type="text" bind:value={newLogContentRegex} placeholder="e.g. ^\d+\.\d+\.\d+\.\d+ -" />
       {#if newLogContentRegexError}<span class="field-error">{newLogContentRegexError}</span>{/if}
     </div>
@@ -232,13 +253,27 @@
               <input type="text" bind:value={editing.line_delimiter} />
             </div>
             <div class="field">
-              <label>Content Regex</label>
+              <label
+                >Content Regex <RegexPresetDropdown
+                  fieldType="content_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.content_regex = p;
+                  }}
+                /></label
+              >
               <input type="text" bind:value={editing.content_regex} />
               {#if editContentRegexError}<span class="field-error">{editContentRegexError}</span
                 >{/if}
             </div>
             <div class="field">
-              <label>Continuation Regex</label>
+              <label
+                >Continuation Regex <RegexPresetDropdown
+                  fieldType="continuation_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.continuation_regex = p;
+                  }}
+                /></label
+              >
               <input type="text" bind:value={editing.continuation_regex} />
               {#if editContinuationRegexError}<span class="field-error"
                   >{editContinuationRegexError}</span
@@ -253,7 +288,14 @@
               />
             </div>
             <div class="field">
-              <label>File Name Regex</label>
+              <label
+                >File Name Regex <RegexPresetDropdown
+                  fieldType="file_name_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.file_name_regex = p;
+                  }}
+                /></label
+              >
               <input
                 type="text"
                 bind:value={editing.file_name_regex}
@@ -263,7 +305,14 @@
                 >{/if}
             </div>
             <div class="field">
-              <label>Log Content Regex</label>
+              <label
+                >Log Content Regex <RegexPresetDropdown
+                  fieldType="log_content_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.log_content_regex = p;
+                  }}
+                /></label
+              >
               <input
                 type="text"
                 bind:value={editing.log_content_regex}

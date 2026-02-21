@@ -1,6 +1,7 @@
 <script lang="ts">
   import { timestampTemplates as tsTemplatesApi, type TimestampTemplate } from './api';
   import { validateRegex } from './regexUtils';
+  import RegexPresetDropdown from './RegexPresetDropdown.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -97,7 +98,12 @@
       <input type="text" bind:value={newFormat} placeholder="e.g. %Y-%m-%dT%H:%M:%S" />
     </div>
     <div class="field">
-      <label>Extraction Regex (optional)</label>
+      <label
+        >Extraction Regex (optional) <RegexPresetDropdown
+          fieldType="extraction_regex"
+          onSelect={(p) => (newExtractionRegex = p)}
+        /></label
+      >
       <input
         type="text"
         bind:value={newExtractionRegex}
@@ -147,7 +153,14 @@
               <input type="text" bind:value={editing.format} />
             </div>
             <div class="field">
-              <label>Extraction Regex</label>
+              <label
+                >Extraction Regex <RegexPresetDropdown
+                  fieldType="extraction_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.extraction_regex = p;
+                  }}
+                /></label
+              >
               <input type="text" bind:value={editing.extraction_regex} />
               {#if editExtractionRegexError}<span class="field-error"
                   >{editExtractionRegexError}</span

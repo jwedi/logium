@@ -675,15 +675,9 @@ Added `validateRegex()` to `regexUtils.ts` (returns null if valid, error string 
 
 ---
 
-### 54. Common Pattern Presets for Template Fields
+### 54. Common Pattern Presets for Template Fields — Done
 
-Dropdown of common patterns next to each template regex field. User selects a preset as a starting point, then tweaks. Examples:
-- **Continuation**: `^\s+` (indented), `^\t` (tab), `^Caused by:`, `^\s+at\s+` (Java stack)
-- **Extraction regex**: `\[([^\]]+)\]` (bracketed), `^(\S+)` (first token)
-- **Content regex**: `^\S+\s+(.*)` (skip first token), `^\[.*?\]\s+(.*)` (skip bracketed prefix)
-- **File name**: `nginx.*\.log$`, `syslog.*`, `\.json$`
-
-UI-only — no backend changes.
+Added "Presets" dropdown buttons next to each regex field in TemplateManager (8 instances: 4 create + 4 edit) and TimestampTemplateManager (2 instances: 1 create + 1 edit). Created `regexPresets.ts` with preset data for 5 field types (continuation, extraction, content, file_name, log_content) and `RegexPresetDropdown.svelte` reusable component. Added 8 new tests across 3 test files.
 
 ---
 

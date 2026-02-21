@@ -88,3 +88,20 @@ describe('TimestampTemplateManager regex validation', () => {
     });
   });
 });
+
+describe('TimestampTemplateManager regex presets', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(tsTemplatesApi.list).mockResolvedValue([]);
+  });
+
+  it('shows 1 preset button in create form', async () => {
+    renderTimestampTemplateManager();
+    await tick();
+
+    await waitFor(() => {
+      const presetButtons = screen.getAllByText(/Presets/);
+      expect(presetButtons.length).toBe(1);
+    });
+  });
+});

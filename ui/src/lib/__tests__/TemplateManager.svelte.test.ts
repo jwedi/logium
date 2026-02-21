@@ -106,3 +106,41 @@ describe('TemplateManager regex validation', () => {
     });
   });
 });
+
+describe('TemplateManager regex presets', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(templatesApi.list).mockResolvedValue([]);
+    vi.mocked(tsTemplatesApi.list).mockResolvedValue([
+      { id: 1, name: 'ISO', format: '%Y-%m-%d', extraction_regex: null, default_year: null },
+    ]);
+  });
+
+  it('shows 4 preset buttons in create form', async () => {
+    renderTemplateManager();
+    await tick();
+
+    await waitFor(() => {
+      const presetButtons = screen.getAllByText(/Presets/);
+      expect(presetButtons.length).toBe(4);
+    });
+  });
+
+  it('selecting a preset fills the input value', async () => {
+    renderTemplateManager();
+    await tick();
+
+    const presetButtons = screen.getAllByText(/Presets/);
+    // Click the first preset button (Content Regex)
+    await fireEvent.click(presetButtons[0]);
+
+    // Click the first preset item
+    const presetItem = screen.getByText('Skip first token');
+    await fireEvent.click(presetItem);
+
+    await waitFor(() => {
+      const input = screen.getByPlaceholderText('Regex to extract content...');
+      expect(input).toHaveValue('^\\S+\\s+(.*)');
+    });
+  });
+});
