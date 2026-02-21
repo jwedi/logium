@@ -161,6 +161,11 @@ export interface ClusterResult {
   total_lines: number;
 }
 
+export interface RawLinesResponse {
+  lines: string[];
+  total_lines: number;
+}
+
 export interface TimeRange {
   start: string | null;
   end: string | null;
@@ -271,6 +276,10 @@ export const sources = {
   },
   delete: (pid: number, id: number) =>
     request<void>(`/projects/${pid}/sources/${id}`, { method: 'DELETE' }),
+  rawLines: (pid: number, id: number, offset = 0, limit = 200) => {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    return request<RawLinesResponse>(`/projects/${pid}/sources/${id}/raw-lines?${params}`);
+  },
 };
 
 // Rules

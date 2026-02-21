@@ -7,6 +7,7 @@
   } from './api';
   import { validateRegex } from './regexUtils';
   import RegexPresetDropdown from './RegexPresetDropdown.svelte';
+  import RegexTestInput from './RegexTestInput.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -167,6 +168,7 @@
       >
       <input type="text" bind:value={newContentRegex} placeholder="Regex to extract content..." />
       {#if newContentRegexError}<span class="field-error">{newContentRegexError}</span>{/if}
+      <RegexTestInput pattern={newContentRegex} {projectId} />
     </div>
     <div class="field">
       <label
@@ -182,6 +184,7 @@
       />
       {#if newContinuationRegexError}<span class="field-error">{newContinuationRegexError}</span
         >{/if}
+      <RegexTestInput pattern={newContinuationRegex} {projectId} />
     </div>
     <div class="field">
       <label>JSON Timestamp Field (optional)</label>
@@ -200,6 +203,7 @@
       >
       <input type="text" bind:value={newFileNameRegex} placeholder="e.g. nginx.*\.log$" />
       {#if newFileNameRegexError}<span class="field-error">{newFileNameRegexError}</span>{/if}
+      <RegexTestInput pattern={newFileNameRegex} {projectId} />
     </div>
     <div class="field">
       <label
@@ -210,6 +214,7 @@
       >
       <input type="text" bind:value={newLogContentRegex} placeholder="e.g. ^\d+\.\d+\.\d+\.\d+ -" />
       {#if newLogContentRegexError}<span class="field-error">{newLogContentRegexError}</span>{/if}
+      <RegexTestInput pattern={newLogContentRegex} {projectId} />
     </div>
   </div>
   <div class="actions">
@@ -264,6 +269,7 @@
               <input type="text" bind:value={editing.content_regex} />
               {#if editContentRegexError}<span class="field-error">{editContentRegexError}</span
                 >{/if}
+              <RegexTestInput pattern={editing.content_regex ?? ''} {projectId} />
             </div>
             <div class="field">
               <label
@@ -278,6 +284,7 @@
               {#if editContinuationRegexError}<span class="field-error"
                   >{editContinuationRegexError}</span
                 >{/if}
+              <RegexTestInput pattern={editing.continuation_regex ?? ''} {projectId} />
             </div>
             <div class="field">
               <label>JSON Timestamp Field</label>
@@ -303,6 +310,7 @@
               />
               {#if editFileNameRegexError}<span class="field-error">{editFileNameRegexError}</span
                 >{/if}
+              <RegexTestInput pattern={editing.file_name_regex ?? ''} {projectId} />
             </div>
             <div class="field">
               <label
@@ -321,6 +329,7 @@
               {#if editLogContentRegexError}<span class="field-error"
                   >{editLogContentRegexError}</span
                 >{/if}
+              <RegexTestInput pattern={editing.log_content_regex ?? ''} {projectId} />
             </div>
           </div>
           <div class="actions">

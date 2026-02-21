@@ -2,6 +2,7 @@
   import { timestampTemplates as tsTemplatesApi, type TimestampTemplate } from './api';
   import { validateRegex } from './regexUtils';
   import RegexPresetDropdown from './RegexPresetDropdown.svelte';
+  import RegexTestInput from './RegexTestInput.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -110,6 +111,7 @@
         placeholder="Regex to extract timestamp from line..."
       />
       {#if newExtractionRegexError}<span class="field-error">{newExtractionRegexError}</span>{/if}
+      <RegexTestInput pattern={newExtractionRegex} {projectId} />
     </div>
     <div class="field">
       <label>Default Year (optional)</label>
@@ -165,6 +167,7 @@
               {#if editExtractionRegexError}<span class="field-error"
                   >{editExtractionRegexError}</span
                 >{/if}
+              <RegexTestInput pattern={editing.extraction_regex ?? ''} {projectId} />
             </div>
             <div class="field">
               <label>Default Year</label>

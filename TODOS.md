@@ -681,18 +681,6 @@ Added "Presets" dropdown buttons next to each regex field in TemplateManager (8 
 
 ---
 
-### 55. Inline Test-Against-Sample for Template Regex Fields + Raw File Viewer
+### 55. Inline Test-Against-Sample for Template Regex Fields + Raw File Viewer — Done
 
-Add a collapsible "Test" section below each regex field in TimestampTemplateManager and TemplateManager. User pastes a sample line, sees what the regex captures (or why it fails) — same pattern as RuleEditor's single-line test.
-
-Additionally, add a "Get sample from file" button that opens a **Raw File Viewer** modal. The modal lets the user pick a log file, displays unprocessed lines, and allows selecting text to use as the sample input. This solves the chicken-and-egg problem: users need to see log content to write regexes, but Logium currently requires templates to be configured before it can display log content.
-
-**Raw File Viewer details:**
-- **New component**: `ui/src/lib/RawFileViewer.svelte` — reusable modal accepting `onSelect: (text: string) => void` callback
-- **New endpoint**: `GET /api/projects/:pid/raw-lines` with `source_id` (existing source) or `file_path` (arbitrary) param. Returns `{ lines: string[], total_lines?: number }`. Paginate with `offset` and `limit` (default 200) so large files don't choke the modal
-- **Quick-pick sources**: If the project has configured sources, show them as buttons at the top (no file browsing needed). Below that, offer a file path input for new/unconfigured files
-- **Line display**: Monospace with line numbers (like LogViewer). Default first 200 lines. "Load more" button for pagination
-- **Text selection**: Browser-native selection + floating "Use as sample" button (positioned near the selection via `mouseup` + `window.getSelection()`). Also a per-line "Use" icon on hover for the common whole-line case
-- **Multi-purpose**: Same modal can serve TimestampTemplateManager, TemplateManager, and potentially RuleEditor
-
-**Integration points:** TimestampTemplateManager, TemplateManager (after test inputs are added)
+Added `RegexTestInput.svelte` component with collapsible "Test" section: paste a sample line, see match/no-match verdict with captured groups (reuses `testPattern()` from regexUtils). Added `RawFileViewer.svelte` modal for browsing raw log files with source picker, line numbers, pagination, and per-line "Use" buttons. New backend endpoint `GET /api/projects/{pid}/sources/{id}/raw-lines` with offset/limit pagination using streaming BufReader. Integrated RegexTestInput into TemplateManager (8 instances: 4 regex fields × create+edit) and TimestampTemplateManager (2 instances: extraction_regex × create+edit). Added tests for all new components and the backend endpoint.

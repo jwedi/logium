@@ -10,6 +10,10 @@ vi.mock('../api', () => ({
     update: vi.fn(),
     delete: vi.fn(),
   },
+  sources: {
+    list: vi.fn().mockResolvedValue([]),
+    rawLines: vi.fn().mockResolvedValue({ lines: [], total_lines: 0 }),
+  },
 }));
 
 import { timestampTemplates as tsTemplatesApi } from '../api';
@@ -85,6 +89,23 @@ describe('TimestampTemplateManager regex validation', () => {
     await waitFor(() => {
       const errors = document.querySelectorAll('.field-error');
       expect(errors.length).toBe(0);
+    });
+  });
+});
+
+describe('TimestampTemplateManager regex test inputs', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(tsTemplatesApi.list).mockResolvedValue([]);
+  });
+
+  it('shows 1 Test button in create form', async () => {
+    renderTimestampTemplateManager();
+    await tick();
+
+    await waitFor(() => {
+      const testButtons = screen.getAllByText('Test');
+      expect(testButtons.length).toBe(1);
     });
   });
 });

@@ -13,6 +13,10 @@ vi.mock('../api', () => ({
   timestampTemplates: {
     list: vi.fn().mockResolvedValue([{ id: 1, name: 'ISO', format: '%Y-%m-%d' }]),
   },
+  sources: {
+    list: vi.fn().mockResolvedValue([]),
+    rawLines: vi.fn().mockResolvedValue({ lines: [], total_lines: 0 }),
+  },
 }));
 
 import { templates as templatesApi, timestampTemplates as tsTemplatesApi } from '../api';
@@ -103,6 +107,26 @@ describe('TemplateManager regex validation', () => {
 
     await waitFor(() => {
       expect(document.querySelectorAll('.field-error').length).toBe(0);
+    });
+  });
+});
+
+describe('TemplateManager regex test inputs', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(templatesApi.list).mockResolvedValue([]);
+    vi.mocked(tsTemplatesApi.list).mockResolvedValue([
+      { id: 1, name: 'ISO', format: '%Y-%m-%d', extraction_regex: null, default_year: null },
+    ]);
+  });
+
+  it('shows 4 Test buttons in create form', async () => {
+    renderTemplateManager();
+    await tick();
+
+    await waitFor(() => {
+      const testButtons = screen.getAllByText('Test');
+      expect(testButtons.length).toBe(4);
     });
   });
 });
