@@ -684,3 +684,11 @@ Added "Presets" dropdown buttons next to each regex field in TemplateManager (8 
 ### 55. Inline Test-Against-Sample for Template Regex Fields + Raw File Viewer — Done
 
 Added `RegexTestInput.svelte` component with collapsible "Test" section: paste a sample line, see match/no-match verdict with captured groups (reuses `testPattern()` from regexUtils). Added `RawFileViewer.svelte` modal for browsing raw log files with source picker, line numbers, pagination, and per-line "Use" buttons. New backend endpoint `GET /api/projects/{pid}/sources/{id}/raw-lines` with offset/limit pagination using streaming BufReader. Integrated RegexTestInput into TemplateManager (8 instances: 4 regex fields × create+edit) and TimestampTemplateManager (2 instances: extraction_regex × create+edit). Added tests for all new components and the backend endpoint.
+
+---
+
+### 56. Strftime Format Test Input for Timestamp Templates
+
+**Status:** Done
+
+Added `test_timestamp_format()` public function to `logium-core::engine` that encapsulates the full timestamp parsing pipeline (extraction regex → parse → prefix parse → yearless fallback). New `POST /api/projects/:pid/timestamp-templates/test-format` endpoint in the server. Frontend `FormatTestInput.svelte` component follows the same UX pattern as `RegexTestInput`: collapsible "Test" section, paste a sample line or browse via RawFileViewer, 300ms debounced API call, shows parsed timestamp (green) or error (red). Integrated into both create and edit forms in `TimestampTemplateManager.svelte`. 5 Rust engine tests, 2 server deserialization tests, 4 frontend component tests.

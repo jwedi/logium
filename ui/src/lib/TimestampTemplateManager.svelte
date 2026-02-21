@@ -3,6 +3,8 @@
   import { validateRegex } from './regexUtils';
   import RegexPresetDropdown from './RegexPresetDropdown.svelte';
   import RegexTestInput from './RegexTestInput.svelte';
+  import FormatTestInput from './FormatTestInput.svelte';
+  import FormatPresetDropdown from './FormatPresetDropdown.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -95,8 +97,14 @@
       <input type="text" bind:value={newName} placeholder="e.g. ISO 8601, Syslog..." />
     </div>
     <div class="field">
-      <label>Format (strftime)</label>
+      <label>Format (strftime) <FormatPresetDropdown onSelect={(p) => (newFormat = p)} /></label>
       <input type="text" bind:value={newFormat} placeholder="e.g. %Y-%m-%dT%H:%M:%S" />
+      <FormatTestInput
+        format={newFormat}
+        extractionRegex={newExtractionRegex}
+        defaultYear={newDefaultYear}
+        {projectId}
+      />
     </div>
     <div class="field">
       <label
@@ -151,8 +159,20 @@
               <input type="text" bind:value={editing.name} />
             </div>
             <div class="field">
-              <label>Format (strftime)</label>
+              <label
+                >Format (strftime) <FormatPresetDropdown
+                  onSelect={(p) => {
+                    if (editing) editing.format = p;
+                  }}
+                /></label
+              >
               <input type="text" bind:value={editing.format} />
+              <FormatTestInput
+                format={editing.format}
+                extractionRegex={editing.extraction_regex ?? ''}
+                defaultYear={editing.default_year?.toString() ?? ''}
+                {projectId}
+              />
             </div>
             <div class="field">
               <label

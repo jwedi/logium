@@ -9,6 +9,7 @@ vi.mock('../api', () => ({
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
+    testFormat: vi.fn().mockResolvedValue({ parsed_timestamp: '2024-01-15 10:30:45' }),
   },
   sources: {
     list: vi.fn().mockResolvedValue([]),
@@ -99,13 +100,13 @@ describe('TimestampTemplateManager regex test inputs', () => {
     vi.mocked(tsTemplatesApi.list).mockResolvedValue([]);
   });
 
-  it('shows 1 Test button in create form', async () => {
+  it('shows 2 Test buttons in create form (regex + format)', async () => {
     renderTimestampTemplateManager();
     await tick();
 
     await waitFor(() => {
       const testButtons = screen.getAllByText('Test');
-      expect(testButtons.length).toBe(1);
+      expect(testButtons.length).toBe(2);
     });
   });
 });
@@ -116,13 +117,13 @@ describe('TimestampTemplateManager regex presets', () => {
     vi.mocked(tsTemplatesApi.list).mockResolvedValue([]);
   });
 
-  it('shows 1 preset button in create form', async () => {
+  it('shows 2 preset buttons in create form (regex + format)', async () => {
     renderTimestampTemplateManager();
     await tick();
 
     await waitFor(() => {
       const presetButtons = screen.getAllByText(/Presets/);
-      expect(presetButtons.length).toBe(1);
+      expect(presetButtons.length).toBe(2);
     });
   });
 });

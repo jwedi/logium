@@ -1,8 +1,10 @@
-export interface RegexPreset {
+export interface Preset {
   label: string;
   pattern: string;
   description: string;
 }
+
+export type RegexPreset = Preset;
 
 export type RegexFieldType =
   | 'continuation_regex'
@@ -65,3 +67,46 @@ export const REGEX_PRESETS: Record<RegexFieldType, RegexPreset[]> = {
     },
   ],
 };
+
+export const FORMAT_PRESETS: Preset[] = [
+  {
+    label: 'ISO 8601',
+    pattern: '%Y-%m-%dT%H:%M:%S',
+    description: '2024-01-15T10:30:45',
+  },
+  {
+    label: 'ISO 8601 (space)',
+    pattern: '%Y-%m-%d %H:%M:%S',
+    description: '2024-01-15 10:30:45',
+  },
+  {
+    label: 'ISO 8601 (millis)',
+    pattern: '%Y-%m-%dT%H:%M:%S%.3f',
+    description: '2024-01-15T10:30:45.123',
+  },
+  {
+    label: 'Syslog (yearless)',
+    pattern: '%b %d %H:%M:%S',
+    description: 'Jan 15 10:30:45 (needs default year)',
+  },
+  {
+    label: 'Nginx / CLF',
+    pattern: '%d/%b/%Y:%H:%M:%S',
+    description: '15/Jan/2024:10:30:45',
+  },
+  {
+    label: 'Date only',
+    pattern: '%Y-%m-%d',
+    description: '2024-01-15',
+  },
+  {
+    label: 'US date + time',
+    pattern: '%m/%d/%Y %H:%M:%S',
+    description: '01/15/2024 10:30:45',
+  },
+  {
+    label: 'European date + time',
+    pattern: '%d.%m.%Y %H:%M:%S',
+    description: '15.01.2024 10:30:45',
+  },
+];

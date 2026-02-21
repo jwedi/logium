@@ -238,6 +238,19 @@ export const timestampTemplates = {
     }),
   delete: (pid: number, id: number) =>
     request<void>(`/projects/${pid}/timestamp-templates/${id}`, { method: 'DELETE' }),
+  testFormat: (
+    pid: number,
+    data: {
+      format: string;
+      sample: string;
+      extraction_regex?: string | null;
+      default_year?: number | null;
+    },
+  ) =>
+    request<{ parsed_timestamp: string }>(`/projects/${pid}/timestamp-templates/test-format`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // Templates
