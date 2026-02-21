@@ -669,16 +669,9 @@ Help users write correct regexes for timestamp templates, source templates, and 
 
 ---
 
-### 53. Regex Validation on All Input Fields
+### 53. Regex Validation on All Input Fields — Done
 
-Validate every regex field on blur/change, show inline error if it doesn't compile. Currently TimestampTemplateManager, TemplateManager, and LogViewer filter all fail silently or at runtime.
-
-Fields to validate:
-- `extraction_regex` (TimestampTemplateManager)
-- `content_regex`, `continuation_regex`, `file_name_regex`, `log_content_regex` (TemplateManager)
-- Search/filter input (LogViewer)
-
-**Implementation:** Client-side only — try `new RegExp(value)` on input, display error message below the field if it throws. Add a shared `validateRegex()` helper to `regexUtils.ts`.
+Added `validateRegex()` to `regexUtils.ts` (returns null if valid, error string if invalid, handles `(?P<>)` syntax). Added inline error display and button disabling on all regex fields in TemplateManager (4 fields, create + edit forms), TimestampTemplateManager (extraction_regex, create + edit), and LogViewer (filter + search bars in regex mode). Added unit tests for `validateRegex` and component tests for both template managers.
 
 ---
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectGroups, toJsRegex, testPattern } from '../regexUtils';
+import { detectGroups, toJsRegex, testPattern, validateRegex } from '../regexUtils';
 
 describe('detectGroups', () => {
   it('finds JS-style named groups', () => {
@@ -80,5 +80,45 @@ describe('testPattern', () => {
     expect(result.status).toBe('match');
     // The group captures an empty string
     expect(result.groups).toEqual({ opt: '' });
+  });
+});
+
+describe('validateRegex', () => {
+  it('returns null for valid simple regex', () => {
+    expect(validateRegex('ERROR \\d+')).toBeNull();
+  });
+
+  it('returns null for valid JS named groups', () => {
+    expect(validateRegex('(?<name>\\w+)')).toBeNull();
+  });
+
+  it('returns null for valid Rust/Python named groups', () => {
+    expect(validateRegex('(?P<host>[^ ]+) (?P<code>\\d+)')).toBeNull();
+  });
+
+  it('returns null for empty string', () => {
+    expect(validateRegex('')).toBeNull();
+  });
+
+  it('returns null for whitespace-only string', () => {
+    expect(validateRegex('   ')).toBeNull();
+  });
+
+  it('returns error string for unclosed group', () => {
+    const result = validateRegex('(unclosed');
+    expect(result).toBeTypeOf('string');
+    expect(result).toMatch(/Invalid regular expression/);
+  });
+
+  it('returns error string for unbalanced bracket', () => {
+    const result = validateRegex('[abc');
+    expect(result).toBeTypeOf('string');
+    expect(result).toMatch(/Invalid regular expression/);
+  });
+
+  it('returns null for common template patterns', () => {
+    expect(validateRegex('^\\s+')).toBeNull();
+    expect(validateRegex('nginx.*\\.log$')).toBeNull();
+    expect(validateRegex('^\\d+\\.\\d+\\.\\d+\\.\\d+ -')).toBeNull();
   });
 });

@@ -55,3 +55,19 @@ export function testPattern(pattern: string, text: string): RegexTestResult {
     return { status: 'error', message: `Invalid regex: ${e.message}`, groups: {} };
   }
 }
+
+/**
+ * Validates whether a regex pattern compiles successfully.
+ * Handles Rust/Python (?P<name>) syntax by converting to JS (?<name>).
+ * Returns null if valid, or an error message string if invalid.
+ * Empty/whitespace-only patterns are considered valid (fields are optional).
+ */
+export function validateRegex(pattern: string): string | null {
+  if (!pattern.trim()) return null;
+  try {
+    new RegExp(toJsRegex(pattern));
+    return null;
+  } catch (e: any) {
+    return e.message;
+  }
+}

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { timestampTemplates as tsTemplatesApi, type TimestampTemplate } from './api';
+  import { validateRegex } from './regexUtils';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -11,6 +12,12 @@
   let newFormat = $state('');
   let newExtractionRegex = $state('');
   let newDefaultYear = $state('');
+
+  let newExtractionRegexError = $derived(validateRegex(newExtractionRegex));
+  let editExtractionRegexError = $derived.by(() => {
+    const e = editing;
+    return e ? validateRegex(e.extraction_regex ?? '') : null;
+  });
 
   async function load() {
     loading = true;
@@ -96,6 +103,7 @@
         bind:value={newExtractionRegex}
         placeholder="Regex to extract timestamp from line..."
       />
+      {#if newExtractionRegexError}<span class="field-error">{newExtractionRegexError}</span>{/if}
     </div>
     <div class="field">
       <label>Default Year (optional)</label>
@@ -107,8 +115,10 @@
     </div>
   </div>
   <div class="actions">
-    <button class="primary" onclick={create} disabled={!newName.trim() || !newFormat.trim()}
-      >Create</button
+    <button
+      class="primary"
+      onclick={create}
+      disabled={!newName.trim() || !newFormat.trim() || !!newExtractionRegexError}>Create</button
     >
   </div>
 </div>
@@ -139,6 +149,9 @@
             <div class="field">
               <label>Extraction Regex</label>
               <input type="text" bind:value={editing.extraction_regex} />
+              {#if editExtractionRegexError}<span class="field-error"
+                  >{editExtractionRegexError}</span
+                >{/if}
             </div>
             <div class="field">
               <label>Default Year</label>
@@ -146,7 +159,9 @@
             </div>
           </div>
           <div class="actions">
-            <button class="primary" onclick={update}>Save</button>
+            <button class="primary" onclick={update} disabled={!!editExtractionRegexError}
+              >Save</button
+            >
             <button onclick={() => (editing = null)}>Cancel</button>
           </div>
         {:else}
@@ -226,5 +241,12 @@
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+  }
+
+  .field-error {
+    font-size: 11px;
+    color: var(--red);
+    margin-top: 2px;
+    font-family: var(--font-mono);
   }
 </style>
