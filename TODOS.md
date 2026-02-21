@@ -660,3 +660,52 @@ Removed confusing count numbers from cluster dots. Cluster radius now scales log
 **Status:** Done
 
 (a) Pattern bands: increased height to 5px, opacity to 0.35, added diamond markers at lane intersections, pattern labels moved to axis gutter with pill styling. (b) Lane headers: added bottom border, count shown in pill badge, increased font size to 12px. (c) Dot hover: added hover-ring circle with accent stroke that fades in on hover. (d) Lane dividers: added vertical separator lines between lanes. (e) Zoom controls: styled as a card with background/border/radius, positioned to the right with sticky behavior.
+
+---
+
+## Regex Assistance
+
+Help users write correct regexes for timestamp templates, source templates, and rules. Currently RuleCreator has auto-suggest + dry-run, but TimestampTemplateManager, TemplateManager, and LogViewer filter fields are bare text inputs with zero feedback.
+
+---
+
+### 53. Regex Validation on All Input Fields
+
+Validate every regex field on blur/change, show inline error if it doesn't compile. Currently TimestampTemplateManager, TemplateManager, and LogViewer filter all fail silently or at runtime.
+
+Fields to validate:
+- `extraction_regex` (TimestampTemplateManager)
+- `content_regex`, `continuation_regex`, `file_name_regex`, `log_content_regex` (TemplateManager)
+- Search/filter input (LogViewer)
+
+**Implementation:** Client-side only — try `new RegExp(value)` on input, display error message below the field if it throws. Add a shared `validateRegex()` helper to `regexUtils.ts`.
+
+---
+
+### 54. Common Pattern Presets for Template Fields
+
+Dropdown of common patterns next to each template regex field. User selects a preset as a starting point, then tweaks. Examples:
+- **Continuation**: `^\s+` (indented), `^\t` (tab), `^Caused by:`, `^\s+at\s+` (Java stack)
+- **Extraction regex**: `\[([^\]]+)\]` (bracketed), `^(\S+)` (first token)
+- **Content regex**: `^\S+\s+(.*)` (skip first token), `^\[.*?\]\s+(.*)` (skip bracketed prefix)
+- **File name**: `nginx.*\.log$`, `syslog.*`, `\.json$`
+
+UI-only — no backend changes.
+
+---
+
+### 55. Inline Test-Against-Sample for Template Regex Fields + Raw File Viewer
+
+Add a collapsible "Test" section below each regex field in TimestampTemplateManager and TemplateManager. User pastes a sample line, sees what the regex captures (or why it fails) — same pattern as RuleEditor's single-line test.
+
+Additionally, add a "Get sample from file" button that opens a **Raw File Viewer** modal. The modal lets the user pick a log file, displays unprocessed lines, and allows selecting text to use as the sample input. This solves the chicken-and-egg problem: users need to see log content to write regexes, but Logium currently requires templates to be configured before it can display log content.
+
+**Raw File Viewer details:**
+- **New component**: `ui/src/lib/RawFileViewer.svelte` — reusable modal accepting `onSelect: (text: string) => void` callback
+- **New endpoint**: `GET /api/projects/:pid/raw-lines` with `source_id` (existing source) or `file_path` (arbitrary) param. Returns `{ lines: string[], total_lines?: number }`. Paginate with `offset` and `limit` (default 200) so large files don't choke the modal
+- **Quick-pick sources**: If the project has configured sources, show them as buttons at the top (no file browsing needed). Below that, offer a file path input for new/unconfigured files
+- **Line display**: Monospace with line numbers (like LogViewer). Default first 200 lines. "Load more" button for pagination
+- **Text selection**: Browser-native selection + floating "Use as sample" button (positioned near the selection via `mouseup` + `window.getSelection()`). Also a per-line "Use" icon on hover for the common whole-line case
+- **Multi-purpose**: Same modal can serve TimestampTemplateManager, TemplateManager, and potentially RuleEditor
+
+**Integration points:** TimestampTemplateManager, TemplateManager (after test inputs are added)
