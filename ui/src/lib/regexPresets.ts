@@ -1,0 +1,112 @@
+export interface Preset {
+  label: string;
+  pattern: string;
+  description: string;
+}
+
+export type RegexPreset = Preset;
+
+export type RegexFieldType =
+  | 'continuation_regex'
+  | 'extraction_regex'
+  | 'content_regex'
+  | 'file_name_regex'
+  | 'log_content_regex';
+
+export const REGEX_PRESETS: Record<RegexFieldType, RegexPreset[]> = {
+  continuation_regex: [
+    { label: 'Indented', pattern: '^\\s+', description: 'Lines starting with whitespace' },
+    { label: 'Tab-indented', pattern: '^\\t', description: 'Lines starting with a tab' },
+    { label: 'Caused by', pattern: '^Caused by:', description: 'Java/Python chained exceptions' },
+    {
+      label: 'Java stack trace',
+      pattern: '^\\s+at\\s+',
+      description: 'Java stack trace frames',
+    },
+  ],
+  extraction_regex: [
+    {
+      label: 'Bracketed',
+      pattern: '\\[([^\\]]+)\\]',
+      description: 'Content inside square brackets',
+    },
+    { label: 'First token', pattern: '^(\\S+)', description: 'First non-whitespace token' },
+  ],
+  content_regex: [
+    {
+      label: 'Skip first token',
+      pattern: '^\\S+\\s+(.*)',
+      description: 'Everything after the first token',
+    },
+    {
+      label: 'Skip bracketed prefix',
+      pattern: '^\\[.*?\\]\\s+(.*)',
+      description: 'Everything after a [bracketed] prefix',
+    },
+  ],
+  file_name_regex: [
+    { label: 'Nginx logs', pattern: 'nginx.*\\.log$', description: 'Nginx log files' },
+    { label: 'Syslog', pattern: 'syslog.*', description: 'Syslog files' },
+    { label: 'JSON files', pattern: '\\.json$', description: 'JSON log files' },
+  ],
+  log_content_regex: [
+    {
+      label: 'Syslog format',
+      pattern: '^\\w+\\s+\\d+\\s+[\\d:]+',
+      description: 'Month day time (e.g. Jan 15 10:30:00)',
+    },
+    {
+      label: 'ISO date prefix',
+      pattern: '^\\d{4}-\\d{2}-\\d{2}',
+      description: 'Lines starting with YYYY-MM-DD',
+    },
+    {
+      label: 'IP prefix',
+      pattern: '^\\d+\\.\\d+\\.\\d+\\.\\d+',
+      description: 'Lines starting with an IP address',
+    },
+  ],
+};
+
+export const FORMAT_PRESETS: Preset[] = [
+  {
+    label: 'ISO 8601',
+    pattern: '%Y-%m-%dT%H:%M:%S',
+    description: '2024-01-15T10:30:45',
+  },
+  {
+    label: 'ISO 8601 (space)',
+    pattern: '%Y-%m-%d %H:%M:%S',
+    description: '2024-01-15 10:30:45',
+  },
+  {
+    label: 'ISO 8601 (millis)',
+    pattern: '%Y-%m-%dT%H:%M:%S%.3f',
+    description: '2024-01-15T10:30:45.123',
+  },
+  {
+    label: 'Syslog (yearless)',
+    pattern: '%b %d %H:%M:%S',
+    description: 'Jan 15 10:30:45 (needs default year)',
+  },
+  {
+    label: 'Nginx / CLF',
+    pattern: '%d/%b/%Y:%H:%M:%S',
+    description: '15/Jan/2024:10:30:45',
+  },
+  {
+    label: 'Date only',
+    pattern: '%Y-%m-%d',
+    description: '2024-01-15',
+  },
+  {
+    label: 'US date + time',
+    pattern: '%m/%d/%Y %H:%M:%S',
+    description: '01/15/2024 10:30:45',
+  },
+  {
+    label: 'European date + time',
+    pattern: '%d.%m.%Y %H:%M:%S',
+    description: '15.01.2024 10:30:45',
+  },
+];

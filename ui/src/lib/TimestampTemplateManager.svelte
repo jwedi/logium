@@ -1,5 +1,10 @@
 <script lang="ts">
   import { timestampTemplates as tsTemplatesApi, type TimestampTemplate } from './api';
+  import { validateRegex } from './regexUtils';
+  import RegexPresetDropdown from './RegexPresetDropdown.svelte';
+  import RegexTestInput from './RegexTestInput.svelte';
+  import FormatTestInput from './FormatTestInput.svelte';
+  import FormatPresetDropdown from './FormatPresetDropdown.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -11,6 +16,12 @@
   let newFormat = $state('');
   let newExtractionRegex = $state('');
   let newDefaultYear = $state('');
+
+  let newExtractionRegexError = $derived(validateRegex(newExtractionRegex));
+  let editExtractionRegexError = $derived.by(() => {
+    const e = editing;
+    return e ? validateRegex(e.extraction_regex ?? '') : null;
+  });
 
   async function load() {
     loading = true;
@@ -86,16 +97,29 @@
       <input type="text" bind:value={newName} placeholder="e.g. ISO 8601, Syslog..." />
     </div>
     <div class="field">
-      <label>Format (strftime)</label>
+      <label>Format (strftime) <FormatPresetDropdown onSelect={(p) => (newFormat = p)} /></label>
       <input type="text" bind:value={newFormat} placeholder="e.g. %Y-%m-%dT%H:%M:%S" />
+      <FormatTestInput
+        format={newFormat}
+        extractionRegex={newExtractionRegex}
+        defaultYear={newDefaultYear}
+        {projectId}
+      />
     </div>
     <div class="field">
-      <label>Extraction Regex (optional)</label>
+      <label
+        >Extraction Regex (optional) <RegexPresetDropdown
+          fieldType="extraction_regex"
+          onSelect={(p) => (newExtractionRegex = p)}
+        /></label
+      >
       <input
         type="text"
         bind:value={newExtractionRegex}
         placeholder="Regex to extract timestamp from line..."
       />
+      {#if newExtractionRegexError}<span class="field-error">{newExtractionRegexError}</span>{/if}
+      <RegexTestInput pattern={newExtractionRegex} {projectId} />
     </div>
     <div class="field">
       <label>Default Year (optional)</label>
@@ -107,8 +131,10 @@
     </div>
   </div>
   <div class="actions">
-    <button class="primary" onclick={create} disabled={!newName.trim() || !newFormat.trim()}
-      >Create</button
+    <button
+      class="primary"
+      onclick={create}
+      disabled={!newName.trim() || !newFormat.trim() || !!newExtractionRegexError}>Create</button
     >
   </div>
 </div>
@@ -133,12 +159,35 @@
               <input type="text" bind:value={editing.name} />
             </div>
             <div class="field">
-              <label>Format (strftime)</label>
+              <label
+                >Format (strftime) <FormatPresetDropdown
+                  onSelect={(p) => {
+                    if (editing) editing.format = p;
+                  }}
+                /></label
+              >
               <input type="text" bind:value={editing.format} />
+              <FormatTestInput
+                format={editing.format}
+                extractionRegex={editing.extraction_regex ?? ''}
+                defaultYear={editing.default_year?.toString() ?? ''}
+                {projectId}
+              />
             </div>
             <div class="field">
-              <label>Extraction Regex</label>
+              <label
+                >Extraction Regex <RegexPresetDropdown
+                  fieldType="extraction_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.extraction_regex = p;
+                  }}
+                /></label
+              >
               <input type="text" bind:value={editing.extraction_regex} />
+              {#if editExtractionRegexError}<span class="field-error"
+                  >{editExtractionRegexError}</span
+                >{/if}
+              <RegexTestInput pattern={editing.extraction_regex ?? ''} {projectId} />
             </div>
             <div class="field">
               <label>Default Year</label>
@@ -146,7 +195,9 @@
             </div>
           </div>
           <div class="actions">
-            <button class="primary" onclick={update}>Save</button>
+            <button class="primary" onclick={update} disabled={!!editExtractionRegexError}
+              >Save</button
+            >
             <button onclick={() => (editing = null)}>Cancel</button>
           </div>
         {:else}
@@ -226,5 +277,12 @@
     display: flex;
     gap: 8px;
     flex-shrink: 0;
+  }
+
+  .field-error {
+    font-size: 11px;
+    color: var(--red);
+    margin-top: 2px;
+    font-family: var(--font-mono);
   }
 </style>

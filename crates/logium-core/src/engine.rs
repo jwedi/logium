@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
-use chrono::NaiveDateTime;
+use chrono::{Datelike, NaiveDateTime};
 use rayon::prelude::*;
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
@@ -387,6 +387,44 @@ fn estimate_timestamp_len(fmt: &str) -> (usize, usize) {
         i += 1;
     }
     (min_len, max_len)
+}
+
+/// Test a timestamp format against a sample string, reusing the engine's
+/// full parsing pipeline (extraction regex → parse → prefix parse → yearless fallback).
+/// Returns the parsed `NaiveDateTime` or a human-readable error.
+pub fn test_timestamp_format(
+    sample: &str,
+    format: &str,
+    extraction_regex: Option<&str>,
+    default_year: Option<i32>,
+) -> Result<NaiveDateTime, String> {
+    // Step 1: extract timestamp substring
+    let ts_input = if let Some(pat) = extraction_regex {
+        let re = Regex::new(pat).map_err(|e| format!("invalid extraction regex: {e}"))?;
+        if let Some(caps) = re.captures(sample) {
+            caps.get(1)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_else(|| sample.to_string())
+        } else {
+            sample.to_string()
+        }
+    } else {
+        sample.to_string()
+    };
+
+    // Step 2: try full parse, then prefix parse, then yearless fallback
+    let year = default_year.unwrap_or_else(|| chrono::Local::now().year());
+    NaiveDateTime::parse_from_str(&ts_input, format)
+        .or_else(|_| parse_timestamp_prefix(&ts_input, format))
+        .or_else(|_| {
+            let augmented_input = format!("{year} {ts_input}");
+            let augmented_fmt = format!("%Y {}", format);
+            NaiveDateTime::parse_from_str(&augmented_input, &augmented_fmt)
+                .or_else(|_| parse_timestamp_prefix(&augmented_input, &augmented_fmt))
+        })
+        .map_err(|e| {
+            format!("failed to parse timestamp from '{ts_input}' with format '{format}': {e}")
+        })
 }
 
 /// Parse a timestamp from the beginning of a line by trying progressively
@@ -3802,5 +3840,84 @@ mod tests {
         };
 
         assert!(dry_run_rule(&source, &template, &ts_template, &rule, 100).is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // test_timestamp_format
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_timestamp_format_iso() {
+        let result = test_timestamp_format(
+            "2024-01-15T10:30:45 some log message",
+            "%Y-%m-%dT%H:%M:%S",
+            None,
+            None,
+        );
+        assert!(result.is_ok());
+        let ts = result.unwrap();
+        assert_eq!(ts.to_string(), "2024-01-15 10:30:45");
+    }
+
+    #[test]
+    fn test_timestamp_format_with_extraction_regex() {
+        let result = test_timestamp_format(
+            "192.168.1.1 - - [29/Jul/2015:17:41:44 +0000] GET /index.html",
+            "%d/%b/%Y:%H:%M:%S",
+            Some(r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2})"),
+            None,
+        );
+        assert!(result.is_ok());
+        let ts = result.unwrap();
+        assert_eq!(ts.to_string(), "2015-07-29 17:41:44");
+    }
+
+    #[test]
+    fn test_timestamp_format_with_default_year() {
+        let result = test_timestamp_format(
+            "Jun 14 15:16:01 combo sshd: Failed password",
+            "%b %d %H:%M:%S",
+            None,
+            Some(2025),
+        );
+        assert!(result.is_ok());
+        let ts = result.unwrap();
+        assert_eq!(ts.to_string(), "2025-06-14 15:16:01");
+    }
+
+    #[test]
+    fn test_timestamp_format_invalid_format() {
+        let result = test_timestamp_format("2024-01-15T10:30:45", "%Q-%Z-%INVALID", None, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to parse"));
+    }
+
+    #[test]
+    fn test_timestamp_format_extraction_regex_no_match_falls_back() {
+        // Regex doesn't match → falls back to full sample
+        let result = test_timestamp_format(
+            "2024-01-15T10:30:45 log line",
+            "%Y-%m-%dT%H:%M:%S",
+            Some(r"\[(\d+)\]"),
+            None,
+        );
+        assert!(result.is_ok());
+        let ts = result.unwrap();
+        assert_eq!(ts.to_string(), "2024-01-15 10:30:45");
+    }
+
+    #[test]
+    fn test_timestamp_format_yearless_without_default_year() {
+        // Yearless format with no default_year should fall back to current year
+        let result = test_timestamp_format(
+            "Jun 15 02:04:59 combo sshd: Failed password",
+            "%b %d %H:%M:%S",
+            None,
+            None,
+        );
+        assert!(result.is_ok());
+        let ts = result.unwrap();
+        let current_year = chrono::Local::now().year();
+        assert_eq!(ts.to_string(), format!("{current_year}-06-15 02:04:59"));
     }
 }

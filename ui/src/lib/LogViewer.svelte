@@ -11,6 +11,7 @@
   } from './api';
   import RuleCreator from './RuleCreator.svelte';
   import { formatTimestamp } from './formatUtils';
+  import { validateRegex } from './regexUtils';
 
   let {
     source,
@@ -51,6 +52,13 @@
   // Filter state
   let filterQuery = $state('');
   let filterIsRegex = $state(false);
+
+  let filterError: string | null = $derived(
+    filterIsRegex && filterQuery ? validateRegex(filterQuery) : null,
+  );
+  let searchError: string | null = $derived(
+    searchIsRegex && searchQuery ? validateRegex(searchQuery) : null,
+  );
 
   // Context expansion state
   let expandedLines: Set<number> = $state(new Set());
@@ -526,6 +534,7 @@
         <span class="filter-count">
           {filterQuery ? `${baseFilteredIndices.length} of ${lines.length} lines` : ''}
         </span>
+        {#if filterError}<span class="regex-error" title={filterError}>Invalid regex</span>{/if}
         {#if filterQuery}
           <button
             onclick={() => {
@@ -572,6 +581,7 @@
                 ? 'No matches'
                 : ''}
           </span>
+          {#if searchError}<span class="regex-error" title={searchError}>Invalid regex</span>{/if}
           <button onclick={prevMatch} title="Previous match">&#x2191;</button>
           <button onclick={nextMatch} title="Next match">&#x2193;</button>
           <button onclick={closeSearch} title="Close search">&#x2715;</button>
@@ -1008,5 +1018,11 @@
     padding: 2px 4px;
     font-size: 12px;
     text-align: center;
+  }
+
+  .regex-error {
+    font-size: 12px;
+    color: var(--red);
+    white-space: nowrap;
   }
 </style>

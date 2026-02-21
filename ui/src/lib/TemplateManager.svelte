@@ -5,6 +5,9 @@
     type SourceTemplate,
     type TimestampTemplate,
   } from './api';
+  import { validateRegex } from './regexUtils';
+  import RegexPresetDropdown from './RegexPresetDropdown.svelte';
+  import RegexTestInput from './RegexTestInput.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -21,6 +24,40 @@
   let newJsonTimestampField = $state('');
   let newFileNameRegex = $state('');
   let newLogContentRegex = $state('');
+
+  let newContentRegexError = $derived(validateRegex(newContentRegex));
+  let newContinuationRegexError = $derived(validateRegex(newContinuationRegex));
+  let newFileNameRegexError = $derived(validateRegex(newFileNameRegex));
+  let newLogContentRegexError = $derived(validateRegex(newLogContentRegex));
+  let hasCreateRegexErrors = $derived(
+    !!newContentRegexError ||
+      !!newContinuationRegexError ||
+      !!newFileNameRegexError ||
+      !!newLogContentRegexError,
+  );
+
+  let editContentRegexError = $derived.by(() => {
+    const e = editing;
+    return e ? validateRegex(e.content_regex ?? '') : null;
+  });
+  let editContinuationRegexError = $derived.by(() => {
+    const e = editing;
+    return e ? validateRegex(e.continuation_regex ?? '') : null;
+  });
+  let editFileNameRegexError = $derived.by(() => {
+    const e = editing;
+    return e ? validateRegex(e.file_name_regex ?? '') : null;
+  });
+  let editLogContentRegexError = $derived.by(() => {
+    const e = editing;
+    return e ? validateRegex(e.log_content_regex ?? '') : null;
+  });
+  let hasEditRegexErrors = $derived(
+    !!editContentRegexError ||
+      !!editContinuationRegexError ||
+      !!editFileNameRegexError ||
+      !!editLogContentRegexError,
+  );
 
   function tsTemplateName(id: number): string {
     return tsTemplateList.find((t) => t.id === id)?.name ?? `#${id}`;
@@ -123,16 +160,31 @@
       <input type="text" bind:value={newLineDelimiter} />
     </div>
     <div class="field">
-      <label>Content Regex (optional)</label>
+      <label
+        >Content Regex (optional) <RegexPresetDropdown
+          fieldType="content_regex"
+          onSelect={(p) => (newContentRegex = p)}
+        /></label
+      >
       <input type="text" bind:value={newContentRegex} placeholder="Regex to extract content..." />
+      {#if newContentRegexError}<span class="field-error">{newContentRegexError}</span>{/if}
+      <RegexTestInput pattern={newContentRegex} {projectId} />
     </div>
     <div class="field">
-      <label>Continuation Regex (optional)</label>
+      <label
+        >Continuation Regex (optional) <RegexPresetDropdown
+          fieldType="continuation_regex"
+          onSelect={(p) => (newContinuationRegex = p)}
+        /></label
+      >
       <input
         type="text"
         bind:value={newContinuationRegex}
         placeholder="Regex for multi-line continuation..."
       />
+      {#if newContinuationRegexError}<span class="field-error">{newContinuationRegexError}</span
+        >{/if}
+      <RegexTestInput pattern={newContinuationRegex} {projectId} />
     </div>
     <div class="field">
       <label>JSON Timestamp Field (optional)</label>
@@ -143,19 +195,34 @@
       />
     </div>
     <div class="field">
-      <label>File Name Regex (optional)</label>
+      <label
+        >File Name Regex (optional) <RegexPresetDropdown
+          fieldType="file_name_regex"
+          onSelect={(p) => (newFileNameRegex = p)}
+        /></label
+      >
       <input type="text" bind:value={newFileNameRegex} placeholder="e.g. nginx.*\.log$" />
+      {#if newFileNameRegexError}<span class="field-error">{newFileNameRegexError}</span>{/if}
+      <RegexTestInput pattern={newFileNameRegex} {projectId} />
     </div>
     <div class="field">
-      <label>Log Content Regex (optional)</label>
+      <label
+        >Log Content Regex (optional) <RegexPresetDropdown
+          fieldType="log_content_regex"
+          onSelect={(p) => (newLogContentRegex = p)}
+        /></label
+      >
       <input type="text" bind:value={newLogContentRegex} placeholder="e.g. ^\d+\.\d+\.\d+\.\d+ -" />
+      {#if newLogContentRegexError}<span class="field-error">{newLogContentRegexError}</span>{/if}
+      <RegexTestInput pattern={newLogContentRegex} {projectId} />
     </div>
   </div>
   <div class="actions">
     <button
       class="primary"
       onclick={createTemplate}
-      disabled={!newName.trim() || newTimestampTemplateId == null}>Create Template</button
+      disabled={!newName.trim() || newTimestampTemplateId == null || hasCreateRegexErrors}
+      >Create Template</button
     >
   </div>
 </div>
@@ -191,12 +258,33 @@
               <input type="text" bind:value={editing.line_delimiter} />
             </div>
             <div class="field">
-              <label>Content Regex</label>
+              <label
+                >Content Regex <RegexPresetDropdown
+                  fieldType="content_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.content_regex = p;
+                  }}
+                /></label
+              >
               <input type="text" bind:value={editing.content_regex} />
+              {#if editContentRegexError}<span class="field-error">{editContentRegexError}</span
+                >{/if}
+              <RegexTestInput pattern={editing.content_regex ?? ''} {projectId} />
             </div>
             <div class="field">
-              <label>Continuation Regex</label>
+              <label
+                >Continuation Regex <RegexPresetDropdown
+                  fieldType="continuation_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.continuation_regex = p;
+                  }}
+                /></label
+              >
               <input type="text" bind:value={editing.continuation_regex} />
+              {#if editContinuationRegexError}<span class="field-error"
+                  >{editContinuationRegexError}</span
+                >{/if}
+              <RegexTestInput pattern={editing.continuation_regex ?? ''} {projectId} />
             </div>
             <div class="field">
               <label>JSON Timestamp Field</label>
@@ -207,24 +295,47 @@
               />
             </div>
             <div class="field">
-              <label>File Name Regex</label>
+              <label
+                >File Name Regex <RegexPresetDropdown
+                  fieldType="file_name_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.file_name_regex = p;
+                  }}
+                /></label
+              >
               <input
                 type="text"
                 bind:value={editing.file_name_regex}
                 placeholder="e.g. nginx.*\.log$"
               />
+              {#if editFileNameRegexError}<span class="field-error">{editFileNameRegexError}</span
+                >{/if}
+              <RegexTestInput pattern={editing.file_name_regex ?? ''} {projectId} />
             </div>
             <div class="field">
-              <label>Log Content Regex</label>
+              <label
+                >Log Content Regex <RegexPresetDropdown
+                  fieldType="log_content_regex"
+                  onSelect={(p) => {
+                    if (editing) editing.log_content_regex = p;
+                  }}
+                /></label
+              >
               <input
                 type="text"
                 bind:value={editing.log_content_regex}
                 placeholder="e.g. ^\d+\.\d+\.\d+\.\d+ -"
               />
+              {#if editLogContentRegexError}<span class="field-error"
+                  >{editLogContentRegexError}</span
+                >{/if}
+              <RegexTestInput pattern={editing.log_content_regex ?? ''} {projectId} />
             </div>
           </div>
           <div class="actions">
-            <button class="primary" onclick={updateTemplate}>Save</button>
+            <button class="primary" onclick={updateTemplate} disabled={hasEditRegexErrors}
+              >Save</button
+            >
             <button onclick={() => (editing = null)}>Cancel</button>
           </div>
         {:else}
@@ -329,5 +440,12 @@
     font-size: 12px;
     color: var(--text-dim);
     font-style: italic;
+  }
+
+  .field-error {
+    font-size: 11px;
+    color: var(--red);
+    margin-top: 2px;
+    font-family: var(--font-mono);
   }
 </style>

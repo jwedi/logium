@@ -161,6 +161,11 @@ export interface ClusterResult {
   total_lines: number;
 }
 
+export interface RawLinesResponse {
+  lines: string[];
+  total_lines: number;
+}
+
 export interface TimeRange {
   start: string | null;
   end: string | null;
@@ -233,6 +238,19 @@ export const timestampTemplates = {
     }),
   delete: (pid: number, id: number) =>
     request<void>(`/projects/${pid}/timestamp-templates/${id}`, { method: 'DELETE' }),
+  testFormat: (
+    pid: number,
+    data: {
+      format: string;
+      sample: string;
+      extraction_regex?: string | null;
+      default_year?: number | null;
+    },
+  ) =>
+    request<{ parsed_timestamp: string }>(`/projects/${pid}/timestamp-templates/test-format`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // Templates
@@ -271,6 +289,10 @@ export const sources = {
   },
   delete: (pid: number, id: number) =>
     request<void>(`/projects/${pid}/sources/${id}`, { method: 'DELETE' }),
+  rawLines: (pid: number, id: number, offset = 0, limit = 200) => {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    return request<RawLinesResponse>(`/projects/${pid}/sources/${id}/raw-lines?${params}`);
+  },
 };
 
 // Rules
