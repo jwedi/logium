@@ -471,11 +471,8 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 **Fix:** Replace `compiled.match_set.matches(&line.content).into_iter().collect::<Vec<_>>()` with direct `SetMatches` method calls.
 **Est. impact:** 5-10% throughput improvement on rule evaluation.
 
-#### P18. Chunk-based file processing to cap memory
-**File:** `crates/logium-core/src/engine.rs` — `process_source()`
-**Issue:** Currently collects ALL lines from a source into `Vec<LogLine>` before parallel rule evaluation. For a 100MB file (~735K lines), this means ~200-300MB of memory for one source alone.
-**Fix:** Process in chunks (e.g., 10K-50K lines). Read a chunk, evaluate rules in parallel via rayon, push results to a pre-allocated output Vec. Chunks of `ProcessedLine` can be appended directly without re-sorting since lines within each source are already chronologically ordered.
-**Est. impact:** 50-70% memory reduction for large files. Enables processing of multi-GB files without OOM.
+#### P18. Chunk-based file processing to cap memory — Done
+Rewrote `process_source()` to read lines in chunks of 10K via `iter.by_ref().take(PROCESS_CHUNK_SIZE)`, evaluate rules in parallel per chunk with rayon, and extend the output Vec. Peak input buffer capped at 10K lines regardless of file size. Added `test_process_source_chunked` test (10,500 lines across 2 chunks). Benchmark shows ~6.5% overhead on 51K-line file (within 10% threshold).
 
 ### High Priority — Algorithmic Skips
 

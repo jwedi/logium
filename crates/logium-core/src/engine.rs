@@ -792,7 +792,11 @@ pub fn dry_run_rule(
     Ok(matches)
 }
 
-/// Read all lines from a source (sequential I/O), then evaluate rules in parallel.
+/// Number of lines to read per chunk in `process_source()`.
+/// Balances memory usage against rayon parallelism overhead.
+const PROCESS_CHUNK_SIZE: usize = 10_000;
+
+/// Read lines from a source in chunks (sequential I/O), then evaluate rules in parallel per chunk.
 /// Returns a Vec of ProcessedLine in chronological order.
 fn process_source(
     source: &Source,
@@ -802,49 +806,65 @@ fn process_source(
     rule_map: &HashMap<u64, &LogRule>,
     compiled_map: &HashMap<u64, &CompiledRule>,
 ) -> Result<Vec<ProcessedLine>, AnalysisError> {
-    // Step 1: sequential I/O — read all lines
-    let lines: Vec<LogLine> =
-        LogLineIterator::new(source, template, ts_template)?.collect::<Result<Vec<_>, _>>()?;
-
+    let mut iter = LogLineIterator::new(source, template, ts_template)?;
     let is_json = template.json_timestamp_field.is_some();
+    let mut result = Vec::new();
 
-    // Step 2: parallel rule evaluation (rayon)
-    let processed: Vec<ProcessedLine> = lines
-        .into_par_iter()
-        .map(|mut line| {
-            let mut rule_matches = Vec::new();
-            for rule_id in rule_ids {
-                if let (Some(rule), Some(compiled)) =
-                    (rule_map.get(rule_id), compiled_map.get(rule_id))
-                    && let Some(extracted) = evaluate_rule(rule, &line, compiled)
-                {
-                    rule_matches.push((*rule_id, extracted));
-                }
-            }
-            let json_fields = if is_json {
-                if let Some(serde_json::Value::Object(map)) = line.cached_json.take() {
-                    let mut fields = HashMap::new();
-                    for (key, value) in &map {
-                        if let Some(sv) = json_value_to_state_value(value) {
-                            fields.insert(key.clone(), sv);
-                        }
+    loop {
+        let chunk: Vec<LogLine> = iter
+            .by_ref()
+            .take(PROCESS_CHUNK_SIZE)
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if chunk.is_empty() {
+            break;
+        }
+
+        let is_last = chunk.len() < PROCESS_CHUNK_SIZE;
+
+        let processed: Vec<ProcessedLine> = chunk
+            .into_par_iter()
+            .map(|mut line| {
+                let mut rule_matches = Vec::new();
+                for rule_id in rule_ids {
+                    if let (Some(rule), Some(compiled)) =
+                        (rule_map.get(rule_id), compiled_map.get(rule_id))
+                        && let Some(extracted) = evaluate_rule(rule, &line, compiled)
+                    {
+                        rule_matches.push((*rule_id, extracted));
                     }
-                    Some(fields)
+                }
+                let json_fields = if is_json {
+                    if let Some(serde_json::Value::Object(map)) = line.cached_json.take() {
+                        let mut fields = HashMap::new();
+                        for (key, value) in &map {
+                            if let Some(sv) = json_value_to_state_value(value) {
+                                fields.insert(key.clone(), sv);
+                            }
+                        }
+                        Some(fields)
+                    } else {
+                        None
+                    }
                 } else {
                     None
+                };
+                ProcessedLine {
+                    line,
+                    rule_matches,
+                    json_fields,
                 }
-            } else {
-                None
-            };
-            ProcessedLine {
-                line,
-                rule_matches,
-                json_fields,
-            }
-        })
-        .collect();
+            })
+            .collect();
 
-    Ok(processed)
+        result.extend(processed);
+
+        if is_last {
+            break;
+        }
+    }
+
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -3919,5 +3939,90 @@ mod tests {
         let ts = result.unwrap();
         let current_year = chrono::Local::now().year();
         assert_eq!(ts.to_string(), format!("{current_year}-06-15 02:04:59"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Chunk-based processing test
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_process_source_chunked() {
+        // Generate a file with PROCESS_CHUNK_SIZE + 500 lines → 2 chunks (10K + 500)
+        let total_lines = PROCESS_CHUNK_SIZE + 500;
+        let mut f = NamedTempFile::new().unwrap();
+        let base =
+            NaiveDateTime::parse_from_str("2024-01-01 00:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        for i in 0..total_lines {
+            let ts = base + chrono::Duration::seconds(i as i64);
+            writeln!(
+                f,
+                "{} [INFO] line number {}",
+                ts.format("%Y-%m-%d %H:%M:%S"),
+                i
+            )
+            .unwrap();
+        }
+
+        let ts_template = make_ts_template();
+        let template = make_template();
+        let source = Source {
+            id: 1,
+            name: "chunked_test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+
+        let rule = LogRule {
+            id: 1,
+            name: "match_info".into(),
+            match_mode: MatchMode::Any,
+            match_rules: vec![MatchRule {
+                id: 1,
+                pattern: r"INFO".into(),
+            }],
+            extraction_rules: vec![ExtractionRule {
+                id: 1,
+                extraction_type: ExtractionType::Static,
+                state_key: "level".into(),
+                pattern: None,
+                static_value: Some("info".into()),
+                mode: ExtractionMode::Replace,
+            }],
+        };
+        let compiled = compile_rules(std::slice::from_ref(&rule)).unwrap();
+        let rule_ids = vec![rule.id];
+        let rule_map: HashMap<u64, &LogRule> = [(rule.id, &rule)].into_iter().collect();
+        let compiled_map: HashMap<u64, &CompiledRule> =
+            [(rule.id, &compiled[0])].into_iter().collect();
+
+        let result = process_source(
+            &source,
+            &template,
+            &ts_template,
+            &rule_ids,
+            &rule_map,
+            &compiled_map,
+        )
+        .unwrap();
+
+        // All lines present — no drops at chunk boundary
+        assert_eq!(result.len(), total_lines, "expected {total_lines} lines");
+
+        // Every line matches the INFO rule
+        for (i, pl) in result.iter().enumerate() {
+            assert_eq!(
+                pl.rule_matches.len(),
+                1,
+                "line {i} should have exactly 1 rule match"
+            );
+        }
+
+        // Timestamps are non-decreasing (chronological order preserved across chunks)
+        for i in 1..result.len() {
+            assert!(
+                result[i].line.timestamp >= result[i - 1].line.timestamp,
+                "timestamps not in order at index {i}"
+            );
+        }
     }
 }
