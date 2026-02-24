@@ -454,6 +454,62 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 **Fix:** Consider adaptive channel capacity or dropping stale messages.
 **Est. impact:** Prevents stalling on slow clients.
 
+### Critical Priority — Hot Path Allocations & Memory
+
+#### P16. Eliminate per-line String allocations in LogLineIterator
+**File:** `crates/logium-core/src/engine.rs` — `LogLineIterator::next()`
+**Issue:** Three unnecessary heap allocations on every single log line:
+1. `ts_input` always allocated as `String` (`first_line.to_string()`) even when it could be a `&str` borrowed from `merged_raw`. Use `Cow<'_, str>` — borrow in the common no-extraction-regex case, own only when extraction regex captures a substring.
+2. `augmented_fmt` recomputed per line (`format!("%Y {}", self.timestamp_format)`) produces the same string for every line from the same source. Pre-compute once in `LogLineIterator::new()` and store as `Option<String>` field.
+3. `augmented_input` allocated per line (`format!("{year} {ts_input}")`). Use a reusable `String` buffer field (`ts_buf`) with `write!` to avoid per-line allocation.
+**Fix:** Use `Cow<'_, str>` for `ts_input`, pre-compute `augmented_fmt` once, reuse a `String` buffer for `augmented_input`.
+**Est. impact:** 15-25% throughput improvement for timestamp parsing, especially for yearless formats (syslog) where the augmented path runs for every line.
+
+#### P17. Avoid Vec allocation in RegexSet match evaluation
+**File:** `crates/logium-core/src/engine.rs` — `evaluate_rule()`
+**Issue:** `SetMatches` collected into a `Vec<usize>` just to check `is_empty()` or `len()`. The `SetMatches` type already provides `.matched_any()` and `.len()` — use those directly. Saves one heap allocation per rule per line (51K allocations per rule in the benchmark).
+**Fix:** Replace `compiled.match_set.matches(&line.content).into_iter().collect::<Vec<_>>()` with direct `SetMatches` method calls.
+**Est. impact:** 5-10% throughput improvement on rule evaluation.
+
+#### P18. Chunk-based file processing to cap memory — Done
+Rewrote `process_source()` to read lines in chunks of 10K via `iter.by_ref().take(PROCESS_CHUNK_SIZE)`, evaluate rules in parallel per chunk with rayon, and extend the output Vec. Peak input buffer capped at 10K lines regardless of file size. Added `test_process_source_chunked` test (10,500 lines across 2 chunks). Benchmark shows ~6.5% overhead on 51K-line file (within 10% threshold).
+
+### High Priority — Algorithmic Skips
+
+#### P19. Skip pattern evaluation when no state changed
+**File:** `crates/logium-core/src/engine.rs` — `analyze()` Phase 2 loop
+**Issue:** `evaluate_patterns()` is called after every line, even when no rules matched and no state changed. Pattern evaluation iterates all patterns and checks predicates via HashMap lookups.
+**Fix:** Track a boolean `any_state_changed` flag. Only call `evaluate_patterns()` when the flag is true.
+**Est. impact:** 5-20% throughput improvement depending on match rate (bigger win when few lines match).
+
+### Medium Priority — Server & Frontend
+
+#### P20. Eliminate double serialization in server routes
+**File:** `crates/logium-server/src/routes/analysis.rs` (and ~18 other route handlers)
+**Issue:** Every route first converts the response to a generic `serde_json::Value` tree (`serde_json::to_value(result).unwrap()`), then Axum's `Json` extractor serializes that tree to JSON — double serialization.
+**Fix:** Use `Json(result)` directly since all response types already derive `Serialize`. Single-pass serialization.
+**Est. impact:** ~2x fewer allocations per response, faster serialization.
+
+#### P21. Use paginated `/raw-lines` endpoint in LogViewer
+**Files:** `ui/src/lib/LogViewer.svelte`, `crates/logium-server/src/routes/sources.rs`
+**Issue:** LogViewer loads the entire file via `/content` endpoint (`read_to_string`), even though a paginated `/raw-lines` endpoint already exists. For 100MB+ files, the entire content is held in both server and browser memory.
+**Fix:** Switch LogViewer to fetch pages from `/raw-lines` on demand (e.g., load visible range + buffer). The virtual scroll implementation already tracks visible line indices — use those to drive paginated fetches.
+**Est. impact:** Enables viewing of arbitrarily large files without browser memory exhaustion.
+
+#### P22. Shrink LogLine with `Option<Box<Value>>`
+**File:** `crates/logium-core/src/model.rs`
+**Issue:** `cached_json: Option<serde_json::Value>` is 33+ bytes inline (serde_json::Value is ~32 bytes). For non-JSON sources (the common case), this is wasted space on every LogLine.
+**Fix:** Change to `Option<Box<serde_json::Value>>` which is 8 bytes (pointer), with the actual Value on the heap only when present.
+**Est. impact:** ~24 bytes saved per LogLine. For 735K lines (100MB file), that's ~17MB less memory.
+
+### Low Priority
+
+#### P23. Avoid operand cloning in evaluate_predicate
+**File:** `crates/logium-core/src/engine.rs` — `evaluate_predicate()`
+**Issue:** `Operand::Literal(v)` and `StateRef` values are `.clone()`d on every predicate evaluation. The comparison operators (`==`, `partial_cmp`, `contains`) all work on references.
+**Fix:** Refactor to compare `&StateValue` directly without cloning.
+**Est. impact:** Minor — fewer allocations when predicates involve string values.
+
 ---
 
 ## Usability & Onboarding
