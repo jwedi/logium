@@ -2,6 +2,8 @@ use axum::extract::{Path, Query, State};
 use axum::routing::post;
 use axum::{Json, Router};
 
+use logium_core::model::ClusterResult;
+
 use super::analysis::TimeRangeQuery;
 use super::{ApiError, ApiResult};
 use crate::AppState;
@@ -15,7 +17,7 @@ async fn cluster(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
     Query(query): Query<TimeRangeQuery>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ClusterResult>> {
     let time_range = query
         .to_time_range()
         .map_err(|e| ApiError::from(DbError::InvalidData(e)))?;
@@ -34,7 +36,7 @@ async fn cluster(
     .map_err(|e| ApiError::from(DbError::InvalidData(format!("task join error: {e}"))))?
     .map_err(|e| ApiError::from(DbError::InvalidData(format!("clustering error: {e}"))))?;
 
-    Ok(Json(serde_json::to_value(result).unwrap()))
+    Ok(Json(result))
 }
 
 #[cfg(test)]

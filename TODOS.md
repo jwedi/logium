@@ -456,39 +456,26 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 
 ### Critical Priority — Hot Path Allocations & Memory
 
-#### P16. Eliminate per-line String allocations in LogLineIterator
+#### P16. Eliminate per-line String allocations in LogLineIterator — Done
 **File:** `crates/logium-core/src/engine.rs` — `LogLineIterator::next()`
-**Issue:** Three unnecessary heap allocations on every single log line:
-1. `ts_input` always allocated as `String` (`first_line.to_string()`) even when it could be a `&str` borrowed from `merged_raw`. Use `Cow<'_, str>` — borrow in the common no-extraction-regex case, own only when extraction regex captures a substring.
-2. `augmented_fmt` recomputed per line (`format!("%Y {}", self.timestamp_format)`) produces the same string for every line from the same source. Pre-compute once in `LogLineIterator::new()` and store as `Option<String>` field.
-3. `augmented_input` allocated per line (`format!("{year} {ts_input}")`). Use a reusable `String` buffer field (`ts_buf`) with `write!` to avoid per-line allocation.
-**Fix:** Use `Cow<'_, str>` for `ts_input`, pre-compute `augmented_fmt` once, reuse a `String` buffer for `augmented_input`.
-**Est. impact:** 15-25% throughput improvement for timestamp parsing, especially for yearless formats (syslog) where the augmented path runs for every line.
+Used `Cow<'_, str>` for `ts_input` (zero-copy borrow from regex captures or `first_line`), pre-computed `augmented_fmt` once in the constructor as `Option<String>`, and reused a `ts_buf: String` buffer field for `augmented_input` via `write!`. Applied same optimization to the JSON path (removed `ts_str.to_string()`). Added `test_iterator_extraction_regex_with_default_year` test covering the combined extraction_regex + default_year path.
 
-#### P17. Avoid Vec allocation in RegexSet match evaluation
+#### P17. Avoid Vec allocation in RegexSet match evaluation — Done
 **File:** `crates/logium-core/src/engine.rs` — `evaluate_rule()`
-**Issue:** `SetMatches` collected into a `Vec<usize>` just to check `is_empty()` or `len()`. The `SetMatches` type already provides `.matched_any()` and `.len()` — use those directly. Saves one heap allocation per rule per line (51K allocations per rule in the benchmark).
-**Fix:** Replace `compiled.match_set.matches(&line.content).into_iter().collect::<Vec<_>>()` with direct `SetMatches` method calls.
-**Est. impact:** 5-10% throughput improvement on rule evaluation.
+Replaced `SetMatches` → `Vec<usize>` → `.is_empty()`/`.len()` with direct `SetMatches` methods: `.matched_any()` (O(1) bitset check for `Any` mode) and `.iter().count()` (allocation-free iteration for `All` mode). Eliminates one heap allocation per rule per line. Benchmark: cross-source 4.95ms → 4.57ms (~8% faster), large file 82.0ms → 80.7ms (~1.5% faster).
 
 #### P18. Chunk-based file processing to cap memory — Done
 Rewrote `process_source()` to read lines in chunks of 10K via `iter.by_ref().take(PROCESS_CHUNK_SIZE)`, evaluate rules in parallel per chunk with rayon, and extend the output Vec. Peak input buffer capped at 10K lines regardless of file size. Added `test_process_source_chunked` test (10,500 lines across 2 chunks). Benchmark shows ~6.5% overhead on 51K-line file (within 10% threshold).
 
 ### High Priority — Algorithmic Skips
 
-#### P19. Skip pattern evaluation when no state changed
-**File:** `crates/logium-core/src/engine.rs` — `analyze()` Phase 2 loop
-**Issue:** `evaluate_patterns()` is called after every line, even when no rules matched and no state changed. Pattern evaluation iterates all patterns and checks predicates via HashMap lookups.
-**Fix:** Track a boolean `any_state_changed` flag. Only call `evaluate_patterns()` when the flag is true.
-**Est. impact:** 5-20% throughput improvement depending on match rate (bigger win when few lines match).
+#### P19. Skip pattern evaluation when no state changed — Done
+Added `state_changed` flag to both `analyze()` and `analyze_streaming()` loops. Pattern evaluation is now skipped when no state changed on a given line. Benchmark: 51K-line test improved from ~80.7ms to ~70.3ms (~13% faster).
 
 ### Medium Priority — Server & Frontend
 
-#### P20. Eliminate double serialization in server routes
-**File:** `crates/logium-server/src/routes/analysis.rs` (and ~18 other route handlers)
-**Issue:** Every route first converts the response to a generic `serde_json::Value` tree (`serde_json::to_value(result).unwrap()`), then Axum's `Json` extractor serializes that tree to JSON — double serialization.
-**Fix:** Use `Json(result)` directly since all response types already derive `Serialize`. Single-pass serialization.
-**Est. impact:** ~2x fewer allocations per response, faster serialization.
+#### P20. Eliminate double serialization in server routes — Done
+Replaced `Json(serde_json::to_value(x).unwrap())` with `Json(x)` using concrete types across 19 handlers in 7 route files (projects, sources, rules, patterns, rulesets, analysis, clustering). Single-pass serialization, no intermediate `serde_json::Value` tree.
 
 #### P21. Use paginated `/raw-lines` endpoint in LogViewer
 **Files:** `ui/src/lib/LogViewer.svelte`, `crates/logium-server/src/routes/sources.rs`

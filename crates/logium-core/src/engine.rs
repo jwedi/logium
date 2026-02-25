@@ -1,5 +1,7 @@
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
+use std::fmt::Write as FmtWrite;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
@@ -92,6 +94,8 @@ pub struct LogLineIterator {
     json_timestamp_field: Option<String>,
     pending_line: Option<String>,
     buf: String,
+    augmented_fmt: Option<String>,
+    ts_buf: String,
 }
 
 impl LogLineIterator {
@@ -134,6 +138,10 @@ impl LogLineIterator {
             json_timestamp_field: template.json_timestamp_field.clone(),
             pending_line: None,
             buf: String::new(),
+            augmented_fmt: ts_template
+                .default_year
+                .map(|_| format!("%Y {}", ts_template.format)),
+            ts_buf: String::new(),
         })
     }
 }
@@ -199,7 +207,7 @@ impl Iterator for LogLineIterator {
             };
 
             let ts_str = match json_val.get(field_name).and_then(|v| v.as_str()) {
-                Some(s) => s.to_string(),
+                Some(s) => s,
                 None => {
                     return Some(Err(AnalysisError::ParseError(format!(
                         "JSON field '{}' not found or not a string",
@@ -208,18 +216,22 @@ impl Iterator for LogLineIterator {
                 }
             };
 
-            let timestamp = NaiveDateTime::parse_from_str(&ts_str, &self.timestamp_format)
-                .or_else(|_| parse_timestamp_prefix(&ts_str, &self.timestamp_format))
-                .or_else(|e| {
-                    if let Some(year) = self.default_year {
-                        let augmented_input = format!("{year} {ts_str}");
-                        let augmented_fmt = format!("%Y {}", self.timestamp_format);
-                        NaiveDateTime::parse_from_str(&augmented_input, &augmented_fmt)
-                            .or_else(|_| parse_timestamp_prefix(&augmented_input, &augmented_fmt))
-                    } else {
-                        Err(e)
-                    }
-                });
+            let timestamp = NaiveDateTime::parse_from_str(ts_str, &self.timestamp_format)
+                .or_else(|_| parse_timestamp_prefix(ts_str, &self.timestamp_format));
+
+            let timestamp = if let Err(e) = timestamp {
+                if let Some(ref augmented_fmt) = self.augmented_fmt {
+                    let year = self.default_year.unwrap();
+                    self.ts_buf.clear();
+                    let _ = write!(self.ts_buf, "{year} {ts_str}");
+                    NaiveDateTime::parse_from_str(&self.ts_buf, augmented_fmt)
+                        .or_else(|_| parse_timestamp_prefix(&self.ts_buf, augmented_fmt))
+                } else {
+                    Err(e)
+                }
+            } else {
+                timestamp
+            };
 
             return match timestamp {
                 Ok(ts) => {
@@ -263,30 +275,32 @@ impl Iterator for LogLineIterator {
         };
 
         // Extract timestamp substring: use extraction_regex if set, otherwise first line
-        let ts_input = if let Some(re) = &self.extraction_regex {
+        let ts_input: Cow<'_, str> = if let Some(re) = &self.extraction_regex {
             if let Some(caps) = re.captures(first_line) {
-                caps.get(1)
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_else(|| first_line.to_string())
+                Cow::Borrowed(caps.get(1).map_or(first_line, |m| m.as_str()))
             } else {
-                first_line.to_string()
+                Cow::Borrowed(first_line)
             }
         } else {
-            first_line.to_string()
+            Cow::Borrowed(first_line)
         };
 
         let timestamp = NaiveDateTime::parse_from_str(&ts_input, &self.timestamp_format)
-            .or_else(|_| parse_timestamp_prefix(&ts_input, &self.timestamp_format))
-            .or_else(|e| {
-                if let Some(year) = self.default_year {
-                    let augmented_input = format!("{year} {ts_input}");
-                    let augmented_fmt = format!("%Y {}", self.timestamp_format);
-                    NaiveDateTime::parse_from_str(&augmented_input, &augmented_fmt)
-                        .or_else(|_| parse_timestamp_prefix(&augmented_input, &augmented_fmt))
-                } else {
-                    Err(e)
-                }
-            });
+            .or_else(|_| parse_timestamp_prefix(&ts_input, &self.timestamp_format));
+
+        let timestamp = if let Err(e) = timestamp {
+            if let Some(ref augmented_fmt) = self.augmented_fmt {
+                let year = self.default_year.unwrap();
+                self.ts_buf.clear();
+                let _ = write!(self.ts_buf, "{year} {ts_input}");
+                NaiveDateTime::parse_from_str(&self.ts_buf, augmented_fmt)
+                    .or_else(|_| parse_timestamp_prefix(&self.ts_buf, augmented_fmt))
+            } else {
+                Err(e)
+            }
+        } else {
+            timestamp
+        };
 
         match timestamp {
             Ok(ts) => {
@@ -705,15 +719,11 @@ pub fn evaluate_rule(
     line: &LogLine,
     compiled: &CompiledRule,
 ) -> Option<HashMap<String, StateValue>> {
-    let matches: Vec<usize> = compiled
-        .match_set
-        .matches(&line.content)
-        .into_iter()
-        .collect();
+    let set_matches = compiled.match_set.matches(&line.content);
 
     let matched = match compiled.match_mode {
-        MatchMode::Any => !matches.is_empty(),
-        MatchMode::All => matches.len() == compiled.match_count,
+        MatchMode::Any => set_matches.matched_any(),
+        MatchMode::All => set_matches.iter().count() == compiled.match_count,
     };
 
     if !matched {
@@ -1255,6 +1265,8 @@ pub fn analyze(
             break;
         }
 
+        let mut state_changed = false;
+
         // Apply pre-computed JSON fields as state
         if let Some(json_fields) = &processed.json_fields {
             let source_name = state_manager
@@ -1279,6 +1291,7 @@ pub fn analyze(
                     },
                 );
                 if old != new {
+                    state_changed = true;
                     all_state_changes.push(StateChange {
                         timestamp: line.timestamp,
                         source_id: line.source_id,
@@ -1308,6 +1321,9 @@ pub fn analyze(
                     line.timestamp,
                 );
 
+                if !changes.is_empty() {
+                    state_changed = true;
+                }
                 for (key, old, new) in changes {
                     all_state_changes.push(StateChange {
                         timestamp: line.timestamp,
@@ -1329,11 +1345,13 @@ pub fn analyze(
             }
         }
 
-        // Evaluate patterns after each line
-        let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
-        for mut pm in pmatches {
-            pm.timestamp = line.timestamp;
-            all_pattern_matches.push(pm);
+        // Evaluate patterns only when state changed
+        if state_changed {
+            let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
+            for mut pm in pmatches {
+                pm.timestamp = line.timestamp;
+                all_pattern_matches.push(pm);
+            }
         }
     }
 
@@ -1438,6 +1456,8 @@ pub fn analyze_streaming(
 
         lines_processed += 1;
 
+        let mut state_changed = false;
+
         // Apply pre-computed JSON fields as state
         if let Some(json_fields) = &processed.json_fields {
             let source_name = state_manager
@@ -1462,6 +1482,7 @@ pub fn analyze_streaming(
                     },
                 );
                 if old != new {
+                    state_changed = true;
                     total_state_changes += 1;
                     if tx
                         .send(AnalysisEvent::StateChange(StateChange {
@@ -1497,6 +1518,9 @@ pub fn analyze_streaming(
                     line.timestamp,
                 );
 
+                if !changes.is_empty() {
+                    state_changed = true;
+                }
                 for (key, old, new) in changes {
                     total_state_changes += 1;
                     if tx
@@ -1528,12 +1552,15 @@ pub fn analyze_streaming(
             }
         }
 
-        let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
-        for mut pm in pmatches {
-            pm.timestamp = line.timestamp;
-            total_pattern_matches += 1;
-            if tx.send(AnalysisEvent::PatternMatch(pm)).is_err() {
-                return Ok(());
+        // Evaluate patterns only when state changed
+        if state_changed {
+            let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
+            for mut pm in pmatches {
+                pm.timestamp = line.timestamp;
+                total_pattern_matches += 1;
+                if tx.send(AnalysisEvent::PatternMatch(pm)).is_err() {
+                    return Ok(());
+                }
             }
         }
 
@@ -4024,5 +4051,48 @@ mod tests {
                 "timestamps not in order at index {i}"
             );
         }
+    }
+
+    #[test]
+    fn test_iterator_extraction_regex_with_default_year() {
+        // Exercises both extraction_regex and default_year through LogLineIterator,
+        // covering the Cow path and the ts_buf/augmented_fmt reuse path.
+        let mut f = NamedTempFile::new().unwrap();
+        // Nginx-style lines: timestamp is embedded mid-line, yearless
+        writeln!(f, "192.168.1.1 - - [15/Jun 12:00:01] GET /index.html").unwrap();
+        writeln!(f, "10.0.0.2 - - [15/Jun 12:00:02] POST /api/data").unwrap();
+        writeln!(f, "172.16.0.3 - - [15/Jun 12:00:03] GET /health").unwrap();
+
+        let ts_template = TimestampTemplate {
+            id: 1,
+            name: "yearless-extracted".into(),
+            format: "%d/%b %H:%M:%S".into(),
+            extraction_regex: Some(r"\[([^\]]+)\]".into()),
+            default_year: Some(2024),
+        };
+        let template = make_template();
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+
+        let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
+        let lines: Vec<LogLine> = iter.map(|r| r.unwrap()).collect();
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            lines[0].timestamp,
+            NaiveDateTime::parse_from_str("2024-06-15 12:00:01", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+        assert_eq!(
+            lines[1].timestamp,
+            NaiveDateTime::parse_from_str("2024-06-15 12:00:02", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+        assert_eq!(
+            lines[2].timestamp,
+            NaiveDateTime::parse_from_str("2024-06-15 12:00:03", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
     }
 }

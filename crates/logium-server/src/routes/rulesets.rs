@@ -4,6 +4,8 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 
+use logium_core::model::Ruleset;
+
 use super::ApiResult;
 use crate::AppState;
 
@@ -29,41 +31,41 @@ struct CreateRuleset {
 async fn list(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Vec<Ruleset>>> {
     let rulesets = state.db.list_rulesets(project_id).await?;
-    Ok(Json(serde_json::to_value(rulesets).unwrap()))
+    Ok(Json(rulesets))
 }
 
 async fn create(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
     Json(body): Json<CreateRuleset>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<Ruleset>)> {
     let rs = state
         .db
         .create_ruleset(project_id, &body.name, body.template_id, &body.rule_ids)
         .await?;
-    Ok((StatusCode::CREATED, Json(serde_json::to_value(rs).unwrap())))
+    Ok((StatusCode::CREATED, Json(rs)))
 }
 
 async fn get_one(
     State(state): State<AppState>,
     Path((project_id, id)): Path<(i64, i64)>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Ruleset>> {
     let rs = state.db.get_ruleset(project_id, id).await?;
-    Ok(Json(serde_json::to_value(rs).unwrap()))
+    Ok(Json(rs))
 }
 
 async fn update(
     State(state): State<AppState>,
     Path((project_id, id)): Path<(i64, i64)>,
     Json(body): Json<CreateRuleset>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Ruleset>> {
     let rs = state
         .db
         .update_ruleset(project_id, id, &body.name, body.template_id, &body.rule_ids)
         .await?;
-    Ok(Json(serde_json::to_value(rs).unwrap()))
+    Ok(Json(rs))
 }
 
 async fn remove(
