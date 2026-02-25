@@ -6,6 +6,8 @@ use axum::{Json, Router};
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 
+use logium_core::model::AnalysisResult;
+
 use super::{ApiError, ApiResult};
 use crate::AppState;
 use crate::db::DbError;
@@ -55,7 +57,7 @@ async fn analyze(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
     Query(time_query): Query<TimeRangeQuery>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<AnalysisResult>> {
     let time_range = time_query
         .to_time_range()
         .map_err(|e| ApiError::from(DbError::InvalidData(e)))?;
@@ -77,7 +79,7 @@ async fn analyze(
     .map_err(|e| ApiError::from(DbError::InvalidData(format!("task join error: {e}"))))?
     .map_err(|e| ApiError::from(DbError::InvalidData(format!("analysis error: {e}"))))?;
 
-    Ok(Json(serde_json::to_value(result).unwrap()))
+    Ok(Json(result))
 }
 
 #[derive(Deserialize, Default)]

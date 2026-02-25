@@ -5,6 +5,8 @@ use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncBufReadExt;
 
+use logium_core::model::Source;
+
 use super::{ApiError, ApiResult};
 use crate::AppState;
 use crate::db::DbError;
@@ -40,32 +42,29 @@ struct CreateSource {
 async fn list(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Vec<Source>>> {
     let sources = state.db.list_sources(project_id).await?;
-    Ok(Json(serde_json::to_value(sources).unwrap()))
+    Ok(Json(sources))
 }
 
 async fn create(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
     Json(body): Json<CreateSource>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<Source>)> {
     let source = state
         .db
         .create_source(project_id, body.template_id, &body.name, &body.file_path)
         .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::to_value(source).unwrap()),
-    ))
+    Ok((StatusCode::CREATED, Json(source)))
 }
 
 async fn get_one(
     State(state): State<AppState>,
     Path((project_id, id)): Path<(i64, i64)>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Source>> {
     let source = state.db.get_source(project_id, id).await?;
-    Ok(Json(serde_json::to_value(source).unwrap()))
+    Ok(Json(source))
 }
 
 async fn remove(
@@ -97,7 +96,7 @@ async fn upload(
     State(state): State<AppState>,
     Path((project_id, id)): Path<(i64, i64)>,
     mut multipart: Multipart,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Source>> {
     // Verify source exists
     let _source = state.db.get_source(project_id, id).await?;
 
@@ -126,7 +125,7 @@ async fn upload(
             .await?;
 
         let source = state.db.get_source(project_id, id).await?;
-        Ok(Json(serde_json::to_value(source).unwrap()))
+        Ok(Json(source))
     } else {
         Err(ApiError::from(DbError::InvalidData(
             "no file field in multipart upload".to_string(),

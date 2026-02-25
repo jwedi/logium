@@ -4,7 +4,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 
-use logium_core::model::MatchMode;
+use logium_core::model::{LogRule, MatchMode};
 
 use super::ApiResult;
 use crate::AppState;
@@ -30,16 +30,16 @@ struct CreateRule {
 async fn list(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Vec<LogRule>>> {
     let rules = state.db.list_rules(project_id).await?;
-    Ok(Json(serde_json::to_value(rules).unwrap()))
+    Ok(Json(rules))
 }
 
 async fn create(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
     Json(body): Json<CreateRule>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<LogRule>)> {
     let rule = state
         .db
         .create_rule(
@@ -50,25 +50,22 @@ async fn create(
             &body.extraction_rules,
         )
         .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::to_value(rule).unwrap()),
-    ))
+    Ok((StatusCode::CREATED, Json(rule)))
 }
 
 async fn get_one(
     State(state): State<AppState>,
     Path((project_id, id)): Path<(i64, i64)>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<LogRule>> {
     let rule = state.db.get_rule(project_id, id).await?;
-    Ok(Json(serde_json::to_value(rule).unwrap()))
+    Ok(Json(rule))
 }
 
 async fn update(
     State(state): State<AppState>,
     Path((project_id, id)): Path<(i64, i64)>,
     Json(body): Json<CreateRule>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<LogRule>> {
     let rule = state
         .db
         .update_rule(
@@ -80,7 +77,7 @@ async fn update(
             &body.extraction_rules,
         )
         .await?;
-    Ok(Json(serde_json::to_value(rule).unwrap()))
+    Ok(Json(rule))
 }
 
 async fn remove(

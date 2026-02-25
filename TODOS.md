@@ -474,11 +474,8 @@ Added `state_changed` flag to both `analyze()` and `analyze_streaming()` loops. 
 
 ### Medium Priority — Server & Frontend
 
-#### P20. Eliminate double serialization in server routes
-**File:** `crates/logium-server/src/routes/analysis.rs` (and ~18 other route handlers)
-**Issue:** Every route first converts the response to a generic `serde_json::Value` tree (`serde_json::to_value(result).unwrap()`), then Axum's `Json` extractor serializes that tree to JSON — double serialization.
-**Fix:** Use `Json(result)` directly since all response types already derive `Serialize`. Single-pass serialization.
-**Est. impact:** ~2x fewer allocations per response, faster serialization.
+#### P20. Eliminate double serialization in server routes — Done
+Replaced `Json(serde_json::to_value(x).unwrap())` with `Json(x)` using concrete types across 19 handlers in 7 route files (projects, sources, rules, patterns, rulesets, analysis, clustering). Single-pass serialization, no intermediate `serde_json::Value` tree.
 
 #### P21. Use paginated `/raw-lines` endpoint in LogViewer
 **Files:** `ui/src/lib/LogViewer.svelte`, `crates/logium-server/src/routes/sources.rs`

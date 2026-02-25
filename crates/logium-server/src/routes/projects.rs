@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 use super::ApiResult;
 use crate::AppState;
+use crate::db::ProjectRow;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -21,37 +22,34 @@ struct CreateProject {
     name: String,
 }
 
-async fn list(State(state): State<AppState>) -> ApiResult<Json<serde_json::Value>> {
+async fn list(State(state): State<AppState>) -> ApiResult<Json<Vec<ProjectRow>>> {
     let projects = state.db.list_projects().await?;
-    Ok(Json(serde_json::to_value(projects).unwrap()))
+    Ok(Json(projects))
 }
 
 async fn create(
     State(state): State<AppState>,
     Json(body): Json<CreateProject>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<ProjectRow>)> {
     let project = state.db.create_project(&body.name).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(serde_json::to_value(project).unwrap()),
-    ))
+    Ok((StatusCode::CREATED, Json(project)))
 }
 
 async fn get_one(
     State(state): State<AppState>,
     Path(id): Path<i64>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ProjectRow>> {
     let project = state.db.get_project(id).await?;
-    Ok(Json(serde_json::to_value(project).unwrap()))
+    Ok(Json(project))
 }
 
 async fn update(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     Json(body): Json<CreateProject>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<ProjectRow>> {
     let project = state.db.update_project(id, &body.name).await?;
-    Ok(Json(serde_json::to_value(project).unwrap()))
+    Ok(Json(project))
 }
 
 async fn remove(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<StatusCode> {

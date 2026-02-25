@@ -4,6 +4,8 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::Deserialize;
 
+use logium_core::model::Pattern;
+
 use super::ApiResult;
 use crate::AppState;
 use crate::db::CreatePredicate;
@@ -29,41 +31,41 @@ struct CreatePattern {
 async fn list(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Vec<Pattern>>> {
     let patterns = state.db.list_patterns(project_id).await?;
-    Ok(Json(serde_json::to_value(patterns).unwrap()))
+    Ok(Json(patterns))
 }
 
 async fn create(
     State(state): State<AppState>,
     Path(project_id): Path<i64>,
     Json(body): Json<CreatePattern>,
-) -> ApiResult<(StatusCode, Json<serde_json::Value>)> {
+) -> ApiResult<(StatusCode, Json<Pattern>)> {
     let p = state
         .db
         .create_pattern(project_id, &body.name, &body.predicates)
         .await?;
-    Ok((StatusCode::CREATED, Json(serde_json::to_value(p).unwrap())))
+    Ok((StatusCode::CREATED, Json(p)))
 }
 
 async fn get_one(
     State(state): State<AppState>,
     Path((project_id, id)): Path<(i64, i64)>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Pattern>> {
     let p = state.db.get_pattern(project_id, id).await?;
-    Ok(Json(serde_json::to_value(p).unwrap()))
+    Ok(Json(p))
 }
 
 async fn update(
     State(state): State<AppState>,
     Path((project_id, id)): Path<(i64, i64)>,
     Json(body): Json<CreatePattern>,
-) -> ApiResult<Json<serde_json::Value>> {
+) -> ApiResult<Json<Pattern>> {
     let p = state
         .db
         .update_pattern(project_id, id, &body.name, &body.predicates)
         .await?;
-    Ok(Json(serde_json::to_value(p).unwrap()))
+    Ok(Json(p))
 }
 
 async fn remove(
