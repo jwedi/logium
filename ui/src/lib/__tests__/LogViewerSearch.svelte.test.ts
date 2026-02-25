@@ -17,11 +17,12 @@ vi.mock('../api', () => ({
   rules: {
     list: vi.fn().mockResolvedValue([]),
   },
+  sources: {
+    rawLines: vi.fn(),
+  },
 }));
 
-// Mock fetch for file content
-const fetchMock = vi.fn();
-vi.stubGlobal('fetch', fetchMock);
+import { sources as sourcesApi } from '../api';
 
 function renderLogViewer(overrides: Record<string, any> = {}) {
   const props = {
@@ -48,9 +49,10 @@ async function typeInSearch(text: string) {
 describe('LogViewer Search', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      text: () => Promise.resolve(LOG_CONTENT),
+    const lines = LOG_CONTENT.split('\n');
+    vi.mocked(sourcesApi.rawLines).mockResolvedValue({
+      lines,
+      total_lines: lines.length,
     });
   });
 
@@ -121,7 +123,7 @@ describe('LogViewer Search', () => {
   it('shows match count for plain text search', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -135,7 +137,7 @@ describe('LogViewer Search', () => {
   it('shows "No matches" when query has no results', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -160,7 +162,7 @@ describe('LogViewer Search', () => {
   it('search is case-insensitive', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -176,7 +178,7 @@ describe('LogViewer Search', () => {
   it('highlights matching text with mark elements', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -192,7 +194,7 @@ describe('LogViewer Search', () => {
   it('applies current-search-match class to the active match line', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -210,7 +212,7 @@ describe('LogViewer Search', () => {
   it('navigates to next match on Enter', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -230,7 +232,7 @@ describe('LogViewer Search', () => {
   it('navigates to previous match on Shift+Enter', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -251,7 +253,7 @@ describe('LogViewer Search', () => {
   it('navigates via arrow buttons', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -273,7 +275,7 @@ describe('LogViewer Search', () => {
   it('wraps around when navigating past last match', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -311,7 +313,7 @@ describe('LogViewer Search', () => {
   it('matches regex patterns in regex mode', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -331,7 +333,7 @@ describe('LogViewer Search', () => {
   it('handles invalid regex gracefully', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await openSearch();
@@ -356,7 +358,7 @@ describe('LogViewer Search', () => {
   it('does not interfere with text selection popup', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // The selection popup element should exist in the DOM

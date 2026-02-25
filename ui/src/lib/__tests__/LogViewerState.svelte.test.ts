@@ -19,10 +19,12 @@ vi.mock('../api', () => ({
   rules: {
     list: vi.fn().mockResolvedValue([]),
   },
+  sources: {
+    rawLines: vi.fn(),
+  },
 }));
 
-const fetchMock = vi.fn();
-vi.stubGlobal('fetch', fetchMock);
+import { sources as sourcesApi } from '../api';
 
 function renderLogViewer(overrides: Record<string, any> = {}) {
   const props = {
@@ -97,9 +99,10 @@ function makeMultiSourceStateChanges() {
 describe('LogViewer Accumulated State', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      text: () => Promise.resolve(LOG_CONTENT),
+    const lines = LOG_CONTENT.split('\n');
+    vi.mocked(sourcesApi.rawLines).mockResolvedValue({
+      lines,
+      total_lines: lines.length,
     });
   });
 
@@ -109,7 +112,7 @@ describe('LogViewer Accumulated State', () => {
 
     renderLogViewer({ ruleMatches, stateChanges });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // Click the first ERROR line (index 2)
@@ -133,7 +136,7 @@ describe('LogViewer Accumulated State', () => {
 
     renderLogViewer({ ruleMatches, stateChanges });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // Click the first ERROR line (timestamp 2024-01-15T10:30:02.000)
@@ -168,7 +171,7 @@ describe('LogViewer Accumulated State', () => {
 
     renderLogViewer({ ruleMatches, stateChanges });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // Click the second ERROR line (timestamp 10:30:05)
@@ -192,7 +195,7 @@ describe('LogViewer Accumulated State', () => {
 
     renderLogViewer({ ruleMatches, stateChanges });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // Click line index 3 "WARN Retrying..." — not a matched line, but after ERROR at index 2
@@ -219,7 +222,7 @@ describe('LogViewer Accumulated State', () => {
 
     renderLogViewer({ ruleMatches: [], stateChanges });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // Click line 0 (before any matches)

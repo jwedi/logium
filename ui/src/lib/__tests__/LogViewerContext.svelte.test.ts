@@ -19,10 +19,12 @@ vi.mock('../api', () => ({
   rules: {
     list: vi.fn().mockResolvedValue([]),
   },
+  sources: {
+    rawLines: vi.fn(),
+  },
 }));
 
-const fetchMock = vi.fn();
-vi.stubGlobal('fetch', fetchMock);
+import { sources as sourcesApi } from '../api';
 
 function renderLogViewer(overrides: Record<string, any> = {}) {
   const props = {
@@ -70,16 +72,17 @@ function makeErrorRuleMatches() {
 describe('LogViewer Context Expansion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      text: () => Promise.resolve(LOG_CONTENT),
+    const lines = LOG_CONTENT.split('\n');
+    vi.mocked(sourcesApi.rawLines).mockResolvedValue({
+      lines,
+      total_lines: lines.length,
     });
   });
 
   it('shows expand button on matched lines when filter active', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -93,7 +96,7 @@ describe('LogViewer Context Expansion', () => {
   it('does not show expand button when no filter active', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // No filter active - should have spacers, not expand buttons
@@ -106,7 +109,7 @@ describe('LogViewer Context Expansion', () => {
   it('clicking expand shows context lines', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -132,7 +135,7 @@ describe('LogViewer Context Expansion', () => {
   it('context lines have context-line class', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -153,7 +156,7 @@ describe('LogViewer Context Expansion', () => {
   it('context lines show original line numbers', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -177,7 +180,7 @@ describe('LogViewer Context Expansion', () => {
   it('collapse removes context lines', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -207,7 +210,7 @@ describe('LogViewer Context Expansion', () => {
   it('expand all shows context for all matches', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -229,7 +232,7 @@ describe('LogViewer Context Expansion', () => {
   it('collapse all removes all context', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -258,7 +261,7 @@ describe('LogViewer Context Expansion', () => {
   it('context size controls number of lines', async () => {
     renderLogViewer({ ruleMatches: [makeErrorRuleMatches()[0]] }); // Rule match only on first ERROR
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -288,7 +291,7 @@ describe('LogViewer Context Expansion', () => {
     // Use a single match that doesn't cover all lines, with small context
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -319,7 +322,7 @@ describe('LogViewer Context Expansion', () => {
   it('filter count shows base count not expanded count', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -340,7 +343,7 @@ describe('LogViewer Context Expansion', () => {
   it('search works within context lines', async () => {
     renderLogViewer({ ruleMatches: makeErrorRuleMatches() });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
