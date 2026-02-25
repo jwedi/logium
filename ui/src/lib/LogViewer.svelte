@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import {
     rules as rulesApi,
+    sources as sourcesApi,
     type Source,
     type LogRule,
     type RuleMatch,
@@ -32,7 +33,18 @@
   const LINE_HEIGHT = 22;
   const OVERSCAN = 10;
 
-  let lines: string[] = $state([]);
+  const PAGE_SIZE = 500;
+
+  let totalLines: number = $state(0);
+  let pageMap: Map<number, string[]> = $state(new Map());
+  let loadingPages: boolean = $state(false);
+  let abortController: AbortController | null = null;
+
+  function getLine(idx: number): string {
+    const page = pageMap.get(Math.floor(idx / PAGE_SIZE));
+    return page?.[idx % PAGE_SIZE] ?? '';
+  }
+
   let container: HTMLDivElement | undefined = $state();
   let scrollTop = $state(0);
   let containerHeight = $state(600);
@@ -52,6 +64,9 @@
   // Filter state
   let filterQuery = $state('');
   let filterIsRegex = $state(false);
+
+  // Whether full data is needed (filter, search, or analysis active)
+  let needsAllLines: boolean = $derived(!!filterQuery || !!searchQuery || ruleMatches.length > 0);
 
   let filterError: string | null = $derived(
     filterIsRegex && filterQuery ? validateRegex(filterQuery) : null,
@@ -81,12 +96,17 @@
   // Base filter: indices passing the text/regex filter
   let baseFilteredIndices: number[] = $derived.by(() => {
     if (!filterQuery || !filterRegex) {
-      return Array.from({ length: lines.length }, (_, i) => i);
+      return Array.from({ length: totalLines }, (_, i) => i);
     }
     const result: number[] = [];
-    for (let i = 0; i < lines.length; i++) {
-      filterRegex.lastIndex = 0;
-      if (filterRegex.test(lines[i])) result.push(i);
+    const sortedPages = [...pageMap.keys()].sort((a, b) => a - b);
+    for (const pageNum of sortedPages) {
+      const page = pageMap.get(pageNum)!;
+      const offset = pageNum * PAGE_SIZE;
+      for (let i = 0; i < page.length; i++) {
+        filterRegex.lastIndex = 0;
+        if (filterRegex.test(page[i])) result.push(offset + i);
+      }
     }
     return result;
   });
@@ -99,7 +119,7 @@
     for (const lineIdx of expandedLines) {
       if (!lineMatchMap.has(lineIdx) || !baseSet.has(lineIdx)) continue;
       const lo = Math.max(0, lineIdx - contextSize);
-      const hi = Math.min(lines.length - 1, lineIdx + contextSize);
+      const hi = Math.min(totalLines - 1, lineIdx + contextSize);
       for (let i = lo; i <= hi; i++) {
         if (!baseSet.has(i)) additions.push(i);
       }
@@ -129,9 +149,12 @@
   // Strip trailing \r so Windows-formatted files match engine output (which strips \r)
   let lineContentIndex = $derived.by(() => {
     const map = new Map<string, number>();
-    for (let i = 0; i < lines.length; i++) {
-      const key = lines[i].replace(/\r$/, '');
-      if (!map.has(key)) map.set(key, i);
+    for (const [pageNum, page] of pageMap) {
+      const offset = pageNum * PAGE_SIZE;
+      for (let i = 0; i < page.length; i++) {
+        const key = page[i].replace(/\r$/, '');
+        if (!map.has(key)) map.set(key, offset + i);
+      }
     }
     return map;
   });
@@ -147,7 +170,7 @@
   let visibleLines = $derived(
     filteredIndices.slice(startIdx, endIdx).map((origIdx, i) => ({
       origIdx,
-      text: lines[origIdx],
+      text: getLine(origIdx),
       gapBefore:
         i === 0
           ? startIdx > 0 && origIdx !== filteredIndices[startIdx - 1] + 1
@@ -175,7 +198,7 @@
     const result: number[] = [];
     for (let fi = 0; fi < filteredIndices.length; fi++) {
       searchRegex.lastIndex = 0;
-      if (searchRegex.test(lines[filteredIndices[fi]])) result.push(fi);
+      if (searchRegex.test(getLine(filteredIndices[fi]))) result.push(fi);
     }
     return result;
   });
@@ -424,31 +447,121 @@
     return segments.length > 0 ? segments : [{ text: line, isMatch: false }];
   }
 
-  // Simulate reading file lines from the source file_path
-  // In real usage, the backend would serve file content
-  async function loadFileContent() {
+  async function loadFirstPage() {
+    abortController?.abort();
+    abortController = new AbortController();
+    const signal = abortController.signal;
+
+    pageMap = new Map();
+    totalLines = 0;
+    loadingPages = false;
+
     if (!source.file_path) {
-      lines = ['(No file uploaded for this source)'];
+      totalLines = 1;
+      pageMap = new Map([[0, ['(No file uploaded for this source)']]]);
       return;
     }
     try {
-      const res = await fetch(`/api/projects/${projectId}/sources/${source.id}/content`);
-      if (res.ok) {
-        const text = await res.text();
-        lines = text.split('\n');
-      } else {
-        lines = [`(Could not load file: ${res.status})`];
-      }
+      const resp = await sourcesApi.rawLines(projectId, source.id, 0, PAGE_SIZE, signal);
+      if (signal.aborted) return;
+      totalLines = resp.total_lines;
+      pageMap = new Map([[0, resp.lines]]);
     } catch {
-      lines = ['(Could not load file content)'];
+      if (abortController?.signal.aborted) return;
+      totalLines = 1;
+      pageMap = new Map([[0, ['(Could not load file content)']]]);
+    }
+  }
+
+  async function loadAllRemainingPages(signal: AbortSignal) {
+    const totalPages = Math.ceil(totalLines / PAGE_SIZE);
+    if (pageMap.size >= totalPages) return;
+    loadingPages = true;
+    const CONCURRENCY = 3;
+    for (let batch = 0; batch < totalPages; batch += CONCURRENCY) {
+      if (signal.aborted) break;
+      const fetches = [];
+      for (let p = batch; p < Math.min(batch + CONCURRENCY, totalPages); p++) {
+        if (pageMap.has(p)) continue;
+        fetches.push(
+          sourcesApi
+            .rawLines(projectId, source.id, p * PAGE_SIZE, PAGE_SIZE, signal)
+            .then((resp) => ({ page: p, lines: resp.lines })),
+        );
+      }
+      if (fetches.length === 0) continue;
+      try {
+        const results = await Promise.all(fetches);
+        if (signal.aborted) break;
+        const next = new Map(pageMap);
+        for (const { page, lines } of results) next.set(page, lines);
+        pageMap = next;
+      } catch {
+        break;
+      }
+    }
+    if (!signal.aborted) loadingPages = false;
+  }
+
+  async function ensureViewportPages(signal: AbortSignal) {
+    if (totalLines === 0 || needsAllLines) return;
+    const viewStart = Math.max(0, Math.floor(scrollTop / LINE_HEIGHT) - OVERSCAN);
+    const viewEnd = Math.ceil((scrollTop + containerHeight) / LINE_HEIGHT) + OVERSCAN;
+    const startPage = Math.max(0, Math.floor(viewStart / PAGE_SIZE) - 1);
+    const endPage = Math.min(Math.ceil(totalLines / PAGE_SIZE) - 1, Math.ceil(viewEnd / PAGE_SIZE));
+    const missing = [];
+    for (let p = startPage; p <= endPage; p++) {
+      if (!pageMap.has(p)) missing.push(p);
+    }
+    if (missing.length === 0) return;
+    try {
+      const results = await Promise.all(
+        missing.map((p) =>
+          sourcesApi
+            .rawLines(projectId, source.id, p * PAGE_SIZE, PAGE_SIZE, signal)
+            .then((resp) => ({ page: p, lines: resp.lines })),
+        ),
+      );
+      if (signal.aborted) return;
+      const next = new Map(pageMap);
+      for (const { page, lines } of results) next.set(page, lines);
+      pageMap = next;
+    } catch {
+      /* ignore */
     }
   }
 
   $effect(() => {
     source;
     expandedLines = new Set();
-    loadFileContent();
+    loadFirstPage();
     loadRules();
+  });
+
+  // Scroll-driven page fetching (debounced, windowed mode only)
+  let scrollFetchTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    scrollTop;
+    containerHeight;
+    if (needsAllLines || !abortController) return;
+    if (scrollFetchTimer) clearTimeout(scrollFetchTimer);
+    scrollFetchTimer = setTimeout(() => {
+      if (abortController && !abortController.signal.aborted) {
+        ensureViewportPages(abortController.signal);
+      }
+    }, 100);
+  });
+
+  // Load all pages when filter/search/analysis activates
+  $effect(() => {
+    if (
+      needsAllLines &&
+      totalLines > PAGE_SIZE &&
+      abortController &&
+      !abortController.signal.aborted
+    ) {
+      loadAllRemainingPages(abortController.signal);
+    }
   });
 
   $effect(() => {
@@ -471,7 +584,7 @@
 
   // Navigate to a specific line when navigateTarget is set (from timeline/histogram click)
   $effect(() => {
-    if (!navigateTarget || lines.length === 0) return;
+    if (!navigateTarget || totalLines === 0) return;
     const _seq = navigateTarget.seq; // read seq so Svelte re-fires on every new request
     const raw = navigateTarget.raw;
     const origIdx = lineContentIndex.get(raw) ?? -1;
@@ -532,8 +645,9 @@
           title="Toggle filter regex">.*</button
         >
         <span class="filter-count">
-          {filterQuery ? `${baseFilteredIndices.length} of ${lines.length} lines` : ''}
+          {filterQuery ? `${baseFilteredIndices.length} of ${totalLines} lines` : ''}
         </span>
+        {#if loadingPages}<span class="loading-indicator">Loading...</span>{/if}
         {#if filterError}<span class="regex-error" title={filterError}>Invalid regex</span>{/if}
         {#if filterQuery}
           <button
@@ -1018,6 +1132,11 @@
     padding: 2px 4px;
     font-size: 12px;
     text-align: center;
+  }
+
+  .loading-indicator {
+    font-size: 12px;
+    color: var(--text-muted);
   }
 
   .regex-error {

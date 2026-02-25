@@ -17,10 +17,12 @@ vi.mock('../api', () => ({
   rules: {
     list: vi.fn().mockResolvedValue([]),
   },
+  sources: {
+    rawLines: vi.fn(),
+  },
 }));
 
-const fetchMock = vi.fn();
-vi.stubGlobal('fetch', fetchMock);
+import { sources as sourcesApi } from '../api';
 
 function renderLogViewer(overrides: Record<string, any> = {}) {
   const props = {
@@ -53,9 +55,10 @@ async function typeInSearch(text: string) {
 describe('LogViewer Filter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      text: () => Promise.resolve(LOG_CONTENT),
+    const lines = LOG_CONTENT.split('\n');
+    vi.mocked(sourcesApi.rawLines).mockResolvedValue({
+      lines,
+      total_lines: lines.length,
     });
   });
 
@@ -69,7 +72,7 @@ describe('LogViewer Filter', () => {
   it('shows all lines when filter is empty', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await waitFor(() => {
@@ -81,7 +84,7 @@ describe('LogViewer Filter', () => {
   it('hides non-matching lines', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -95,7 +98,7 @@ describe('LogViewer Filter', () => {
   it('filter is case-insensitive', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('error');
@@ -109,7 +112,7 @@ describe('LogViewer Filter', () => {
   it('displays original line numbers', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -126,7 +129,7 @@ describe('LogViewer Filter', () => {
   it('shows "N of M lines" count', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -160,7 +163,7 @@ describe('LogViewer Filter', () => {
   it('filters with regex', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // Enable regex mode
@@ -178,7 +181,7 @@ describe('LogViewer Filter', () => {
   it('invalid regex handled gracefully', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // Enable regex mode
@@ -200,7 +203,7 @@ describe('LogViewer Filter', () => {
   it('highlights filter matches', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -214,7 +217,7 @@ describe('LogViewer Filter', () => {
   it('clear button clears filter', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     await typeInFilter('ERROR');
@@ -237,7 +240,7 @@ describe('LogViewer Filter', () => {
   it('search within filtered results', async () => {
     renderLogViewer();
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // First filter to ERROR lines only
@@ -265,7 +268,7 @@ describe('LogViewer Filter', () => {
 
     renderLogViewer({ ruleMatches: [ruleMatch] });
     await tick();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(sourcesApi.rawLines).toHaveBeenCalled());
     await tick();
 
     // Filter to ERROR lines

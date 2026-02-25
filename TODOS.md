@@ -477,11 +477,8 @@ Added `state_changed` flag to both `analyze()` and `analyze_streaming()` loops. 
 #### P20. Eliminate double serialization in server routes — Done
 Replaced `Json(serde_json::to_value(x).unwrap())` with `Json(x)` using concrete types across 19 handlers in 7 route files (projects, sources, rules, patterns, rulesets, analysis, clustering). Single-pass serialization, no intermediate `serde_json::Value` tree.
 
-#### P21. Use paginated `/raw-lines` endpoint in LogViewer
-**Files:** `ui/src/lib/LogViewer.svelte`, `crates/logium-server/src/routes/sources.rs`
-**Issue:** LogViewer loads the entire file via `/content` endpoint (`read_to_string`), even though a paginated `/raw-lines` endpoint already exists. For 100MB+ files, the entire content is held in both server and browser memory.
-**Fix:** Switch LogViewer to fetch pages from `/raw-lines` on demand (e.g., load visible range + buffer). The virtual scroll implementation already tracks visible line indices — use those to drive paginated fetches.
-**Est. impact:** Enables viewing of arbitrarily large files without browser memory exhaustion.
+#### P21. Use paginated `/raw-lines` endpoint in LogViewer — Done
+Switched LogViewer from `GET /content` (full file read) to paginated `/raw-lines` endpoint. Loads first page (500 lines) on mount, fetches viewport pages on scroll (debounced), and background-loads all remaining pages when filter/search/analysis activates. Added `AbortSignal` support to `sources.rawLines` API. Updated all 4 LogViewer test files to mock `sources.rawLines` instead of `global.fetch`.
 
 #### P22. Shrink LogLine with `Option<Box<Value>>`
 **File:** `crates/logium-core/src/model.rs`

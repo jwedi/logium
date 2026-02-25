@@ -289,9 +289,12 @@ export const sources = {
   },
   delete: (pid: number, id: number) =>
     request<void>(`/projects/${pid}/sources/${id}`, { method: 'DELETE' }),
-  rawLines: (pid: number, id: number, offset = 0, limit = 200) => {
+  rawLines: (pid: number, id: number, offset = 0, limit = 200, signal?: AbortSignal) => {
     const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
-    return request<RawLinesResponse>(`/projects/${pid}/sources/${id}/raw-lines?${params}`);
+    return request<RawLinesResponse>(
+      `/projects/${pid}/sources/${id}/raw-lines?${params}`,
+      signal ? { signal } : undefined,
+    );
   },
 };
 
