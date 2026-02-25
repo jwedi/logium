@@ -103,7 +103,7 @@ pub struct LogLine {
     pub raw: Arc<str>,
     pub content: Arc<str>,
     #[serde(skip)]
-    pub cached_json: Option<serde_json::Value>,
+    pub cached_json: Option<Box<serde_json::Value>>,
 }
 
 /// Match modes for log rules.

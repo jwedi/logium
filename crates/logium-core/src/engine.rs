@@ -241,7 +241,7 @@ impl Iterator for LogLineIterator {
                         source_id: self.source_id,
                         content: Arc::clone(&raw),
                         raw,
-                        cached_json: Some(json_val),
+                        cached_json: Some(Box::new(json_val)),
                     }))
                 }
                 Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
@@ -845,7 +845,9 @@ fn process_source(
                     }
                 }
                 let json_fields = if is_json {
-                    if let Some(serde_json::Value::Object(map)) = line.cached_json.take() {
+                    if let Some(serde_json::Value::Object(map)) =
+                        line.cached_json.take().map(|b| *b)
+                    {
                         let mut fields = HashMap::new();
                         for (key, value) in &map {
                             if let Some(sv) = json_value_to_state_value(value) {
