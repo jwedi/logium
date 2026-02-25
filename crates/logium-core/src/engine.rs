@@ -719,15 +719,11 @@ pub fn evaluate_rule(
     line: &LogLine,
     compiled: &CompiledRule,
 ) -> Option<HashMap<String, StateValue>> {
-    let matches: Vec<usize> = compiled
-        .match_set
-        .matches(&line.content)
-        .into_iter()
-        .collect();
+    let set_matches = compiled.match_set.matches(&line.content);
 
     let matched = match compiled.match_mode {
-        MatchMode::Any => !matches.is_empty(),
-        MatchMode::All => matches.len() == compiled.match_count,
+        MatchMode::Any => set_matches.matched_any(),
+        MatchMode::All => set_matches.iter().count() == compiled.match_count,
     };
 
     if !matched {

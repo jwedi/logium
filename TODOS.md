@@ -460,11 +460,9 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 **File:** `crates/logium-core/src/engine.rs` — `LogLineIterator::next()`
 Used `Cow<'_, str>` for `ts_input` (zero-copy borrow from regex captures or `first_line`), pre-computed `augmented_fmt` once in the constructor as `Option<String>`, and reused a `ts_buf: String` buffer field for `augmented_input` via `write!`. Applied same optimization to the JSON path (removed `ts_str.to_string()`). Added `test_iterator_extraction_regex_with_default_year` test covering the combined extraction_regex + default_year path.
 
-#### P17. Avoid Vec allocation in RegexSet match evaluation
+#### P17. Avoid Vec allocation in RegexSet match evaluation — Done
 **File:** `crates/logium-core/src/engine.rs` — `evaluate_rule()`
-**Issue:** `SetMatches` collected into a `Vec<usize>` just to check `is_empty()` or `len()`. The `SetMatches` type already provides `.matched_any()` and `.len()` — use those directly. Saves one heap allocation per rule per line (51K allocations per rule in the benchmark).
-**Fix:** Replace `compiled.match_set.matches(&line.content).into_iter().collect::<Vec<_>>()` with direct `SetMatches` method calls.
-**Est. impact:** 5-10% throughput improvement on rule evaluation.
+Replaced `SetMatches` → `Vec<usize>` → `.is_empty()`/`.len()` with direct `SetMatches` methods: `.matched_any()` (O(1) bitset check for `Any` mode) and `.iter().count()` (allocation-free iteration for `All` mode). Eliminates one heap allocation per rule per line. Benchmark: cross-source 4.95ms → 4.57ms (~8% faster), large file 82.0ms → 80.7ms (~1.5% faster).
 
 #### P18. Chunk-based file processing to cap memory — Done
 Rewrote `process_source()` to read lines in chunks of 10K via `iter.by_ref().take(PROCESS_CHUNK_SIZE)`, evaluate rules in parallel per chunk with rayon, and extend the output Vec. Peak input buffer capped at 10K lines regardless of file size. Added `test_process_source_chunked` test (10,500 lines across 2 chunks). Benchmark shows ~6.5% overhead on 51K-line file (within 10% threshold).
