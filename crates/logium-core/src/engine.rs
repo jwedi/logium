@@ -1265,6 +1265,8 @@ pub fn analyze(
             break;
         }
 
+        let mut state_changed = false;
+
         // Apply pre-computed JSON fields as state
         if let Some(json_fields) = &processed.json_fields {
             let source_name = state_manager
@@ -1289,6 +1291,7 @@ pub fn analyze(
                     },
                 );
                 if old != new {
+                    state_changed = true;
                     all_state_changes.push(StateChange {
                         timestamp: line.timestamp,
                         source_id: line.source_id,
@@ -1318,6 +1321,9 @@ pub fn analyze(
                     line.timestamp,
                 );
 
+                if !changes.is_empty() {
+                    state_changed = true;
+                }
                 for (key, old, new) in changes {
                     all_state_changes.push(StateChange {
                         timestamp: line.timestamp,
@@ -1339,11 +1345,13 @@ pub fn analyze(
             }
         }
 
-        // Evaluate patterns after each line
-        let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
-        for mut pm in pmatches {
-            pm.timestamp = line.timestamp;
-            all_pattern_matches.push(pm);
+        // Evaluate patterns only when state changed
+        if state_changed {
+            let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
+            for mut pm in pmatches {
+                pm.timestamp = line.timestamp;
+                all_pattern_matches.push(pm);
+            }
         }
     }
 
@@ -1448,6 +1456,8 @@ pub fn analyze_streaming(
 
         lines_processed += 1;
 
+        let mut state_changed = false;
+
         // Apply pre-computed JSON fields as state
         if let Some(json_fields) = &processed.json_fields {
             let source_name = state_manager
@@ -1472,6 +1482,7 @@ pub fn analyze_streaming(
                     },
                 );
                 if old != new {
+                    state_changed = true;
                     total_state_changes += 1;
                     if tx
                         .send(AnalysisEvent::StateChange(StateChange {
@@ -1507,6 +1518,9 @@ pub fn analyze_streaming(
                     line.timestamp,
                 );
 
+                if !changes.is_empty() {
+                    state_changed = true;
+                }
                 for (key, old, new) in changes {
                     total_state_changes += 1;
                     if tx
@@ -1538,12 +1552,15 @@ pub fn analyze_streaming(
             }
         }
 
-        let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
-        for mut pm in pmatches {
-            pm.timestamp = line.timestamp;
-            total_pattern_matches += 1;
-            if tx.send(AnalysisEvent::PatternMatch(pm)).is_err() {
-                return Ok(());
+        // Evaluate patterns only when state changed
+        if state_changed {
+            let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
+            for mut pm in pmatches {
+                pm.timestamp = line.timestamp;
+                total_pattern_matches += 1;
+                if tx.send(AnalysisEvent::PatternMatch(pm)).is_err() {
+                    return Ok(());
+                }
             }
         }
 

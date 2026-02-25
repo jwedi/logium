@@ -469,11 +469,8 @@ Rewrote `process_source()` to read lines in chunks of 10K via `iter.by_ref().tak
 
 ### High Priority — Algorithmic Skips
 
-#### P19. Skip pattern evaluation when no state changed
-**File:** `crates/logium-core/src/engine.rs` — `analyze()` Phase 2 loop
-**Issue:** `evaluate_patterns()` is called after every line, even when no rules matched and no state changed. Pattern evaluation iterates all patterns and checks predicates via HashMap lookups.
-**Fix:** Track a boolean `any_state_changed` flag. Only call `evaluate_patterns()` when the flag is true.
-**Est. impact:** 5-20% throughput improvement depending on match rate (bigger win when few lines match).
+#### P19. Skip pattern evaluation when no state changed — Done
+Added `state_changed` flag to both `analyze()` and `analyze_streaming()` loops. Pattern evaluation is now skipped when no state changed on a given line. Benchmark: 51K-line test improved from ~80.7ms to ~70.3ms (~13% faster).
 
 ### Medium Priority — Server & Frontend
 
