@@ -1347,8 +1347,8 @@ pub fn analyze(
             }
         }
 
-        // Evaluate patterns only when state changed
-        if state_changed {
+        // Evaluate patterns when state changed or any rule matched (patterns re-fire)
+        if state_changed || !processed.rule_matches.is_empty() {
             let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
             for mut pm in pmatches {
                 pm.timestamp = line.timestamp;
@@ -1554,8 +1554,8 @@ pub fn analyze_streaming(
             }
         }
 
-        // Evaluate patterns only when state changed
-        if state_changed {
+        // Evaluate patterns when state changed or any rule matched (patterns re-fire)
+        if state_changed || !processed.rule_matches.is_empty() {
             let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
             for mut pm in pmatches {
                 pm.timestamp = line.timestamp;
@@ -4095,6 +4095,98 @@ mod tests {
         assert_eq!(
             lines[2].timestamp,
             NaiveDateTime::parse_from_str("2024-06-15 12:00:03", "%Y-%m-%d %H:%M:%S").unwrap()
+        );
+    }
+
+    #[test]
+    fn test_pattern_fires_on_consecutive_lines() {
+        // 3 consecutive lines that all match the same rule extracting status=running.
+        // Pattern checks status == "running". Since the rule matches all 3 lines,
+        // the pattern should fire 3 times — not 1.
+        let mut log = NamedTempFile::new().unwrap();
+        writeln!(log, "2024-01-01 00:00:01 [INFO] Server status: running").unwrap();
+        writeln!(log, "2024-01-01 00:00:02 [INFO] Server status: running").unwrap();
+        writeln!(log, "2024-01-01 00:00:03 [INFO] Server status: running").unwrap();
+
+        let ts_template = make_ts_template();
+
+        let template = SourceTemplate {
+            id: 1,
+            name: "default".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
+            json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
+        };
+
+        let sources = vec![Source {
+            id: 1,
+            name: "server".into(),
+            template_id: 1,
+            file_path: log.path().to_str().unwrap().into(),
+        }];
+
+        let rule = LogRule {
+            id: 1,
+            name: "status_rule".into(),
+            match_mode: MatchMode::Any,
+            match_rules: vec![MatchRule {
+                id: 1,
+                pattern: r"Server status:".into(),
+            }],
+            extraction_rules: vec![ExtractionRule {
+                id: 1,
+                extraction_type: ExtractionType::Parsed,
+                state_key: "status".into(),
+                pattern: Some(r"Server status: (?P<status>\S+)".into()),
+                static_value: None,
+                mode: ExtractionMode::Replace,
+            }],
+        };
+
+        let rulesets = vec![Ruleset {
+            id: 1,
+            name: "rules".into(),
+            template_id: 1,
+            rule_ids: vec![1],
+        }];
+
+        let pattern = Pattern {
+            id: 1,
+            name: "status_running".into(),
+            predicates: vec![PatternPredicate {
+                source_name: "server".into(),
+                state_key: "status".into(),
+                operator: Operator::Eq,
+                operand: Operand::Literal(StateValue::String("running".into())),
+            }],
+        };
+
+        let result = analyze(
+            &sources,
+            &[template],
+            &[ts_template],
+            &[rule],
+            &rulesets,
+            &[pattern],
+            &TimeRange::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.rule_matches.len(),
+            3,
+            "expected 3 rule matches, got {}",
+            result.rule_matches.len()
+        );
+        assert_eq!(
+            result.pattern_matches.len(),
+            3,
+            "expected 3 pattern matches (re-fire on each line), got {}",
+            result.pattern_matches.len()
         );
     }
 }
