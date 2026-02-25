@@ -456,14 +456,9 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 
 ### Critical Priority — Hot Path Allocations & Memory
 
-#### P16. Eliminate per-line String allocations in LogLineIterator
+#### P16. Eliminate per-line String allocations in LogLineIterator — Done
 **File:** `crates/logium-core/src/engine.rs` — `LogLineIterator::next()`
-**Issue:** Three unnecessary heap allocations on every single log line:
-1. `ts_input` always allocated as `String` (`first_line.to_string()`) even when it could be a `&str` borrowed from `merged_raw`. Use `Cow<'_, str>` — borrow in the common no-extraction-regex case, own only when extraction regex captures a substring.
-2. `augmented_fmt` recomputed per line (`format!("%Y {}", self.timestamp_format)`) produces the same string for every line from the same source. Pre-compute once in `LogLineIterator::new()` and store as `Option<String>` field.
-3. `augmented_input` allocated per line (`format!("{year} {ts_input}")`). Use a reusable `String` buffer field (`ts_buf`) with `write!` to avoid per-line allocation.
-**Fix:** Use `Cow<'_, str>` for `ts_input`, pre-compute `augmented_fmt` once, reuse a `String` buffer for `augmented_input`.
-**Est. impact:** 15-25% throughput improvement for timestamp parsing, especially for yearless formats (syslog) where the augmented path runs for every line.
+Used `Cow<'_, str>` for `ts_input` (zero-copy borrow from regex captures or `first_line`), pre-computed `augmented_fmt` once in the constructor as `Option<String>`, and reused a `ts_buf: String` buffer field for `augmented_input` via `write!`. Applied same optimization to the JSON path (removed `ts_str.to_string()`). Added `test_iterator_extraction_regex_with_default_year` test covering the combined extraction_regex + default_year path.
 
 #### P17. Avoid Vec allocation in RegexSet match evaluation
 **File:** `crates/logium-core/src/engine.rs` — `evaluate_rule()`
