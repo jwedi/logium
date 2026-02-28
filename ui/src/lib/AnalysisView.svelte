@@ -541,6 +541,10 @@
         onBucketClick={(match) => {
           handleNavigate(match.source_id, match.log_line.raw);
         }}
+        onTimeRangeSelect={(start, end) => {
+          timeStart = start;
+          timeEnd = end;
+        }}
       />
     {/if}
 
@@ -599,6 +603,10 @@
             ruleMatches={sourceRuleMatches}
             onBucketClick={(match) => {
               requestNavigate(match.log_line.raw);
+            }}
+            onTimeRangeSelect={(start, end) => {
+              timeStart = start;
+              timeEnd = end;
             }}
           />
         {/if}

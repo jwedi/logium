@@ -729,3 +729,11 @@ Added `RegexTestInput.svelte` component with collapsible "Test" section: paste a
 **Status:** Done
 
 Added `test_timestamp_format()` public function to `logium-core::engine` that encapsulates the full timestamp parsing pipeline (extraction regex → parse → prefix parse → yearless fallback). New `POST /api/projects/:pid/timestamp-templates/test-format` endpoint in the server. Frontend `FormatTestInput.svelte` component follows the same UX pattern as `RegexTestInput`: collapsible "Test" section, paste a sample line or browse via RawFileViewer, 300ms debounced API call, shows parsed timestamp (green) or error (red). Integrated into both create and edit forms in `TimestampTemplateManager.svelte`. 5 Rust engine tests, 2 server deserialization tests, 4 frontend component tests.
+
+---
+
+### 57. Click-and-Drag Time Range Selection on Match Density Histogram
+
+**Status:** Done
+
+Added click-and-drag interaction to `EventDensityHistogram.svelte`: press on the histogram, drag to another bucket, and release to set the `timeStart`/`timeEnd` filter in AnalysisView. Works in both directions (left-to-right and right-to-left). Selection overlay shown during drag, crosshair cursor when selectable. Single clicks still fire `onBucketClick` for navigation. Pointer capture ensures drag works even when pointer leaves the SVG. Both histogram instances (table view and logs view) wired up. 5 new tests (drag selection, backward drag, single click vs drag, selection overlay, crosshair cursor).

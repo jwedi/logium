@@ -4,9 +4,11 @@
   let {
     ruleMatches,
     onBucketClick,
+    onTimeRangeSelect,
   }: {
     ruleMatches: RuleMatch[];
     onBucketClick?: (match: RuleMatch) => void;
+    onTimeRangeSelect?: (start: string, end: string) => void;
   } = $props();
 
   let containerWidth = $state(0);
@@ -77,9 +79,14 @@
   const GAP = 2;
   const PAD_X = 4;
 
+  let svgEl: SVGSVGElement;
+
   let hoveredIdx: number | null = $state(null);
   let tooltipX = $state(0);
   let tooltipY = $state(0);
+
+  let dragStartIdx: number | null = $state(null);
+  let dragCurrentIdx: number | null = $state(null);
 
   function formatLabel(ms: number): string {
     const d = new Date(ms);
@@ -95,6 +102,17 @@
     const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
     const dd = String(d.getUTCDate()).padStart(2, '0');
     return `${mo}/${dd} ${d.toISOString().slice(11, 19)}`;
+  }
+
+  function msToDatetimeLocal(ms: number): string {
+    const d = new Date(ms);
+    const yyyy = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(d.getUTCDate()).padStart(2, '0');
+    const hh = String(d.getUTCHours()).padStart(2, '0');
+    const mm = String(d.getUTCMinutes()).padStart(2, '0');
+    const ss = String(d.getUTCSeconds()).padStart(2, '0');
+    return `${yyyy}-${mo}-${dd}T${hh}:${mm}:${ss}`;
   }
 
   function chartWidth(): number {
@@ -117,10 +135,71 @@
     return Math.max(2, (count / maxCount) * BAR_AREA_HEIGHT);
   }
 
-  function handleClick(bucket: Bucket) {
-    if (onBucketClick && bucket.count > 0) {
-      onBucketClick(bucket.firstMatch);
+  function xToBucketIdx(clientX: number, svg: SVGSVGElement): number | null {
+    if (buckets.length === 0) return null;
+    const rect = svg.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const firstBarX = barX(0, buckets.length);
+    const bw = barWidth(buckets.length);
+    const step = bw + GAP;
+    const lastBarEnd = barX(buckets.length - 1, buckets.length) + bw;
+
+    if (x < firstBarX) return 0;
+    if (x >= lastBarEnd) return buckets.length - 1;
+
+    const idx = Math.floor((x - firstBarX) / step);
+    return Math.min(Math.max(0, idx), buckets.length - 1);
+  }
+
+  function handlePointerDown(e: PointerEvent) {
+    if (!onTimeRangeSelect && !onBucketClick) return;
+    if (!svgEl) return;
+    const idx = xToBucketIdx(e.clientX, svgEl);
+    if (idx === null) return;
+    dragStartIdx = idx;
+    dragCurrentIdx = idx;
+    svgEl.setPointerCapture?.(e.pointerId);
+  }
+
+  function handlePointerMove(e: PointerEvent) {
+    if (dragStartIdx === null) return;
+    if (!svgEl) return;
+    const idx = xToBucketIdx(e.clientX, svgEl);
+    if (idx !== null) dragCurrentIdx = idx;
+  }
+
+  function handlePointerUp() {
+    const startIdx = dragStartIdx;
+    const currentIdx = dragCurrentIdx;
+    if (startIdx === null || currentIdx === null) {
+      dragStartIdx = null;
+      dragCurrentIdx = null;
+      return;
     }
+
+    if (startIdx === currentIdx) {
+      // Single click — fire onBucketClick
+      const bucket = buckets[startIdx];
+      if (onBucketClick && bucket && bucket.count > 0) {
+        onBucketClick(bucket.firstMatch);
+      }
+    } else {
+      // Drag — fire onTimeRangeSelect
+      if (onTimeRangeSelect) {
+        const minIdx = Math.min(startIdx, currentIdx);
+        const maxIdx = Math.max(startIdx, currentIdx);
+        const fromBucket = buckets[minIdx];
+        const toBucket = buckets[maxIdx];
+        if (fromBucket && toBucket) {
+          const fromStr = msToDatetimeLocal(fromBucket.startMs);
+          const toStr = msToDatetimeLocal(toBucket.endMs);
+          onTimeRangeSelect(fromStr, toStr);
+        }
+      }
+    }
+
+    dragStartIdx = null;
+    dragCurrentIdx = null;
   }
 
   // Time labels: start, middle, end
@@ -144,7 +223,16 @@
 {#if buckets.length > 0}
   <div class="density-histogram card" bind:clientWidth={containerWidth}>
     <span class="histogram-title">Match Density</span>
-    <svg width="100%" height={TOTAL_HEIGHT}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <svg
+      bind:this={svgEl}
+      width="100%"
+      height={TOTAL_HEIGHT}
+      class:selectable={!!onTimeRangeSelect}
+      onpointerdown={handlePointerDown}
+      onpointermove={handlePointerMove}
+      onpointerup={handlePointerUp}
+    >
       <!-- Y-axis max count label -->
       <text
         x={Y_LABEL_WIDTH - 4}
@@ -171,22 +259,35 @@
         stroke="var(--border)"
         stroke-width="1"
       />
+      <!-- Selection overlay -->
+      {#if dragStartIdx !== null && dragCurrentIdx !== null && dragStartIdx !== dragCurrentIdx}
+        {@const minIdx = Math.min(dragStartIdx, dragCurrentIdx)}
+        {@const maxIdx = Math.max(dragStartIdx, dragCurrentIdx)}
+        {@const x1 = barX(minIdx, buckets.length)}
+        {@const x2 = barX(maxIdx, buckets.length) + barWidth(buckets.length)}
+        <rect
+          class="selection-overlay"
+          x={x1}
+          y={0}
+          width={x2 - x1}
+          height={BAR_AREA_HEIGHT}
+          fill="var(--accent)"
+          opacity="0.15"
+          pointer-events="none"
+        />
+      {/if}
       {#each buckets as bucket, i}
         {@const bw = barWidth(buckets.length)}
         {@const bx = barX(i, buckets.length)}
         {@const bh = barHeight(bucket.count)}
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
         <rect
           class="bar"
-          class:clickable={!!onBucketClick}
+          class:clickable={!!onBucketClick || !!onTimeRangeSelect}
           x={bx}
           y={BAR_AREA_HEIGHT - bh}
           width={bw}
           height={bh}
           opacity={hoveredIdx === i ? 1.0 : 0.7}
-          role={onBucketClick ? 'button' : undefined}
-          tabindex={onBucketClick ? 0 : undefined}
-          onclick={() => handleClick(bucket)}
           onmouseenter={(e) => {
             hoveredIdx = i;
             const rect = e.currentTarget.getBoundingClientRect();
@@ -250,6 +351,10 @@
 
   .bar.clickable {
     cursor: pointer;
+  }
+
+  svg.selectable {
+    cursor: crosshair;
   }
 
   .tooltip {
