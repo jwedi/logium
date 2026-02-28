@@ -401,18 +401,20 @@
   >
     {formatTimeRangeLabel()}
   </button>
+  {#if hasTimeRange}
+    <button
+      class="time-range-clear"
+      onclick={() => {
+        timeStart = '';
+        timeEnd = '';
+        runAnalysis();
+      }}>Clear</button
+    >
+  {/if}
   {#if showTimeRange}
     <div class="time-range-inputs">
       <label>From <input type="datetime-local" bind:value={timeStart} step="1" /></label>
       <label>To <input type="datetime-local" bind:value={timeEnd} step="1" /></label>
-      {#if hasTimeRange}
-        <button
-          onclick={() => {
-            timeStart = '';
-            timeEnd = '';
-          }}>Clear</button
-        >
-      {/if}
     </div>
   {/if}
 </div>
@@ -541,6 +543,11 @@
         onBucketClick={(match) => {
           handleNavigate(match.source_id, match.log_line.raw);
         }}
+        onTimeRangeSelect={(start, end) => {
+          timeStart = start;
+          timeEnd = end;
+          runAnalysis();
+        }}
       />
     {/if}
 
@@ -599,6 +606,10 @@
             ruleMatches={sourceRuleMatches}
             onBucketClick={(match) => {
               requestNavigate(match.log_line.raw);
+            }}
+            onTimeRangeSelect={(start, end) => {
+              timeStart = start;
+              timeEnd = end;
             }}
           />
         {/if}
@@ -701,6 +712,12 @@
     background: var(--accent);
     color: var(--bg);
     border-color: var(--accent);
+  }
+
+  .time-range-clear {
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 12px;
   }
 
   .time-range-inputs {
