@@ -151,6 +151,18 @@
     return Math.min(Math.max(0, idx), buckets.length - 1);
   }
 
+  function cancelDrag() {
+    window.removeEventListener('keydown', handleKeyDown);
+    dragStartIdx = null;
+    dragCurrentIdx = null;
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && dragStartIdx !== null) {
+      cancelDrag();
+    }
+  }
+
   function handlePointerDown(e: PointerEvent) {
     if (!onTimeRangeSelect && !onBucketClick) return;
     if (!svgEl) return;
@@ -159,6 +171,7 @@
     dragStartIdx = idx;
     dragCurrentIdx = idx;
     svgEl.setPointerCapture?.(e.pointerId);
+    window.addEventListener('keydown', handleKeyDown);
   }
 
   function handlePointerMove(e: PointerEvent) {
@@ -169,6 +182,8 @@
   }
 
   function handlePointerUp() {
+    window.removeEventListener('keydown', handleKeyDown);
+
     const startIdx = dragStartIdx;
     const currentIdx = dragCurrentIdx;
     if (startIdx === null || currentIdx === null) {

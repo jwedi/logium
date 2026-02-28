@@ -193,6 +193,36 @@ describe('EventDensityHistogram', () => {
     expect(overlay).toBeInTheDocument();
   });
 
+  it('Escape cancels drag selection without firing callbacks', async () => {
+    const onSelect = vi.fn();
+    const onClick = vi.fn();
+    const matches = Array.from({ length: 10 }, (_, i) => {
+      const min = i.toString().padStart(2, '0');
+      return makeMatchAtTime(`2024-01-15T10:${min}:00.000`);
+    });
+    const { container } = renderHistogram({
+      ruleMatches: matches,
+      onTimeRangeSelect: onSelect,
+      onBucketClick: onClick,
+    });
+    const svg = container.querySelector('svg')!;
+    await pointerDown(svg, 36);
+    await pointerMove(svg, 200);
+    // Selection overlay should be visible mid-drag
+    expect(container.querySelector('.selection-overlay')).toBeInTheDocument();
+    // Press Escape to cancel
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    // Overlay should be gone
+    expect(container.querySelector('.selection-overlay')).not.toBeInTheDocument();
+    // Neither callback should have fired
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClick).not.toHaveBeenCalled();
+    // Subsequent pointerUp should be a no-op
+    await pointerUp(svg, 200);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
   it('shows crosshair cursor when onTimeRangeSelect is provided', () => {
     const matches = [
       makeMatchAtTime('2024-01-15T10:00:00.000'),
