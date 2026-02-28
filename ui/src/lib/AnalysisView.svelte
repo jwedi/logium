@@ -544,6 +544,7 @@
         onTimeRangeSelect={(start, end) => {
           timeStart = start;
           timeEnd = end;
+          runAnalysis();
         }}
       />
     {/if}
