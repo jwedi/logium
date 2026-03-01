@@ -436,11 +436,9 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 **Fix:** Compute the filtered result once and derive breakdowns from it.
 **Est. impact:** 2-3x fewer iterations over large arrays.
 
-#### P13. Viewport-filter timeline events
+#### P13. Viewport-filter timeline events — Done
 **File:** `ui/src/lib/TimelineView.svelte`
-**Issue:** `allEvents` creates objects for ALL matches regardless of visible range.
-**Fix:** Filter to the visible time range before creating event objects.
-**Est. impact:** Less GC pressure for large analyses.
+Added `visiblePatternEvents` derived using binary search to filter pattern events to the visible viewport (same approach as `TimelineSwimlane`). All 3 pattern `{#each}` loops now iterate only visible events. Also replaced `Math.min(...spread)` / `Math.max(...spread)` domain computation with a single loop to avoid stack overflow on >100k events.
 
 #### P14. Virtualize StateEvolutionView
 **File:** `ui/src/lib/StateEvolutionView.svelte`

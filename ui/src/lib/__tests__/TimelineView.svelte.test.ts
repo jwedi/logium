@@ -132,6 +132,27 @@ describe('TimelineView', () => {
     expect(container.querySelector('.timeline-container')).toBeInTheDocument();
   });
 
+  it('renders pattern labels for visible pattern events', () => {
+    // Use a pattern timestamp close to the rule match so it falls in the default viewport
+    const { container } = renderView({
+      result: makeAnalysisResult({
+        rule_matches: [
+          makeRuleMatch({
+            source_id: 1,
+            log_line: makeLogLine({ timestamp: '2024-01-15T10:30:00.000' }),
+          }),
+        ],
+        pattern_matches: [
+          makePatternMatch({ pattern_id: 1, timestamp: '2024-01-15T10:30:00.100' }),
+        ],
+      }),
+      patternList: [makePattern({ id: 1, name: 'Failure Pattern' })],
+    });
+    const labels = container.querySelectorAll('.pattern-label');
+    expect(labels.length).toBeGreaterThanOrEqual(1);
+    expect(labels[0].textContent).toBe('Failure Pattern');
+  });
+
   // --- Snapshot ---
 
   it('matches snapshot with two sources and a pattern match', () => {
