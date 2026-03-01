@@ -430,11 +430,9 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 **Fix:** Cache per-source outside the inner loop.
 **Est. impact:** Minor — fewer HashMap lookups.
 
-#### P12. Deduplicate derived filter chains
+#### P12. Deduplicate derived filter chains — Done
 **File:** `ui/src/lib/AnalysisView.svelte`
-**Issue:** `filteredResult`, `ruleBreakdown`, `sourceBreakdown` each independently filter the full result.
-**Fix:** Compute the filtered result once and derive breakdowns from it.
-**Est. impact:** 2-3x fewer iterations over large arrays.
+Merged `ruleBreakdown` and `sourceBreakdown` into a single `breakdowns` derived that computes both count maps in one pass. Added `filteredSourceMatchCounts` derived map to replace inline `.filter()` calls in the source tab template (was O(2*S*N), now O(N) precomputed).
 
 #### P13. Viewport-filter timeline events — Done
 **File:** `ui/src/lib/TimelineView.svelte`

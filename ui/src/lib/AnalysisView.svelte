@@ -116,23 +116,34 @@
     return { rule_matches: rm, pattern_matches: result.pattern_matches, state_changes: sc };
   });
 
-  let ruleBreakdown = $derived.by(() => {
-    if (!result) return [];
-    const counts = new Map<number, number>();
-    for (const rm of result.rule_matches) counts.set(rm.rule_id, (counts.get(rm.rule_id) ?? 0) + 1);
-    return Array.from(counts.entries())
-      .map(([id, count]) => ({ id, name: getRuleName(id), count }))
-      .sort((a, b) => b.count - a.count);
+  let breakdowns = $derived.by(() => {
+    if (!result)
+      return {
+        rules: [] as { id: number; name: string; count: number }[],
+        sources: [] as { id: number; name: string; count: number }[],
+      };
+    const ruleCounts = new Map<number, number>();
+    const sourceCounts = new Map<number, number>();
+    for (const rm of result.rule_matches) {
+      ruleCounts.set(rm.rule_id, (ruleCounts.get(rm.rule_id) ?? 0) + 1);
+      sourceCounts.set(rm.source_id, (sourceCounts.get(rm.source_id) ?? 0) + 1);
+    }
+    return {
+      rules: Array.from(ruleCounts.entries())
+        .map(([id, count]) => ({ id, name: getRuleName(id), count }))
+        .sort((a, b) => b.count - a.count),
+      sources: Array.from(sourceCounts.entries())
+        .map(([id, count]) => ({ id, name: getSourceName(id), count }))
+        .sort((a, b) => b.count - a.count),
+    };
   });
 
-  let sourceBreakdown = $derived.by(() => {
-    if (!result) return [];
+  let filteredSourceMatchCounts = $derived.by(() => {
     const counts = new Map<number, number>();
-    for (const rm of result.rule_matches)
+    for (const rm of filteredResult.rule_matches) {
       counts.set(rm.source_id, (counts.get(rm.source_id) ?? 0) + 1);
-    return Array.from(counts.entries())
-      .map(([id, count]) => ({ id, name: getSourceName(id), count }))
-      .sort((a, b) => b.count - a.count);
+    }
+    return counts;
   });
 
   let sourceRuleMatches = $derived(
@@ -445,7 +456,7 @@
         <div class="facet-group">
           <span class="facet-label">Rules</span>
           <div class="facet-chips">
-            {#each ruleBreakdown as rb}
+            {#each breakdowns.rules as rb}
               <button
                 class="facet-chip"
                 class:active={filterRuleId === rb.id}
@@ -461,7 +472,7 @@
         <div class="facet-group">
           <span class="facet-label">Sources</span>
           <div class="facet-chips">
-            {#each sourceBreakdown as sb}
+            {#each breakdowns.sources as sb}
               <button
                 class="facet-chip"
                 class:active={filterSourceId === sb.id}
@@ -579,6 +590,7 @@
         <span class="source-file-label">Log File</span>
         <div class="source-file-tabs">
           {#each sourceList as src}
+            {@const srcCount = filteredSourceMatchCounts.get(src.id) ?? 0}
             <button
               class="source-file-tab"
               class:active={selectedSourceId === src.id}
@@ -588,10 +600,8 @@
               }}
             >
               {src.name}
-              {#if filteredResult.rule_matches.filter((m) => m.source_id === src.id).length > 0}
-                <span class="source-file-count"
-                  >{filteredResult.rule_matches.filter((m) => m.source_id === src.id).length}</span
-                >
+              {#if srcCount > 0}
+                <span class="source-file-count">{srcCount}</span>
               {/if}
             </button>
           {/each}
