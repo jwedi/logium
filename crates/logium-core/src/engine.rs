@@ -1246,6 +1246,7 @@ pub fn analyze(
     let merger = ProcessedLineMerger::new(processed_sources);
 
     let mut state_manager = StateManager::new(sources);
+    let source_name_cache = state_manager.source_names.clone();
     let mut pattern_eval = PatternEvaluator::new(patterns);
 
     let mut all_rule_matches = Vec::new();
@@ -1267,15 +1268,15 @@ pub fn analyze(
             break;
         }
 
+        let source_name = source_name_cache
+            .get(&line.source_id)
+            .cloned()
+            .unwrap_or_default();
+
         let mut state_changed = false;
 
         // Apply pre-computed JSON fields as state
         if let Some(json_fields) = &processed.json_fields {
-            let source_name = state_manager
-                .source_names
-                .get(&line.source_id)
-                .cloned()
-                .unwrap_or_default();
             let state = Arc::make_mut(
                 state_manager
                     .per_source_state
@@ -1308,12 +1309,6 @@ pub fn analyze(
         }
 
         // Apply pre-computed rule matches
-        let source_name = state_manager
-            .source_names
-            .get(&line.source_id)
-            .cloned()
-            .unwrap_or_default();
-
         for (rule_id, extracted) in &processed.rule_matches {
             if let Some(rule) = rule_map.get(rule_id) {
                 let changes = state_manager.apply_mutations(
@@ -1434,6 +1429,7 @@ pub fn analyze_streaming(
     let merger = ProcessedLineMerger::new(processed_sources);
 
     let mut state_manager = StateManager::new(sources);
+    let source_name_cache = state_manager.source_names.clone();
     let mut pattern_eval = PatternEvaluator::new(patterns);
 
     let mut lines_processed: u64 = 0;
@@ -1458,15 +1454,15 @@ pub fn analyze_streaming(
 
         lines_processed += 1;
 
+        let source_name = source_name_cache
+            .get(&line.source_id)
+            .cloned()
+            .unwrap_or_default();
+
         let mut state_changed = false;
 
         // Apply pre-computed JSON fields as state
         if let Some(json_fields) = &processed.json_fields {
-            let source_name = state_manager
-                .source_names
-                .get(&line.source_id)
-                .cloned()
-                .unwrap_or_default();
             let state = Arc::make_mut(
                 state_manager
                     .per_source_state
@@ -1505,12 +1501,6 @@ pub fn analyze_streaming(
         }
 
         // Apply pre-computed rule matches
-        let source_name = state_manager
-            .source_names
-            .get(&line.source_id)
-            .cloned()
-            .unwrap_or_default();
-
         for (rule_id, extracted) in &processed.rule_matches {
             if let Some(rule) = rule_map.get(rule_id) {
                 let changes = state_manager.apply_mutations(

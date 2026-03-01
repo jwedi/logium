@@ -424,17 +424,13 @@ Content-based height estimation virtual scroll for pattern match cards. `estimat
 
 ### Medium Priority
 
-#### P11. Cache source_name in hot loop
+#### P11. Cache source_name in hot loop — Done
 **File:** `crates/logium-core/src/engine.rs`
-**Issue:** `source_name` looked up and cloned from HashMap per line.
-**Fix:** Cache per-source outside the inner loop.
-**Est. impact:** Minor — fewer HashMap lookups.
+Cloned `source_names` HashMap into a local `source_name_cache` before the loop in both `analyze()` and `analyze_streaming()`. Consolidated two per-iteration HashMap lookups (JSON fields block + rule matches block) into a single lookup at the top of each iteration. Lookups now hit the local cache instead of borrowing through `state_manager`.
 
-#### P12. Deduplicate derived filter chains
+#### P12. Deduplicate derived filter chains — Done
 **File:** `ui/src/lib/AnalysisView.svelte`
-**Issue:** `filteredResult`, `ruleBreakdown`, `sourceBreakdown` each independently filter the full result.
-**Fix:** Compute the filtered result once and derive breakdowns from it.
-**Est. impact:** 2-3x fewer iterations over large arrays.
+Merged `ruleBreakdown` and `sourceBreakdown` into a single `breakdowns` derived that computes both count maps in one pass. Added `filteredSourceMatchCounts` derived map to replace inline `.filter()` calls in the source tab template (was O(2*S*N), now O(N) precomputed).
 
 #### P13. Viewport-filter timeline events — Done
 **File:** `ui/src/lib/TimelineView.svelte`
