@@ -102,12 +102,16 @@
     return events;
   });
 
-  // Compute time domain
+  // Compute time domain (single loop avoids temp array + spread stack overflow on >100k events)
   let domain = $derived.by(() => {
-    const timestamps = allEvents.map((e) => e.timestamp);
-    if (timestamps.length === 0) return { minTime: 0, maxTime: 1000, span: 1000 };
-    const minTime = Math.min(...timestamps);
-    const maxTime = Math.max(...timestamps);
+    if (allEvents.length === 0) return { minTime: 0, maxTime: 1000, span: 1000 };
+    let minTime = allEvents[0].timestamp;
+    let maxTime = allEvents[0].timestamp;
+    for (let i = 1; i < allEvents.length; i++) {
+      const t = allEvents[i].timestamp;
+      if (t < minTime) minTime = t;
+      if (t > maxTime) maxTime = t;
+    }
     const span = Math.max(maxTime - minTime, 1000); // at least 1s span
     // Add 5% padding on each side
     const padding = span * 0.05;
@@ -144,6 +148,36 @@
   let patternEvents = $derived(
     allEvents.filter((e) => e.type === 'pattern').sort((a, b) => a.timestamp - b.timestamp),
   );
+
+  // Viewport-filtered pattern events (binary search, same approach as TimelineSwimlane)
+  let visiblePatternEvents = $derived.by(() => {
+    if (patternEvents.length === 0) return [];
+    const visMinY = scrollTop - 50;
+    const visMaxY = scrollTop + viewportHeight + 50;
+
+    // Binary search for first visible event
+    let lo = 0,
+      hi = patternEvents.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const y = (patternEvents[mid].timestamp - domain.minTime) / msPerPixel;
+      if (y < visMinY) lo = mid + 1;
+      else hi = mid;
+    }
+    const startIdx = lo;
+
+    // Binary search for last visible event
+    lo = startIdx;
+    hi = patternEvents.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const y = (patternEvents[mid].timestamp - domain.minTime) / msPerPixel;
+      if (y <= visMaxY) lo = mid + 1;
+      else hi = mid;
+    }
+
+    return patternEvents.slice(startIdx, lo);
+  });
 
   function onScroll() {
     if (scrollContainer) {
@@ -260,7 +294,7 @@
             {viewportHeight}
           />
           <!-- Pattern labels in axis gutter -->
-          {#each patternEvents as pev}
+          {#each visiblePatternEvents as pev}
             {@const y = (pev.timestamp - domain.minTime) / msPerPixel}
             <button class="pattern-label" style="top: {y - 10}px" onclick={() => onEventClick(pev)}
               >{getPatternName(pev.patternId!)}</button
@@ -298,7 +332,7 @@
           {/each}
 
           <!-- Pattern bands (visual only, behind swimlanes) -->
-          {#each patternEvents as pev}
+          {#each visiblePatternEvents as pev}
             {@const y = (pev.timestamp - domain.minTime) / msPerPixel}
             <rect
               x="0"
@@ -339,7 +373,7 @@
           {/each}
 
           <!-- Pattern click targets (on top of swimlanes to receive clicks) -->
-          {#each patternEvents as pev}
+          {#each visiblePatternEvents as pev}
             {@const y = (pev.timestamp - domain.minTime) / msPerPixel}
             <!-- svelte-ignore a11y_click_events_have_key_events -->
             <g onclick={() => onEventClick(pev)} role="button" tabindex="0" style="cursor: pointer">
