@@ -593,7 +593,7 @@ impl Database {
 
     pub async fn list_sources(&self, project_id: i64) -> Result<Vec<Source>, DbError> {
         let rows = sqlx::query(
-            "SELECT id, name, template_id, file_path FROM sources WHERE project_id = ? ORDER BY id",
+            "SELECT id, name, template_id, file_path, color FROM sources WHERE project_id = ? ORDER BY id",
         )
         .bind(project_id)
         .fetch_all(&self.pool)
@@ -604,7 +604,7 @@ impl Database {
 
     pub async fn get_source(&self, project_id: i64, id: i64) -> Result<Source, DbError> {
         let row = sqlx::query(
-            "SELECT id, name, template_id, file_path FROM sources WHERE id = ? AND project_id = ?",
+            "SELECT id, name, template_id, file_path, color FROM sources WHERE id = ? AND project_id = ?",
         )
         .bind(id)
         .bind(project_id)
@@ -621,15 +621,17 @@ impl Database {
         template_id: i64,
         name: &str,
         file_path: &str,
+        color: &str,
     ) -> Result<Source, DbError> {
         let id = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO sources (project_id, template_id, name, file_path)
-             VALUES (?, ?, ?, ?) RETURNING id",
+            "INSERT INTO sources (project_id, template_id, name, file_path, color)
+             VALUES (?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(project_id)
         .bind(template_id)
         .bind(name)
         .bind(file_path)
+        .bind(color)
         .fetch_one(&self.pool)
         .await?;
 
@@ -638,7 +640,26 @@ impl Database {
             name: name.to_string(),
             template_id: template_id as u64,
             file_path: file_path.to_string(),
+            color: color.to_string(),
         })
+    }
+
+    pub async fn update_source_color(
+        &self,
+        project_id: i64,
+        id: i64,
+        color: &str,
+    ) -> Result<(), DbError> {
+        let result = sqlx::query("UPDATE sources SET color = ? WHERE id = ? AND project_id = ?")
+            .bind(color)
+            .bind(id)
+            .bind(project_id)
+            .execute(&self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        Ok(())
     }
 
     pub async fn update_source_file_path(
@@ -1447,6 +1468,7 @@ fn row_to_source(row: &sqlx::sqlite::SqliteRow) -> Source {
         name: row.get("name"),
         template_id: row.get::<i64, _>("template_id") as u64,
         file_path: row.get("file_path"),
+        color: row.get("color"),
     }
 }
 
@@ -1761,10 +1783,17 @@ mod tests {
             .unwrap();
 
         let s = db
-            .create_source(p.id, t.id as i64, "server.log", "/var/log/server.log")
+            .create_source(
+                p.id,
+                t.id as i64,
+                "server.log",
+                "/var/log/server.log",
+                "#60a5fa",
+            )
             .await
             .unwrap();
         assert_eq!(s.name, "server.log");
+        assert_eq!(s.color, "#60a5fa");
 
         let sources = db.list_sources(p.id).await.unwrap();
         assert_eq!(sources.len(), 1);

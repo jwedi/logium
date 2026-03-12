@@ -61,6 +61,7 @@ fn make_source(id: u64, name: &str, path: &str, template_id: u64) -> Source {
         name: name.into(),
         template_id,
         file_path: path.into(),
+        color: String::new(),
     }
 }
 

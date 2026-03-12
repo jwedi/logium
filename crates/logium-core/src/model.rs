@@ -93,6 +93,7 @@ pub struct Source {
     pub name: String,
     pub template_id: u64,
     pub file_path: String,
+    pub color: String,
 }
 
 /// A parsed log line.

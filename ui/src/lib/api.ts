@@ -31,6 +31,7 @@ export interface Source {
   name: string;
   template_id: number;
   file_path: string;
+  color: string;
 }
 
 export interface MatchRule {
@@ -277,6 +278,11 @@ export const sources = {
   get: (pid: number, id: number) => request<Source>(`/projects/${pid}/sources/${id}`),
   create: (pid: number, data: Omit<Source, 'id'>) =>
     request<Source>(`/projects/${pid}/sources`, { method: 'POST', body: JSON.stringify(data) }),
+  update: (pid: number, id: number, data: { color: string }) =>
+    request<Source>(`/projects/${pid}/sources/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
   upload: async (pid: number, id: number, file: File): Promise<Source> => {
     const form = new FormData();
     form.append('file', file);

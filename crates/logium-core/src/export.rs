@@ -338,6 +338,7 @@ mod tests {
             name: "app.log".to_string(),
             template_id: 1,
             file_path: "/var/log/app.log".to_string(),
+            color: String::new(),
         }]
     }
 

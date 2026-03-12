@@ -24,6 +24,10 @@
     return ruleList.find((r) => r.id === id)?.name ?? `Rule #${id}`;
   }
 
+  function getSourceColor(name: string): string {
+    return sourceList.find((s) => s.name === name)?.color ?? 'var(--accent)';
+  }
+
   function closeModal() {
     selectedChange = null;
   }
@@ -104,7 +108,8 @@
           {#each filteredChanges as sc}
             <tr onclick={() => (selectedChange = sc)}>
               <td class="ts" title={sc.timestamp}>{formatTimestamp(sc.timestamp)}</td>
-              <td class="source">{sc.source_name}</td>
+              <td class="source" style="color:{getSourceColor(sc.source_name)}">{sc.source_name}</td
+              >
               <td class="key">{sc.state_key}</td>
               <td class="change">
                 <span class="old-value"
@@ -139,7 +144,9 @@
             <span class="label">Timestamp</span><span class="mono">{selectedChange.timestamp}</span>
           </div>
           <div class="detail-row">
-            <span class="label">Source</span><span class="accent">{selectedChange.source_name}</span
+            <span class="label">Source</span><span
+              style="color:{getSourceColor(selectedChange.source_name)}"
+              >{selectedChange.source_name}</span
             >
           </div>
           <div class="detail-row">
@@ -171,7 +178,9 @@
             <h3>State at this point</h3>
             {#each [...stateSnapshot.entries()].sort( ([a], [b]) => a.localeCompare(b), ) as [srcName, entries]}
               <div class="source-group">
-                <div class="source-label">Current state of {srcName}</div>
+                <div class="source-label" style="color:{getSourceColor(srcName)}">
+                  Current state of {srcName}
+                </div>
                 {#each [...entries.entries()] as [key, val]}
                   <div class="state-entry">
                     <span class="state-key">{key}</span>
@@ -274,7 +283,6 @@
   }
 
   .source {
-    color: var(--accent);
     font-weight: 500;
   }
 

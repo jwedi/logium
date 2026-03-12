@@ -26,8 +26,8 @@ const mockClusterResult = {
 };
 
 const mockSources = [
-  { id: 1, name: 'app.log', template_id: 1, file_path: '/var/log/app.log' },
-  { id: 2, name: 'system.log', template_id: 1, file_path: '/var/log/system.log' },
+  { id: 1, name: 'app.log', template_id: 1, file_path: '/var/log/app.log', color: '#60a5fa' },
+  { id: 2, name: 'system.log', template_id: 1, file_path: '/var/log/system.log', color: '#34d399' },
 ];
 
 let clusterRunImpl: () => Promise<typeof mockClusterResult>;

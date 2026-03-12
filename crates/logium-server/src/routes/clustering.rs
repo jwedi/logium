@@ -85,6 +85,7 @@ mod tests {
             tmpl.id as i64,
             "test",
             log_path.to_str().unwrap(),
+            "#60a5fa",
         )
         .await
         .unwrap();

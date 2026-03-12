@@ -756,3 +756,11 @@ mirroring the `accumulatedState` derived value in `LogViewer.svelte`. No backend
 **Status:** Done
 
 Added `selectedChange` state, `stateSnapshot` derived value (replays `stateChanges` up to clicked timestamp), and `closeModal()` helper. Table rows get `onclick` + pointer cursor. Modal shows the clicked change's fields and a per-source state snapshot sorted alphabetically. Snapshot updated to reflect the new scoped CSS class on `<tr>` elements.
+
+---
+
+### 60. Source Color Assignment
+
+**Status:** Done
+
+Each source now has a persistent `color` field. Migration `20240101000002_source_color.sql` adds `color TEXT NOT NULL DEFAULT '#6b7280'` to the sources table. `Source` model gains a `color: String` field. `db.create_source()` accepts a `color: &str` parameter. New `db.update_source_color()` function. `PATCH /api/projects/:pid/sources/:id` endpoint added. Auto-assignment picks from an 8-color palette (`#60a5fa` through `#fb923c`) based on existing source count when no color is provided. Frontend: `SourceManager.svelte` adds a color picker in the create form and an inline color picker per source card with a colored swatch and source name rendered in its color. `StateEvolutionView.svelte`, `AnalysisView.svelte`, and `LogViewer.svelte` use `getSourceColor()` helpers to color source names throughout (table cells, modal detail, source facet chips, rule match badges, log-file tabs, state panel source names).

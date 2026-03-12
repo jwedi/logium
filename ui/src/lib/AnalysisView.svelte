@@ -162,6 +162,10 @@
     return sourceList.find((s) => s.id === id)?.name ?? `Source #${id}`;
   }
 
+  function getSourceColor(id: number): string {
+    return sourceList.find((s) => s.id === id)?.color ?? 'var(--accent)';
+  }
+
   function pmSourceCount(pm: PatternMatch): number {
     return Object.keys(pm.state_snapshot).length;
   }
@@ -476,6 +480,7 @@
               <button
                 class="facet-chip"
                 class:active={filterSourceId === sb.id}
+                style="color:{getSourceColor(sb.id)}"
                 onclick={() => {
                   filterSourceId = filterSourceId === sb.id ? null : sb.id;
                 }}
@@ -572,7 +577,9 @@
           {#each visibleMatches.slice(0, 100) as rm}
             <div class="match-row">
               <span class="badge">{getRuleName(rm.rule_id)}</span>
-              <span class="badge">{getSourceName(rm.source_id)}</span>
+              <span class="badge" style="color:{getSourceColor(rm.source_id)}"
+                >{getSourceName(rm.source_id)}</span
+              >
               <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
             </div>
           {/each}
@@ -599,7 +606,9 @@
                 navigateTarget = null;
               }}
             >
-              {src.name}
+              <span style="color:{selectedSourceId === src.id ? 'inherit' : src.color}"
+                >{src.name}</span
+              >
               {#if srcCount > 0}
                 <span class="source-file-count">{srcCount}</span>
               {/if}
@@ -631,6 +640,7 @@
             patternMatches={filteredResult.pattern_matches}
             stateChanges={result?.state_changes ?? []}
             {navigateTarget}
+            {sourceList}
           />
         </div>
       </div>

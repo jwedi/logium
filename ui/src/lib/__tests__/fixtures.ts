@@ -59,6 +59,7 @@ export function makeSource(overrides: Partial<Source> = {}): Source {
     name: 'app.log',
     template_id: 1,
     file_path: '/var/log/app.log',
+    color: '#60a5fa',
     ...overrides,
   };
 }

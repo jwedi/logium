@@ -1885,6 +1885,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -1919,6 +1920,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -1953,6 +1955,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -1989,6 +1992,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -2078,12 +2082,14 @@ mod tests {
                 name: "server".into(),
                 template_id: 1,
                 file_path: "".into(),
+                color: String::new(),
             },
             Source {
                 id: 2,
                 name: "client".into(),
                 template_id: 1,
                 file_path: "".into(),
+                color: String::new(),
             },
         ]
     }
@@ -2461,18 +2467,21 @@ mod tests {
                 name: "s1".into(),
                 template_id: 1,
                 file_path: f1.path().to_str().unwrap().into(),
+                color: String::new(),
             },
             Source {
                 id: 2,
                 name: "s2".into(),
                 template_id: 1,
                 file_path: f2.path().to_str().unwrap().into(),
+                color: String::new(),
             },
             Source {
                 id: 3,
                 name: "s3".into(),
                 template_id: 1,
                 file_path: f3.path().to_str().unwrap().into(),
+                color: String::new(),
             },
         ];
 
@@ -2545,12 +2554,14 @@ mod tests {
                 name: "server".into(),
                 template_id: 1,
                 file_path: server_log.path().to_str().unwrap().into(),
+                color: String::new(),
             },
             Source {
                 id: 2,
                 name: "client".into(),
                 template_id: 1,
                 file_path: client_log.path().to_str().unwrap().into(),
+                color: String::new(),
             },
         ];
 
@@ -2728,12 +2739,14 @@ mod tests {
                 name: "server".into(),
                 template_id: 1,
                 file_path: server_log.path().to_str().unwrap().into(),
+                color: String::new(),
             },
             Source {
                 id: 2,
                 name: "client".into(),
                 template_id: 1,
                 file_path: client_log.path().to_str().unwrap().into(),
+                color: String::new(),
             },
         ];
 
@@ -2901,6 +2914,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -2935,6 +2949,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -2969,6 +2984,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
 
@@ -2996,6 +3012,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -3048,6 +3065,7 @@ mod tests {
             name: "server".into(),
             template_id: 1,
             file_path: server_log.path().to_str().unwrap().into(),
+            color: String::new(),
         }];
 
         let rules = vec![
@@ -3156,6 +3174,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3218,6 +3237,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3251,6 +3271,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3276,6 +3297,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3326,6 +3348,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3367,6 +3390,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3400,6 +3424,7 @@ mod tests {
             name: "json_src".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let result = analyze(
@@ -3495,6 +3520,7 @@ mod tests {
             name: "src".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
         let rules = vec![LogRule {
             id: 1,
@@ -3689,6 +3715,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().to_string(),
+            color: String::new(),
         };
 
         let result = cluster_logs(
@@ -3768,6 +3795,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().to_string(),
+            color: String::new(),
         };
 
         let result = cluster_logs(
@@ -3869,6 +3897,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: file.path().to_str().unwrap().into(),
+            color: String::new(),
         };
         let ts_template = TimestampTemplate {
             id: 1,
@@ -4082,6 +4111,7 @@ mod tests {
             name: "chunked_test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let rule = LogRule {
@@ -4161,6 +4191,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -4210,6 +4241,7 @@ mod tests {
             name: "server".into(),
             template_id: 1,
             file_path: log.path().to_str().unwrap().into(),
+            color: String::new(),
         }];
 
         let rule = LogRule {

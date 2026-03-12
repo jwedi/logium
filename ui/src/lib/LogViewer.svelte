@@ -21,6 +21,7 @@
     patternMatches = [],
     stateChanges = [],
     navigateTarget = null,
+    sourceList = [],
   }: {
     source: Source;
     projectId: number;
@@ -28,6 +29,7 @@
     patternMatches?: PatternMatch[];
     stateChanges?: StateChange[];
     navigateTarget?: { raw: string; seq: number } | null;
+    sourceList?: Source[];
   } = $props();
 
   const LINE_HEIGHT = 22;
@@ -298,6 +300,10 @@
 
   function getRuleColor(ruleId: number): number {
     return ruleId % 6;
+  }
+
+  function getSourceColor(name: string): string {
+    return sourceList.find((s) => s.name === name)?.color ?? 'var(--text-dim)';
   }
 
   function formatStateValue(sv: StateValue): string {
@@ -800,7 +806,9 @@
             return a[0].localeCompare(b[0]);
           }) as [sourceName, entries]}
             <div class="state-group">
-              <div class="state-source-name">{sourceName}</div>
+              <div class="state-source-name" style="color:{getSourceColor(sourceName)}">
+                {sourceName}
+              </div>
               {#each [...entries.entries()] as [key, val]}
                 <div class="state-entry">
                   <span class="state-key">{key}</span>
