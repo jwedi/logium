@@ -61,6 +61,7 @@ fn make_source(id: u64, name: &str, path: &str, template_id: u64) -> Source {
         name: name.into(),
         template_id,
         file_path: path.into(),
+        color: String::new(),
     }
 }
 
@@ -164,6 +165,7 @@ fn test_zookeeper_cross_source() {
             static_value: Some("warn".into()),
             mode: ExtractionMode::Replace,
         }],
+        event_text: None,
     };
 
     let connection_rule = LogRule {
@@ -182,6 +184,7 @@ fn test_zookeeper_cross_source() {
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
         }],
+        event_text: None,
     };
 
     let ruleset = Ruleset {
@@ -261,6 +264,7 @@ fn test_nginx_cross_source() {
             static_value: None,
             mode: ExtractionMode::Replace,
         }],
+        event_text: None,
     };
 
     let ruleset = Ruleset {
@@ -338,6 +342,7 @@ fn test_syslog_cross_source() {
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
         }],
+        event_text: None,
     };
 
     let rhost_rule = LogRule {
@@ -356,6 +361,7 @@ fn test_syslog_cross_source() {
             static_value: None,
             mode: ExtractionMode::Replace,
         }],
+        event_text: None,
     };
 
     let ruleset = Ruleset {
@@ -455,6 +461,7 @@ fn test_timestamp_template_reuse() {
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
         }],
+        event_text: None,
     };
 
     let rs_a = Ruleset {
@@ -539,6 +546,7 @@ fn test_cross_source_state_ref() {
             static_value: None,
             mode: ExtractionMode::Replace,
         }],
+        event_text: None,
     };
 
     let ruleset = Ruleset {
@@ -695,6 +703,7 @@ fn test_multiline_cross_source() {
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
         }],
+        event_text: None,
     };
 
     // Rule: detect WARN
@@ -714,6 +723,7 @@ fn test_multiline_cross_source() {
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
         }],
+        event_text: None,
     };
 
     let ruleset = Ruleset {

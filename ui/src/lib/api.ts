@@ -31,6 +31,7 @@ export interface Source {
   name: string;
   template_id: number;
   file_path: string;
+  color: string;
 }
 
 export interface MatchRule {
@@ -53,6 +54,7 @@ export interface LogRule {
   match_mode: 'Any' | 'All';
   match_rules: MatchRule[];
   extraction_rules: ExtractionRule[];
+  event_text: string | null;
 }
 
 export interface Ruleset {
@@ -98,6 +100,7 @@ export interface RuleMatch {
   source_id: number;
   log_line: LogLine;
   extracted_state: Record<string, StateValue>;
+  event_text: string | null;
 }
 
 export interface PatternMatch {
@@ -277,6 +280,11 @@ export const sources = {
   get: (pid: number, id: number) => request<Source>(`/projects/${pid}/sources/${id}`),
   create: (pid: number, data: Omit<Source, 'id'>) =>
     request<Source>(`/projects/${pid}/sources`, { method: 'POST', body: JSON.stringify(data) }),
+  update: (pid: number, id: number, data: { color: string }) =>
+    request<Source>(`/projects/${pid}/sources/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
   upload: async (pid: number, id: number, file: File): Promise<Source> => {
     const form = new FormData();
     form.append('file', file);

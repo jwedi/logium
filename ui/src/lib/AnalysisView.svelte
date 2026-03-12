@@ -162,6 +162,10 @@
     return sourceList.find((s) => s.id === id)?.name ?? `Source #${id}`;
   }
 
+  function getSourceColor(id: number): string {
+    return sourceList.find((s) => s.id === id)?.color ?? 'var(--accent)';
+  }
+
   function pmSourceCount(pm: PatternMatch): number {
     return Object.keys(pm.state_snapshot).length;
   }
@@ -476,6 +480,7 @@
               <button
                 class="facet-chip"
                 class:active={filterSourceId === sb.id}
+                style="color:{getSourceColor(sb.id)}"
                 onclick={() => {
                   filterSourceId = filterSourceId === sb.id ? null : sb.id;
                 }}
@@ -572,8 +577,17 @@
           {#each visibleMatches.slice(0, 100) as rm}
             <div class="match-row">
               <span class="badge">{getRuleName(rm.rule_id)}</span>
-              <span class="badge">{getSourceName(rm.source_id)}</span>
-              <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
+              <span class="badge" style="color:{getSourceColor(rm.source_id)}"
+                >{getSourceName(rm.source_id)}</span
+              >
+              <div class="match-content">
+                {#if rm.event_text}
+                  <span class="event-text">{rm.event_text}</span>
+                  <code class="match-line dim">{rm.log_line.content || rm.log_line.raw}</code>
+                {:else}
+                  <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
+                {/if}
+              </div>
             </div>
           {/each}
           {#if visibleMatches.length > 100}
@@ -599,7 +613,9 @@
                 navigateTarget = null;
               }}
             >
-              {src.name}
+              <span style="color:{selectedSourceId === src.id ? 'inherit' : src.color}"
+                >{src.name}</span
+              >
               {#if srcCount > 0}
                 <span class="source-file-count">{srcCount}</span>
               {/if}
@@ -631,6 +647,7 @@
             patternMatches={filteredResult.pattern_matches}
             stateChanges={result?.state_changes ?? []}
             {navigateTarget}
+            {sourceList}
           />
         </div>
       </div>
@@ -1008,14 +1025,32 @@
     border-radius: var(--radius);
   }
 
+  .match-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .event-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
   .match-line {
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
+    white-space: pre;
+    overflow-x: auto;
+    display: block;
+  }
+
+  .match-line.dim {
+    color: var(--text-muted);
+    font-size: 11px;
   }
 
   .text-muted {

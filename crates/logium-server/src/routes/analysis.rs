@@ -585,6 +585,7 @@ async fn dry_run(
         match_mode,
         match_rules,
         extraction_rules,
+        event_text: None,
     };
 
     let result = tokio::task::spawn_blocking(move || {

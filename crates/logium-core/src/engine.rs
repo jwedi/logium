@@ -704,6 +704,17 @@ pub struct CompiledRule {
     pub match_count: usize,
     pub match_mode: MatchMode,
     pub extraction_regexes: Vec<(usize, Regex)>, // (extraction_rule_index, compiled regex)
+    pub event_text: Option<String>,
+}
+
+/// Resolves a `{key}` template string against extracted state values.
+fn resolve_event_text(template: &str, extracted: &HashMap<String, StateValue>) -> String {
+    let mut result = template.to_string();
+    for (key, value) in extracted {
+        let placeholder = format!("{{{key}}}");
+        result = result.replace(&placeholder, &value.to_string());
+    }
+    result
 }
 
 fn compile_rules(rules: &[LogRule]) -> Result<Vec<CompiledRule>, AnalysisError> {
@@ -734,6 +745,7 @@ fn compile_rules(rules: &[LogRule]) -> Result<Vec<CompiledRule>, AnalysisError> 
             match_count,
             match_mode: rule.match_mode.clone(),
             extraction_regexes,
+            event_text: rule.event_text.clone(),
         });
     }
     Ok(compiled)
@@ -818,11 +830,16 @@ pub fn dry_run_rule(
     for result in iter {
         let line = result?;
         if let Some(extracted) = evaluate_rule(rule, &line, &compiled) {
+            let event_text = compiled
+                .event_text
+                .as_deref()
+                .map(|t| resolve_event_text(t, &extracted));
             matches.push(RuleMatch {
                 rule_id: rule.id,
                 source_id: source.id,
                 log_line: line,
                 extracted_state: extracted,
+                event_text,
             });
             if matches.len() >= limit {
                 break;
@@ -1363,11 +1380,16 @@ pub fn analyze(
                     });
                 }
 
+                let event_text = compiled_map
+                    .get(rule_id)
+                    .and_then(|c| c.event_text.as_deref())
+                    .map(|t| resolve_event_text(t, extracted));
                 all_rule_matches.push(RuleMatch {
                     rule_id: *rule_id,
                     source_id: line.source_id,
                     log_line: line.clone(),
                     extracted_state: extracted.clone(),
+                    event_text,
                 });
             }
         }
@@ -1561,11 +1583,16 @@ pub fn analyze_streaming(
                     }
                 }
 
+                let event_text = compiled_map
+                    .get(rule_id)
+                    .and_then(|c| c.event_text.as_deref())
+                    .map(|t| resolve_event_text(t, extracted));
                 let rm = RuleMatch {
                     rule_id: *rule_id,
                     source_id: line.source_id,
                     log_line: line.clone(),
                     extracted_state: extracted.clone(),
+                    event_text,
                 };
                 total_rule_matches += 1;
                 if tx.send(AnalysisEvent::RuleMatch(rm)).is_err() {
@@ -1789,6 +1816,7 @@ mod tests {
                 pattern: r"ERROR".into(),
             }],
             extraction_rules: vec![],
+            event_text: None,
         };
         let compiled = compile_one(&rule);
         let line = make_log_line("2024-01-01 ERROR something broke");
@@ -1806,6 +1834,7 @@ mod tests {
                 pattern: r"ERROR".into(),
             }],
             extraction_rules: vec![],
+            event_text: None,
         };
         let compiled = compile_one(&rule);
         let line = make_log_line("2024-01-01 INFO all good");
@@ -1829,6 +1858,7 @@ mod tests {
                 },
             ],
             extraction_rules: vec![],
+            event_text: None,
         };
         let compiled = compile_one(&rule);
 
@@ -1862,6 +1892,7 @@ mod tests {
                 },
             ],
             extraction_rules: vec![],
+            event_text: None,
         };
         let compiled = compile_one(&rule);
 
@@ -1885,6 +1916,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -1919,6 +1951,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -1953,6 +1986,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -1989,6 +2023,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -2031,6 +2066,7 @@ mod tests {
                 static_value: None,
                 mode: ExtractionMode::Replace,
             }],
+            event_text: None,
         };
         let compiled = compile_one(&rule);
         let line = make_log_line("server players: 42 online");
@@ -2056,6 +2092,7 @@ mod tests {
                 static_value: Some("error_detected".into()),
                 mode: ExtractionMode::Replace,
             }],
+            event_text: None,
         };
         let compiled = compile_one(&rule);
         let line = make_log_line("ERROR something");
@@ -2078,12 +2115,14 @@ mod tests {
                 name: "server".into(),
                 template_id: 1,
                 file_path: "".into(),
+                color: String::new(),
             },
             Source {
                 id: 2,
                 name: "client".into(),
                 template_id: 1,
                 file_path: "".into(),
+                color: String::new(),
             },
         ]
     }
@@ -2461,18 +2500,21 @@ mod tests {
                 name: "s1".into(),
                 template_id: 1,
                 file_path: f1.path().to_str().unwrap().into(),
+                color: String::new(),
             },
             Source {
                 id: 2,
                 name: "s2".into(),
                 template_id: 1,
                 file_path: f2.path().to_str().unwrap().into(),
+                color: String::new(),
             },
             Source {
                 id: 3,
                 name: "s3".into(),
                 template_id: 1,
                 file_path: f3.path().to_str().unwrap().into(),
+                color: String::new(),
             },
         ];
 
@@ -2545,12 +2587,14 @@ mod tests {
                 name: "server".into(),
                 template_id: 1,
                 file_path: server_log.path().to_str().unwrap().into(),
+                color: String::new(),
             },
             Source {
                 id: 2,
                 name: "client".into(),
                 template_id: 1,
                 file_path: client_log.path().to_str().unwrap().into(),
+                color: String::new(),
             },
         ];
 
@@ -2571,6 +2615,7 @@ mod tests {
                 static_value: None,
                 mode: ExtractionMode::Replace,
             }],
+            event_text: None,
         };
 
         // Rule: extract player count
@@ -2590,6 +2635,7 @@ mod tests {
                 static_value: None,
                 mode: ExtractionMode::Replace,
             }],
+            event_text: None,
         };
 
         // Rule: extract client region
@@ -2609,6 +2655,7 @@ mod tests {
                 static_value: None,
                 mode: ExtractionMode::Replace,
             }],
+            event_text: None,
         };
 
         let rules = vec![server_region_rule, player_count_rule, client_region_rule];
@@ -2728,12 +2775,14 @@ mod tests {
                 name: "server".into(),
                 template_id: 1,
                 file_path: server_log.path().to_str().unwrap().into(),
+                color: String::new(),
             },
             Source {
                 id: 2,
                 name: "client".into(),
                 template_id: 1,
                 file_path: client_log.path().to_str().unwrap().into(),
+                color: String::new(),
             },
         ];
 
@@ -2754,6 +2803,7 @@ mod tests {
                     static_value: None,
                     mode: ExtractionMode::Replace,
                 }],
+                event_text: None,
             },
             LogRule {
                 id: 2,
@@ -2771,6 +2821,7 @@ mod tests {
                     static_value: None,
                     mode: ExtractionMode::Replace,
                 }],
+                event_text: None,
             },
             LogRule {
                 id: 3,
@@ -2788,6 +2839,7 @@ mod tests {
                     static_value: None,
                     mode: ExtractionMode::Replace,
                 }],
+                event_text: None,
             },
         ];
 
@@ -2901,6 +2953,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -2935,6 +2988,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -2969,6 +3023,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
 
@@ -2996,6 +3051,7 @@ mod tests {
             name: "src1".into(),
             template_id: 1,
             file_path: "".into(),
+            color: String::new(),
         }];
         let mut sm = StateManager::new(&sources);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -3048,6 +3104,7 @@ mod tests {
             name: "server".into(),
             template_id: 1,
             file_path: server_log.path().to_str().unwrap().into(),
+            color: String::new(),
         }];
 
         let rules = vec![
@@ -3067,6 +3124,7 @@ mod tests {
                     static_value: None,
                     mode: ExtractionMode::Replace,
                 }],
+                event_text: None,
             },
             LogRule {
                 id: 2,
@@ -3084,6 +3142,7 @@ mod tests {
                     static_value: None,
                     mode: ExtractionMode::Replace,
                 }],
+                event_text: None,
             },
         ];
 
@@ -3156,6 +3215,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3218,6 +3278,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3251,6 +3312,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3276,6 +3338,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3326,6 +3389,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3367,6 +3431,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -3400,6 +3465,7 @@ mod tests {
             name: "json_src".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let result = analyze(
@@ -3495,6 +3561,7 @@ mod tests {
             name: "src".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
         let rules = vec![LogRule {
             id: 1,
@@ -3505,6 +3572,7 @@ mod tests {
                 pattern: r"event_\d+".into(),
             }],
             extraction_rules: vec![],
+            event_text: None,
         }];
         let rulesets = vec![Ruleset {
             id: 1,
@@ -3689,6 +3757,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().to_string(),
+            color: String::new(),
         };
 
         let result = cluster_logs(
@@ -3768,6 +3837,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().to_string(),
+            color: String::new(),
         };
 
         let result = cluster_logs(
@@ -3869,6 +3939,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: file.path().to_str().unwrap().into(),
+            color: String::new(),
         };
         let ts_template = TimestampTemplate {
             id: 1,
@@ -3911,6 +3982,7 @@ mod tests {
                 pattern: "ERROR".into(),
             }],
             extraction_rules: vec![],
+            event_text: None,
         };
 
         // All matches
@@ -3947,6 +4019,7 @@ mod tests {
                 static_value: None,
                 mode: ExtractionMode::Replace,
             }],
+            event_text: None,
         };
 
         let matches = dry_run_rule(&source, &template, &ts_template, &rule, 100).unwrap();
@@ -3969,6 +4042,7 @@ mod tests {
                 pattern: "[invalid".into(),
             }],
             extraction_rules: vec![],
+            event_text: None,
         };
 
         assert!(dry_run_rule(&source, &template, &ts_template, &rule, 100).is_err());
@@ -4082,6 +4156,7 @@ mod tests {
             name: "chunked_test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let rule = LogRule {
@@ -4100,6 +4175,7 @@ mod tests {
                 static_value: Some("info".into()),
                 mode: ExtractionMode::Replace,
             }],
+            event_text: None,
         };
         let compiled = compile_rules(std::slice::from_ref(&rule)).unwrap();
         let rule_ids = vec![rule.id];
@@ -4161,6 +4237,7 @@ mod tests {
             name: "test".into(),
             template_id: 1,
             file_path: f.path().to_str().unwrap().into(),
+            color: String::new(),
         };
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
@@ -4210,6 +4287,7 @@ mod tests {
             name: "server".into(),
             template_id: 1,
             file_path: log.path().to_str().unwrap().into(),
+            color: String::new(),
         }];
 
         let rule = LogRule {
@@ -4228,6 +4306,7 @@ mod tests {
                 static_value: None,
                 mode: ExtractionMode::Replace,
             }],
+            event_text: None,
         };
 
         let rulesets = vec![Ruleset {

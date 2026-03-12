@@ -227,9 +227,9 @@
     font-size: 12px;
     color: var(--text);
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: pre;
+    overflow-x: auto;
+    display: block;
   }
 
   .cluster-meta {

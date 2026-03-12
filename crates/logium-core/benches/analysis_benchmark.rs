@@ -40,12 +40,14 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
         name: "source_a".into(),
         template_id: 1,
         file_path: fixture_path("nginx", "source_a.log"),
+        color: String::new(),
     };
     let src_b = Source {
         id: 2,
         name: "source_b".into(),
         template_id: 1,
         file_path: fixture_path("nginx", "source_b.log"),
+        color: String::new(),
     };
     let status_rule = LogRule {
         id: 1,
@@ -63,6 +65,7 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
             static_value: None,
             mode: ExtractionMode::Replace,
         }],
+        event_text: Option::None,
     };
     let method_rule = LogRule {
         id: 2,
@@ -80,6 +83,7 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
         }],
+        event_text: Option::None,
     };
     let ruleset = Ruleset {
         id: 1,
@@ -146,6 +150,7 @@ fn bench_nginx_large(c: &mut Criterion) {
         name: "nginx_full".into(),
         template_id: 1,
         file_path: fixture_path("nginx", "full_large.log"),
+        color: String::new(),
     };
     let status_rule = LogRule {
         id: 1,
@@ -163,6 +168,7 @@ fn bench_nginx_large(c: &mut Criterion) {
             static_value: None,
             mode: ExtractionMode::Replace,
         }],
+        event_text: Option::None,
     };
     let ruleset = Ruleset {
         id: 1,

@@ -424,8 +424,22 @@ describe('AnalysisView', () => {
 
     // Mock rules to include a second rule
     vi.mocked(rulesApi.list).mockResolvedValue([
-      { id: 1, name: 'Error Rule', match_mode: 'Any', match_rules: [], extraction_rules: [] },
-      { id: 2, name: 'Warn Rule', match_mode: 'Any', match_rules: [], extraction_rules: [] },
+      {
+        id: 1,
+        name: 'Error Rule',
+        match_mode: 'Any',
+        match_rules: [],
+        extraction_rules: [],
+        event_text: null,
+      },
+      {
+        id: 2,
+        name: 'Warn Rule',
+        match_mode: 'Any',
+        match_rules: [],
+        extraction_rules: [],
+        event_text: null,
+      },
     ]);
 
     renderAnalysis();

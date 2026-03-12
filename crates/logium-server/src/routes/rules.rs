@@ -25,6 +25,7 @@ struct CreateRule {
     match_mode: MatchMode,
     match_rules: Vec<CreateMatchRule>,
     extraction_rules: Vec<CreateExtractionRule>,
+    event_text: Option<String>,
 }
 
 async fn list(
@@ -48,6 +49,7 @@ async fn create(
             &body.match_mode,
             &body.match_rules,
             &body.extraction_rules,
+            body.event_text.as_deref(),
         )
         .await?;
     Ok((StatusCode::CREATED, Json(rule)))
@@ -75,6 +77,7 @@ async fn update(
             &body.match_mode,
             &body.match_rules,
             &body.extraction_rules,
+            body.event_text.as_deref(),
         )
         .await?;
     Ok(Json(rule))

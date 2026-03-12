@@ -6,8 +6,14 @@ import RawFileViewer from '../RawFileViewer.svelte';
 vi.mock('../api', () => ({
   sources: {
     list: vi.fn().mockResolvedValue([
-      { id: 1, name: 'server.log', template_id: 1, file_path: '/var/log/server.log' },
-      { id: 2, name: 'app.log', template_id: 1, file_path: '/var/log/app.log' },
+      {
+        id: 1,
+        name: 'server.log',
+        template_id: 1,
+        file_path: '/var/log/server.log',
+        color: '#60a5fa',
+      },
+      { id: 2, name: 'app.log', template_id: 1, file_path: '/var/log/app.log', color: '#34d399' },
     ]),
     rawLines: vi.fn().mockResolvedValue({
       lines: ['line one', 'line two', 'line three'],
@@ -30,8 +36,14 @@ describe('RawFileViewer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(sourcesApi.list).mockResolvedValue([
-      { id: 1, name: 'server.log', template_id: 1, file_path: '/var/log/server.log' },
-      { id: 2, name: 'app.log', template_id: 1, file_path: '/var/log/app.log' },
+      {
+        id: 1,
+        name: 'server.log',
+        template_id: 1,
+        file_path: '/var/log/server.log',
+        color: '#60a5fa',
+      },
+      { id: 2, name: 'app.log', template_id: 1, file_path: '/var/log/app.log', color: '#34d399' },
     ]);
     vi.mocked(sourcesApi.rawLines).mockResolvedValue({
       lines: ['line one', 'line two', 'line three'],

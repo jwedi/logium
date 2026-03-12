@@ -30,9 +30,11 @@
     match_mode: initMode,
     match_rules: initMR,
     extraction_rules: initER,
+    event_text: initEventText,
   } = rule;
   let editName = $state(initName);
   let editMatchMode: 'Any' | 'All' = $state(initMode);
+  let editEventText = $state(initEventText ?? '');
   let editMatchPatterns: { id: number; pattern: string }[] = $state(
     initMR.map((mr) => ({ id: mr.id, pattern: mr.pattern })),
   );
@@ -53,6 +55,10 @@
       mode: er.mode,
     })),
   );
+
+  const eventTextTooltip =
+    'Optional template shown in place of the raw log line in analysis results. Use {key} to reference extracted state values.';
+  const eventTextPlaceholder = 'e.g. Player started matchmaking for {id}';
 
   let saving = $state(false);
 
@@ -226,6 +232,7 @@
             mode: er.mode,
           }),
         ),
+        event_text: editEventText.trim() || null,
       };
       await rulesApi.update(projectId, rule.id, payload);
       invalidateAnalysis();
@@ -333,6 +340,30 @@
       >
     </div>
   {/each}
+
+  <div class="event-text-section">
+    <div class="section-header">
+      <h3>
+        Event Text
+        <span class="info-icon" data-tooltip={eventTextTooltip}>?</span>
+      </h3>
+    </div>
+    <input
+      type="text"
+      bind:value={editEventText}
+      placeholder={eventTextPlaceholder}
+      class="event-text-input"
+    />
+    {#if editExtractionRules.some((er) => er.state_key.trim())}
+      <div class="event-text-hint">
+        Available keys:
+        {editExtractionRules
+          .filter((er) => er.state_key.trim())
+          .map((er) => `{${er.state_key}}`)
+          .join(', ')}
+      </div>
+    {/if}
+  </div>
 
   <div class="dry-run-section">
     <h3>Test Rule (dry run)</h3>
@@ -487,6 +518,26 @@
 
   .remove-extraction {
     margin-bottom: 2px;
+  }
+
+  .event-text-section {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .event-text-input {
+    width: 100%;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+
+  .event-text-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
   }
 
   .dry-run-section {

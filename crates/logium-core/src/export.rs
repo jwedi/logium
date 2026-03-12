@@ -329,6 +329,7 @@ mod tests {
             match_mode: MatchMode::Any,
             match_rules: vec![],
             extraction_rules: vec![],
+            event_text: None,
         }]
     }
 
@@ -338,6 +339,7 @@ mod tests {
             name: "app.log".to_string(),
             template_id: 1,
             file_path: "/var/log/app.log".to_string(),
+            color: String::new(),
         }]
     }
 
@@ -383,6 +385,7 @@ mod tests {
                     cached_json: None,
                 },
                 extracted_state: extracted,
+                event_text: None,
             }],
             pattern_matches: vec![PatternMatch {
                 pattern_id: 100,

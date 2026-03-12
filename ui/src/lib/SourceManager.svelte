@@ -21,6 +21,7 @@
 
   let newName = $state('');
   let newTemplateId = $state<number | ''>('');
+  let newColor = $state('#60a5fa');
   let fileInput: HTMLInputElement | undefined = $state();
 
   let replacingSourceId: number | null = $state(null);
@@ -152,6 +153,7 @@
         name: newName.trim(),
         template_id: Number(newTemplateId),
         file_path: '',
+        color: newColor,
       });
 
       if (fileInput?.files?.[0]) {
@@ -160,9 +162,19 @@
 
       newName = '';
       newTemplateId = '';
+      newColor = '#60a5fa';
       detectionResult = null;
       detectedTemplateName = null;
       if (fileInput) fileInput.value = '';
+      await load();
+    } catch (e: any) {
+      alert(e.message);
+    }
+  }
+
+  async function updateColor(source: Source, color: string) {
+    try {
+      await sourcesApi.update(projectId, source.id, { color });
       await load();
     } catch (e: any) {
       alert(e.message);
@@ -211,7 +223,7 @@
     <span class="source-title">{selectedSource.name}</span>
     <span class="badge">{selectedSource.file_path || 'no file'}</span>
   </div>
-  <LogViewer source={selectedSource} {projectId} />
+  <LogViewer source={selectedSource} {projectId} sourceList={[selectedSource]} />
 {:else}
   <div class="create-form card">
     <h3>Add Source</h3>
@@ -219,6 +231,10 @@
       <div class="field">
         <label>Name</label>
         <input type="text" bind:value={newName} placeholder="Source name..." />
+      </div>
+      <div class="field">
+        <label>Color</label>
+        <input type="color" bind:value={newColor} />
       </div>
       <div class="field">
         <label>Template</label>
@@ -274,12 +290,21 @@
       {#each sourceList as source}
         <div class="source-card card">
           <div class="source-info">
-            <span class="source-name">{source.name}</span>
+            <div class="source-name-row">
+              <span class="source-color-swatch" style="background:{source.color}"></span>
+              <span class="source-name" style="color:{source.color}">{source.name}</span>
+            </div>
             <span class="source-meta">
               Template #{source.template_id} &middot; {source.file_path || 'no file'}
             </span>
           </div>
           <div class="source-actions">
+            <input
+              type="color"
+              value={source.color}
+              onchange={(e) => updateColor(source, (e.target as HTMLInputElement).value)}
+              title="Change color"
+            />
             <button onclick={() => (selectedSource = source)}>View logs</button>
             <button
               onclick={() => {
@@ -340,6 +365,20 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .source-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .source-color-swatch {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
   }
 
   .source-name {

@@ -10,12 +10,16 @@ use super::{ApiError, ApiResult};
 use crate::AppState;
 use crate::db::DbError;
 
+const COLOR_PALETTE: &[&str] = &[
+    "#60a5fa", "#34d399", "#f87171", "#fbbf24", "#a78bfa", "#f472b6", "#38bdf8", "#fb923c",
+];
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/projects/{project_id}/sources", get(list).post(create))
         .route(
             "/api/projects/{project_id}/sources/{id}",
-            get(get_one).delete(remove),
+            get(get_one).delete(remove).patch(patch_color),
         )
         .route(
             "/api/projects/{project_id}/sources/{id}/upload",
@@ -36,6 +40,12 @@ struct CreateSource {
     template_id: i64,
     name: String,
     file_path: String,
+    color: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PatchSource {
+    color: String,
 }
 
 async fn list(
@@ -51,11 +61,36 @@ async fn create(
     Path(project_id): Path<i64>,
     Json(body): Json<CreateSource>,
 ) -> ApiResult<(StatusCode, Json<Source>)> {
+    let color = if let Some(c) = body.color {
+        c
+    } else {
+        let existing = state.db.list_sources(project_id).await.unwrap_or_default();
+        COLOR_PALETTE[existing.len() % COLOR_PALETTE.len()].to_string()
+    };
     let source = state
         .db
-        .create_source(project_id, body.template_id, &body.name, &body.file_path)
+        .create_source(
+            project_id,
+            body.template_id,
+            &body.name,
+            &body.file_path,
+            &color,
+        )
         .await?;
     Ok((StatusCode::CREATED, Json(source)))
+}
+
+async fn patch_color(
+    State(state): State<AppState>,
+    Path((project_id, id)): Path<(i64, i64)>,
+    Json(body): Json<PatchSource>,
+) -> ApiResult<Json<Source>> {
+    state
+        .db
+        .update_source_color(project_id, id, &body.color)
+        .await?;
+    let source = state.db.get_source(project_id, id).await?;
+    Ok(Json(source))
 }
 
 async fn get_one(
@@ -237,7 +272,7 @@ mod tests {
             .unwrap();
 
         let source = db
-            .create_source(project.id, tmpl.id as i64, "test-src", &path)
+            .create_source(project.id, tmpl.id as i64, "test-src", &path, "#60a5fa")
             .await
             .unwrap();
 
