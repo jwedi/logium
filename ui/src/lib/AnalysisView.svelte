@@ -1012,10 +1012,10 @@
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: pre;
+    overflow-x: auto;
     flex: 1;
+    display: block;
   }
 
   .text-muted {

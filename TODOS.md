@@ -731,3 +731,11 @@ Added `test_timestamp_format()` public function to `logium-core::engine` that en
 **Status:** Done
 
 Added click-and-drag interaction to `EventDensityHistogram.svelte`: press on the histogram, drag to another bucket, and release to set the `timeStart`/`timeEnd` filter in AnalysisView. Works in both directions (left-to-right and right-to-left). Selection overlay shown during drag, crosshair cursor when selectable. Single clicks still fire `onBucketClick` for navigation. Pointer capture ensures drag works even when pointer leaves the SVG. Both histogram instances (table view and logs view) wired up. 5 new tests (drag selection, backward drag, single click vs drag, selection overlay, crosshair cursor).
+
+---
+
+### 58. Fix Log Line Truncation in All Viewers
+
+**Status:** Done
+
+CSS-only fix across three components. `LogViewer.svelte`: added `overflow-x: auto` to `.log-viewer`, removed `right: 0` from `.visible-lines` so the absolute container can widen beyond the viewport, removed `overflow: hidden; text-overflow: ellipsis` from `.line-content`, and made `.line-number` `position: sticky; left: 8px; z-index: 1; background: var(--bg)` with matching hover/selected overrides so line numbers stay anchored while scrolling right. `AnalysisView.svelte` `.match-line` and `ErrorClusteringView.svelte` `.cluster-template`: replaced `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` with `white-space: pre; overflow-x: auto; display: block` for per-element horizontal scroll.

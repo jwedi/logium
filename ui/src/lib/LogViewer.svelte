@@ -851,6 +851,7 @@
   .log-viewer {
     flex: 1;
     overflow-y: auto;
+    overflow-x: auto;
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -868,7 +869,6 @@
   .visible-lines {
     position: absolute;
     left: 0;
-    right: 0;
   }
 
   .log-line {
@@ -894,12 +894,22 @@
     padding-right: 12px;
     color: var(--text-muted);
     user-select: none;
+    position: sticky;
+    left: 8px;
+    z-index: 1;
+    background: var(--bg);
+  }
+
+  .log-line:hover .line-number {
+    background: var(--bg-secondary);
+  }
+
+  .log-line.selected .line-number {
+    background: var(--bg-tertiary);
   }
 
   .line-content {
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
   .state-panel {
