@@ -194,7 +194,7 @@ impl Iterator for LogLineIterator {
             head_line
         };
 
-        if merged_raw.is_empty() {
+        if merged_raw.trim().is_empty() {
             return self.next();
         }
 
@@ -3216,6 +3216,7 @@ mod tests {
         writeln!(f, "2024-01-15 10:00:02 INFO second line").unwrap();
         writeln!(f).unwrap(); // blank line
         writeln!(f).unwrap(); // consecutive blank line
+        write!(f, "\r\n").unwrap(); // Windows-style blank line
         writeln!(f, "2024-01-15 10:00:03 INFO third line").unwrap();
 
         let ts_template = make_ts_template();
