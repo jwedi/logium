@@ -155,6 +155,7 @@ pub struct LogRule {
     pub match_mode: MatchMode,
     pub match_rules: Vec<MatchRule>,
     pub extraction_rules: Vec<ExtractionRule>,
+    pub event_text: Option<String>,
 }
 
 /// A ruleset binding rules to a template.
@@ -213,6 +214,7 @@ pub struct RuleMatch {
     pub source_id: u64,
     pub log_line: LogLine,
     pub extracted_state: HashMap<String, StateValue>,
+    pub event_text: Option<String>,
 }
 
 /// Result of a pattern matching.

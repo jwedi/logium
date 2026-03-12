@@ -698,11 +698,12 @@ impl Database {
     // -----------------------------------------------------------------------
 
     pub async fn list_rules(&self, project_id: i64) -> Result<Vec<LogRule>, DbError> {
-        let rule_rows =
-            sqlx::query("SELECT id, name, match_mode FROM rules WHERE project_id = ? ORDER BY id")
-                .bind(project_id)
-                .fetch_all(&self.pool)
-                .await?;
+        let rule_rows = sqlx::query(
+            "SELECT id, name, match_mode, event_text FROM rules WHERE project_id = ? ORDER BY id",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await?;
 
         let mut rules = Vec::with_capacity(rule_rows.len());
         for row in &rule_rows {
@@ -713,13 +714,14 @@ impl Database {
     }
 
     pub async fn get_rule(&self, project_id: i64, id: i64) -> Result<LogRule, DbError> {
-        let row =
-            sqlx::query("SELECT id, name, match_mode FROM rules WHERE id = ? AND project_id = ?")
-                .bind(id)
-                .bind(project_id)
-                .fetch_optional(&self.pool)
-                .await?
-                .ok_or(DbError::NotFound)?;
+        let row = sqlx::query(
+            "SELECT id, name, match_mode, event_text FROM rules WHERE id = ? AND project_id = ?",
+        )
+        .bind(id)
+        .bind(project_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(DbError::NotFound)?;
 
         self.build_log_rule(&row, id).await
     }
@@ -732,6 +734,7 @@ impl Database {
         let name: String = row.get("name");
         let match_mode_str: String = row.get("match_mode");
         let match_mode = parse_match_mode(&match_mode_str)?;
+        let event_text: Option<String> = row.get("event_text");
 
         let match_rows =
             sqlx::query("SELECT id, pattern FROM match_rules WHERE rule_id = ? ORDER BY id")
@@ -777,6 +780,7 @@ impl Database {
             match_mode,
             match_rules,
             extraction_rules: extraction_rules?,
+            event_text,
         })
     }
 
@@ -787,14 +791,16 @@ impl Database {
         match_mode: &MatchMode,
         match_rules: &[CreateMatchRule],
         extraction_rules: &[CreateExtractionRule],
+        event_text: Option<&str>,
     ) -> Result<LogRule, DbError> {
         let mode_str = match_mode_to_str(match_mode);
         let rule_id = sqlx::query_scalar::<_, i64>(
-            "INSERT INTO rules (project_id, name, match_mode) VALUES (?, ?, ?) RETURNING id",
+            "INSERT INTO rules (project_id, name, match_mode, event_text) VALUES (?, ?, ?, ?) RETURNING id",
         )
         .bind(project_id)
         .bind(name)
         .bind(mode_str)
+        .bind(event_text)
         .fetch_one(&self.pool)
         .await?;
 
@@ -845,9 +851,11 @@ impl Database {
             match_mode: match_mode.clone(),
             match_rules: built_match_rules,
             extraction_rules: built_ext_rules,
+            event_text: event_text.map(|s| s.to_string()),
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_rule(
         &self,
         project_id: i64,
@@ -856,13 +864,15 @@ impl Database {
         match_mode: &MatchMode,
         match_rules: &[CreateMatchRule],
         extraction_rules: &[CreateExtractionRule],
+        event_text: Option<&str>,
     ) -> Result<LogRule, DbError> {
         let mode_str = match_mode_to_str(match_mode);
         let result = sqlx::query(
-            "UPDATE rules SET name = ?, match_mode = ? WHERE id = ? AND project_id = ?",
+            "UPDATE rules SET name = ?, match_mode = ?, event_text = ? WHERE id = ? AND project_id = ?",
         )
         .bind(name)
         .bind(mode_str)
+        .bind(event_text)
         .bind(id)
         .bind(project_id)
         .execute(&self.pool)
@@ -929,6 +939,7 @@ impl Database {
             match_mode: match_mode.clone(),
             match_rules: built_match_rules,
             extraction_rules: built_ext_rules,
+            event_text: event_text.map(|s| s.to_string()),
         })
     }
 
@@ -1314,6 +1325,7 @@ impl Database {
                     &rule.match_mode,
                     &create_match_rules,
                     &create_ext_rules,
+                    rule.event_text.as_deref(),
                 )
                 .await?;
             rule_id_map.insert(rule.id, new_rule.id);
@@ -1822,6 +1834,7 @@ mod tests {
                     static_value: Some("error".to_string()),
                     mode: ExtractionMode::Replace,
                 }],
+                None,
             )
             .await
             .unwrap();
@@ -1847,6 +1860,7 @@ mod tests {
                     },
                 ],
                 &[],
+                None,
             )
             .await
             .unwrap();
@@ -1881,11 +1895,11 @@ mod tests {
             .await
             .unwrap();
         let r1 = db
-            .create_rule(p.id, "r1", &MatchMode::Any, &[], &[])
+            .create_rule(p.id, "r1", &MatchMode::Any, &[], &[], None)
             .await
             .unwrap();
         let r2 = db
-            .create_rule(p.id, "r2", &MatchMode::Any, &[], &[])
+            .create_rule(p.id, "r2", &MatchMode::Any, &[], &[], None)
             .await
             .unwrap();
 
@@ -2014,7 +2028,7 @@ mod tests {
         )
         .await
         .unwrap();
-        db.create_rule(p.id, "r1", &MatchMode::Any, &[], &[])
+        db.create_rule(p.id, "r1", &MatchMode::Any, &[], &[], None)
             .await
             .unwrap();
 
@@ -2075,6 +2089,7 @@ mod tests {
                     static_value: Some("error".to_string()),
                     mode: ExtractionMode::Replace,
                 }],
+                None,
             )
             .await
             .unwrap();

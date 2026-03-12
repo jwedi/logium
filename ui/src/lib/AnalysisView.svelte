@@ -580,7 +580,14 @@
               <span class="badge" style="color:{getSourceColor(rm.source_id)}"
                 >{getSourceName(rm.source_id)}</span
               >
-              <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
+              <div class="match-content">
+                {#if rm.event_text}
+                  <span class="event-text">{rm.event_text}</span>
+                  <code class="match-line dim">{rm.log_line.content || rm.log_line.raw}</code>
+                {:else}
+                  <code class="match-line">{rm.log_line.content || rm.log_line.raw}</code>
+                {/if}
+              </div>
             </div>
           {/each}
           {#if visibleMatches.length > 100}
@@ -1018,14 +1025,32 @@
     border-radius: var(--radius);
   }
 
+  .match-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .event-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+
   .match-line {
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text);
     white-space: pre;
     overflow-x: auto;
-    flex: 1;
     display: block;
+  }
+
+  .match-line.dim {
+    color: var(--text-muted);
+    font-size: 11px;
   }
 
   .text-muted {

@@ -40,6 +40,7 @@ export function makeRuleMatch(overrides: Partial<RuleMatch> = {}): RuleMatch {
     source_id: 1,
     log_line: makeLogLine(),
     extracted_state: {},
+    event_text: null,
     ...overrides,
   };
 }
@@ -71,6 +72,7 @@ export function makeRule(overrides: Partial<LogRule> = {}): LogRule {
     match_mode: 'Any',
     match_rules: [{ id: 1, pattern: 'ERROR' }],
     extraction_rules: [],
+    event_text: null,
     ...overrides,
   };
 }
@@ -99,6 +101,7 @@ export function makeRuleWithExtractions(overrides: Partial<LogRule> = {}): LogRu
         mode: 'Replace',
       },
     ],
+    event_text: null,
     ...overrides,
   };
 }

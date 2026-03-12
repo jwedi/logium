@@ -54,6 +54,7 @@ export interface LogRule {
   match_mode: 'Any' | 'All';
   match_rules: MatchRule[];
   extraction_rules: ExtractionRule[];
+  event_text: string | null;
 }
 
 export interface Ruleset {
@@ -99,6 +100,7 @@ export interface RuleMatch {
   source_id: number;
   log_line: LogLine;
   extracted_state: Record<string, StateValue>;
+  event_text: string | null;
 }
 
 export interface PatternMatch {

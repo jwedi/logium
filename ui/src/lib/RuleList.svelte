@@ -114,6 +114,7 @@
           static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
           mode: er.mode,
         })),
+        event_text: null,
       });
       newName = '';
       newMatchPattern = '';

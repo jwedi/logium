@@ -764,3 +764,11 @@ Added `selectedChange` state, `stateSnapshot` derived value (replays `stateChang
 **Status:** Done
 
 Each source now has a persistent `color` field. Migration `20240101000002_source_color.sql` adds `color TEXT NOT NULL DEFAULT '#6b7280'` to the sources table. `Source` model gains a `color: String` field. `db.create_source()` accepts a `color: &str` parameter. New `db.update_source_color()` function. `PATCH /api/projects/:pid/sources/:id` endpoint added. Auto-assignment picks from an 8-color palette (`#60a5fa` through `#fb923c`) based on existing source count when no color is provided. Frontend: `SourceManager.svelte` adds a color picker in the create form and an inline color picker per source card with a colored swatch and source name rendered in its color. `StateEvolutionView.svelte`, `AnalysisView.svelte`, and `LogViewer.svelte` use `getSourceColor()` helpers to color source names throughout (table cells, modal detail, source facet chips, rule match badges, log-file tabs, state panel source names).
+
+---
+
+### 61. Rule Event Text
+
+**Status:** Done
+
+Added optional `event_text: Option<String>` to `LogRule` and `event_text: Option<String>` to `RuleMatch`. Migration `20240101000003_rule_event_text.sql` adds the column to the `rules` table. Engine `resolve_event_text()` helper replaces `{key}` placeholders in the template string with extracted state values at match time. All three `RuleMatch` construction sites in `engine.rs` (`dry_run_rule`, `analyze`, `analyze_streaming`) populate `event_text` via `CompiledRule`. `db.create_rule()` and `db.update_rule()` accept `event_text: Option<&str>`. Routes pass `body.event_text.as_deref()`. Frontend: `LogRule` and `RuleMatch` interfaces updated in `api.ts`. `RuleEditor.svelte` adds an "Event Text" input field with a `{key}` hint showing available extracted keys. `AnalysisView.svelte` rule matches table shows resolved event text prominently with the raw line dimmed below when event text is present.
