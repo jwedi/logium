@@ -96,6 +96,8 @@ pub struct LogLineIterator {
     buf: Vec<u8>,
     augmented_fmt: Option<String>,
     ts_buf: String,
+    line_number: u64,
+    file_path: String,
 }
 
 impl LogLineIterator {
@@ -142,6 +144,8 @@ impl LogLineIterator {
                 .default_year
                 .map(|_| format!("%Y {}", ts_template.format)),
             ts_buf: String::new(),
+            line_number: 0,
+            file_path: source.file_path.clone(),
         })
     }
 }
@@ -158,12 +162,14 @@ impl Iterator for LogLineIterator {
             match self.reader.read_until(b'\n', &mut self.buf) {
                 Ok(0) => return None,
                 Ok(_) => {
+                    self.line_number += 1;
                     let s = String::from_utf8_lossy(&self.buf);
                     s.trim_end_matches('\n').trim_end_matches('\r').to_string()
                 }
                 Err(e) => return Some(Err(AnalysisError::ParseError(e.to_string()))),
             }
         };
+        let head_line_number = self.line_number;
 
         // If continuation_regex is set, merge continuation lines.
         let merged_raw = if let Some(cont_re) = &self.continuation_regex {
@@ -173,6 +179,7 @@ impl Iterator for LogLineIterator {
                 match self.reader.read_until(b'\n', &mut self.buf) {
                     Ok(0) => break, // EOF
                     Ok(_) => {
+                        self.line_number += 1;
                         let raw = String::from_utf8_lossy(&self.buf);
                         let line = raw
                             .trim_end_matches('\n')
@@ -203,19 +210,27 @@ impl Iterator for LogLineIterator {
             let json_val: serde_json::Value = match serde_json::from_str(&merged_raw) {
                 Ok(v) => v,
                 Err(e) => {
-                    return Some(Err(AnalysisError::ParseError(format!(
-                        "failed to parse JSON: {e}"
-                    ))));
+                    tracing::warn!(
+                        file = %self.file_path,
+                        line = head_line_number,
+                        content = %merged_raw,
+                        "skipping unparseable line: failed to parse JSON: {e}"
+                    );
+                    return self.next();
                 }
             };
 
             let ts_str = match json_val.get(field_name).and_then(|v| v.as_str()) {
                 Some(s) => s,
                 None => {
-                    return Some(Err(AnalysisError::ParseError(format!(
-                        "JSON field '{}' not found or not a string",
+                    tracing::warn!(
+                        file = %self.file_path,
+                        line = head_line_number,
+                        content = %merged_raw,
+                        "skipping unparseable line: JSON field '{}' not found or not a string",
                         field_name
-                    ))));
+                    );
+                    return self.next();
                 }
             };
 
@@ -247,10 +262,16 @@ impl Iterator for LogLineIterator {
                         cached_json: Some(Box::new(json_val)),
                     }))
                 }
-                Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
-                    "failed to parse timestamp from '{}' with format '{}': {}",
-                    ts_str, self.timestamp_format, e
-                )))),
+                Err(e) => {
+                    tracing::warn!(
+                        file = %self.file_path,
+                        line = head_line_number,
+                        content = %merged_raw,
+                        "skipping unparseable line: failed to parse timestamp from '{}' with format '{}': {}",
+                        ts_str, self.timestamp_format, e
+                    );
+                    self.next()
+                }
             };
         }
 
@@ -320,10 +341,16 @@ impl Iterator for LogLineIterator {
                     cached_json: None,
                 }))
             }
-            Err(e) => Some(Err(AnalysisError::InvalidTimestampFormat(format!(
-                "failed to parse timestamp from '{}' with format '{}': {}",
-                first_line, self.timestamp_format, e
-            )))),
+            Err(e) => {
+                tracing::warn!(
+                    file = %self.file_path,
+                    line = head_line_number,
+                    content = %merged_raw,
+                    "skipping unparseable line: failed to parse timestamp from '{}' with format '{}': {}",
+                    first_line, self.timestamp_format, e
+                );
+                self.next()
+            }
         }
     }
 }
@@ -3196,16 +3223,14 @@ mod tests {
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
         let results: Vec<_> = iter.collect();
 
-        // First two lines parse fine; third line ("  at ...") will fail timestamp parsing
+        // First two lines parse fine; third line ("  at ...") fails timestamp parsing and is skipped
         assert_eq!(
             results.len(),
-            3,
-            "without continuation_regex, each physical line is separate"
+            2,
+            "without continuation_regex, malformed lines are silently skipped"
         );
         assert!(results[0].is_ok());
         assert!(results[1].is_ok());
-        // The continuation line will fail timestamp parsing (expected behavior)
-        assert!(results[2].is_err());
     }
 
     #[test]
@@ -3235,6 +3260,42 @@ mod tests {
         assert_eq!(&*lines[0].raw, "2024-01-15 10:00:01 INFO first line");
         assert_eq!(&*lines[1].raw, "2024-01-15 10:00:02 INFO second line");
         assert_eq!(&*lines[2].raw, "2024-01-15 10:00:03 INFO third line");
+    }
+
+    #[test]
+    fn test_malformed_lines_are_skipped() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "2024-01-15 10:00:01 INFO first valid line").unwrap();
+        writeln!(f, "this line has no timestamp at all -- totally malformed").unwrap();
+        writeln!(f, "2024-01-15 10:00:03 INFO third valid line").unwrap();
+
+        let ts_template = make_ts_template();
+        let template = make_template();
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+
+        let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
+        let results: Vec<_> = iter.collect();
+
+        assert_eq!(
+            results.len(),
+            2,
+            "malformed lines should be silently skipped"
+        );
+        assert!(results[0].is_ok());
+        assert!(results[1].is_ok());
+        assert_eq!(
+            &*results[0].as_ref().unwrap().raw,
+            "2024-01-15 10:00:01 INFO first valid line"
+        );
+        assert_eq!(
+            &*results[1].as_ref().unwrap().raw,
+            "2024-01-15 10:00:03 INFO third valid line"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -3310,8 +3371,8 @@ mod tests {
 
         let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
         let results: Vec<_> = iter.collect();
-        assert_eq!(results.len(), 1);
-        assert!(results[0].is_err());
+        // Invalid JSON line is silently skipped, so the iterator yields nothing
+        assert_eq!(results.len(), 0);
     }
 
     #[test]
