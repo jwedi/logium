@@ -194,6 +194,10 @@ impl Iterator for LogLineIterator {
             head_line
         };
 
+        if merged_raw.is_empty() {
+            return self.next();
+        }
+
         // JSON mode: parse line as JSON, extract timestamp from configured field
         if let Some(ref field_name) = self.json_timestamp_field {
             let json_val: serde_json::Value = match serde_json::from_str(&merged_raw) {
@@ -3202,6 +3206,34 @@ mod tests {
         assert!(results[1].is_ok());
         // The continuation line will fail timestamp parsing (expected behavior)
         assert!(results[2].is_err());
+    }
+
+    #[test]
+    fn test_empty_lines_are_skipped() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "2024-01-15 10:00:01 INFO first line").unwrap();
+        writeln!(f).unwrap(); // blank line
+        writeln!(f, "2024-01-15 10:00:02 INFO second line").unwrap();
+        writeln!(f).unwrap(); // blank line
+        writeln!(f).unwrap(); // consecutive blank line
+        writeln!(f, "2024-01-15 10:00:03 INFO third line").unwrap();
+
+        let ts_template = make_ts_template();
+        let template = make_template();
+        let source = Source {
+            id: 1,
+            name: "test".into(),
+            template_id: 1,
+            file_path: f.path().to_str().unwrap().into(),
+        };
+
+        let iter = LogLineIterator::new(&source, &template, &ts_template).unwrap();
+        let lines: Vec<LogLine> = iter.map(|r| r.unwrap()).collect();
+
+        assert_eq!(lines.len(), 3, "empty lines should be silently skipped");
+        assert_eq!(&*lines[0].raw, "2024-01-15 10:00:01 INFO first line");
+        assert_eq!(&*lines[1].raw, "2024-01-15 10:00:02 INFO second line");
+        assert_eq!(&*lines[2].raw, "2024-01-15 10:00:03 INFO third line");
     }
 
     // -----------------------------------------------------------------------
