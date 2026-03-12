@@ -3,7 +3,6 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncBufReadExt;
 
 use logium_core::model::Source;
 
@@ -86,9 +85,10 @@ async fn content(
             "no file uploaded for this source".to_string(),
         )));
     }
-    let content = tokio::fs::read_to_string(path)
+    let bytes = tokio::fs::read(path)
         .await
         .map_err(|e| ApiError::from(DbError::InvalidData(format!("read error: {e}"))))?;
+    let content = String::from_utf8_lossy(&bytes).into_owned();
     Ok(content)
 }
 
@@ -174,25 +174,18 @@ async fn raw_lines(
     let offset = query.offset.unwrap_or(0);
     let limit = query.limit.unwrap_or(200).min(1000);
 
-    let file = tokio::fs::File::open(path)
+    let bytes = tokio::fs::read(path)
         .await
         .map_err(|e| ApiError::from(DbError::InvalidData(format!("read error: {e}"))))?;
-
-    let reader = tokio::io::BufReader::new(file);
-    let mut line_stream = reader.lines();
-    let mut total_lines = 0usize;
-    let mut lines = Vec::new();
-
-    while let Some(line) = line_stream
-        .next_line()
-        .await
-        .map_err(|e| ApiError::from(DbError::InvalidData(format!("read error: {e}"))))?
-    {
-        if total_lines >= offset && lines.len() < limit {
-            lines.push(line);
-        }
-        total_lines += 1;
-    }
+    let content = String::from_utf8_lossy(&bytes);
+    let all_lines: Vec<&str> = content.lines().collect();
+    let total_lines = all_lines.len();
+    let lines: Vec<String> = all_lines
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .map(|s| s.to_string())
+        .collect();
 
     Ok(Json(RawLinesResponse { lines, total_lines }))
 }

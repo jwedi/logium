@@ -93,7 +93,7 @@ pub struct LogLineIterator {
     continuation_regex: Option<Regex>,
     json_timestamp_field: Option<String>,
     pending_line: Option<String>,
-    buf: String,
+    buf: Vec<u8>,
     augmented_fmt: Option<String>,
     ts_buf: String,
 }
@@ -137,7 +137,7 @@ impl LogLineIterator {
             continuation_regex,
             json_timestamp_field: template.json_timestamp_field.clone(),
             pending_line: None,
-            buf: String::new(),
+            buf: Vec::new(),
             augmented_fmt: ts_template
                 .default_year
                 .map(|_| format!("%Y {}", ts_template.format)),
@@ -155,13 +155,12 @@ impl Iterator for LogLineIterator {
             pending
         } else {
             self.buf.clear();
-            match self.reader.read_line(&mut self.buf) {
+            match self.reader.read_until(b'\n', &mut self.buf) {
                 Ok(0) => return None,
-                Ok(_) => self
-                    .buf
-                    .trim_end_matches('\n')
-                    .trim_end_matches('\r')
-                    .to_string(),
+                Ok(_) => {
+                    let s = String::from_utf8_lossy(&self.buf);
+                    s.trim_end_matches('\n').trim_end_matches('\r').to_string()
+                }
                 Err(e) => return Some(Err(AnalysisError::ParseError(e.to_string()))),
             }
         };
@@ -171,11 +170,11 @@ impl Iterator for LogLineIterator {
             let mut merged = head_line;
             loop {
                 self.buf.clear();
-                match self.reader.read_line(&mut self.buf) {
+                match self.reader.read_until(b'\n', &mut self.buf) {
                     Ok(0) => break, // EOF
                     Ok(_) => {
-                        let line = self
-                            .buf
+                        let raw = String::from_utf8_lossy(&self.buf);
+                        let line = raw
                             .trim_end_matches('\n')
                             .trim_end_matches('\r')
                             .to_string();
