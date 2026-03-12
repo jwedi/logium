@@ -739,3 +739,20 @@ Added click-and-drag interaction to `EventDensityHistogram.svelte`: press on the
 **Status:** Done
 
 CSS-only fix across three components. `LogViewer.svelte`: added `overflow-x: auto` to `.log-viewer`, removed `right: 0` from `.visible-lines` so the absolute container can widen beyond the viewport, removed `overflow: hidden; text-overflow: ellipsis` from `.line-content`, and made `.line-number` `position: sticky; left: 8px; z-index: 1; background: var(--bg)` with matching hover/selected overrides so line numbers stay anchored while scrolling right. `AnalysisView.svelte` `.match-line` and `ErrorClusteringView.svelte` `.cluster-template`: replaced `overflow: hidden; text-overflow: ellipsis; white-space: nowrap` with `white-space: pre; overflow-x: auto; display: block` for per-element horizontal scroll.
+
+---
+
+### 59. State Change Detail Modal in StateEvolutionView
+
+Clicking a row in the state-changes chronological table opens a modal showing:
+(1) the clicked change — timestamp, source, key, old → new value, rule name; and
+(2) a "Current state of <source>" section for every source that has accumulated any state
+up to that timestamp. The snapshot is computed in the frontend by replaying the
+`stateChanges` array (already available as a prop) up to the clicked row's timestamp,
+mirroring the `accumulatedState` derived value in `LogViewer.svelte`. No backend changes.
+
+**Key file:** `ui/src/lib/StateEvolutionView.svelte`
+
+**Status:** Done
+
+Added `selectedChange` state, `stateSnapshot` derived value (replays `stateChanges` up to clicked timestamp), and `closeModal()` helper. Table rows get `onclick` + pointer cursor. Modal shows the clicked change's fields and a per-source state snapshot sorted alphabetically. Snapshot updated to reflect the new scoped CSS class on `<tr>` elements.
