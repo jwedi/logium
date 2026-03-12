@@ -1,4 +1,4 @@
-use axum::extract::{Multipart, Path, Query, State};
+use axum::extract::{DefaultBodyLimit, Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -20,7 +20,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/api/projects/{project_id}/sources/{id}/upload",
-            post(upload),
+            post(upload).layer(DefaultBodyLimit::max(500 * 1024 * 1024)),
         )
         .route(
             "/api/projects/{project_id}/sources/{id}/content",
@@ -97,40 +97,53 @@ async fn upload(
     Path((project_id, id)): Path<(i64, i64)>,
     mut multipart: Multipart,
 ) -> ApiResult<Json<Source>> {
+    tracing::debug!(project_id, source_id = id, "upload request received");
+
     // Verify source exists
     let _source = state.db.get_source(project_id, id).await?;
 
-    if let Some(field) = multipart
+    let field = multipart
         .next_field()
         .await
-        .map_err(|e| ApiError::from(DbError::InvalidData(format!("multipart error: {e}"))))?
-    {
-        let file_name = field.file_name().unwrap_or("upload.log").to_string();
-        let data = field
-            .bytes()
-            .await
-            .map_err(|e| ApiError::from(DbError::InvalidData(format!("read error: {e}"))))?;
+        .map_err(|e| {
+            tracing::warn!(project_id, source_id = id, error = %e, "multipart parse error (file may exceed size limit)");
+            ApiError::from(DbError::InvalidData(format!("multipart error: {e}")))
+        })?
+        .ok_or_else(|| {
+            ApiError::from(DbError::InvalidData(
+                "no file field in multipart upload".to_string(),
+            ))
+        })?;
 
-        // Save to uploads directory
-        let upload_path = state.uploads_dir.join(format!("{}_{}", id, file_name));
-        tokio::fs::write(&upload_path, &data)
-            .await
-            .map_err(|e| ApiError::from(DbError::InvalidData(format!("write error: {e}"))))?;
+    let file_name = field.file_name().unwrap_or("upload.log").to_string();
+    let content_type = field.content_type().unwrap_or("unknown").to_string();
+    tracing::debug!(project_id, source_id = id, %file_name, %content_type, "reading upload field");
 
-        // Update the source's file_path
-        let path_str = upload_path.to_string_lossy().to_string();
-        state
-            .db
-            .update_source_file_path(project_id, id, &path_str)
-            .await?;
+    let data = field
+        .bytes()
+        .await
+        .map_err(|e| {
+            tracing::warn!(project_id, source_id = id, %file_name, error = %e, "failed to read upload bytes");
+            ApiError::from(DbError::InvalidData(format!("read error: {e}")))
+        })?;
 
-        let source = state.db.get_source(project_id, id).await?;
-        Ok(Json(source))
-    } else {
-        Err(ApiError::from(DbError::InvalidData(
-            "no file field in multipart upload".to_string(),
-        )))
-    }
+    // Save to uploads directory
+    let upload_path = state.uploads_dir.join(format!("{}_{}", id, file_name));
+    tokio::fs::write(&upload_path, &data)
+        .await
+        .map_err(|e| ApiError::from(DbError::InvalidData(format!("write error: {e}"))))?;
+
+    tracing::info!(project_id, source_id = id, %file_name, bytes = data.len(), "upload received successfully");
+
+    // Update the source's file_path
+    let path_str = upload_path.to_string_lossy().to_string();
+    state
+        .db
+        .update_source_file_path(project_id, id, &path_str)
+        .await?;
+
+    let source = state.db.get_source(project_id, id).await?;
+    Ok(Json(source))
 }
 
 #[derive(Deserialize)]
