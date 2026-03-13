@@ -541,7 +541,7 @@
       onclick={() => {
         viewMode = 'state';
         navigateTarget = null;
-      }}>State Evolution</button
+      }}>Event Feed</button
     >
     <button
       class:active={viewMode === 'clusters'}
@@ -663,7 +663,14 @@
       onNavigate={handleNavigate}
     />
   {:else if viewMode === 'state'}
-    <StateEvolutionView stateChanges={filteredResult.state_changes} {sourceList} {ruleList} />
+    <StateEvolutionView
+      ruleMatches={filteredResult.rule_matches}
+      stateChanges={filteredResult.state_changes}
+      patternMatches={filteredResult.pattern_matches}
+      {sourceList}
+      {ruleList}
+      {patternList}
+    />
   {:else if viewMode === 'clusters'}
     <ErrorClusteringView {projectId} {sourceList} />
   {/if}

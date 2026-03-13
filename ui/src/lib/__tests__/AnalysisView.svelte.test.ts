@@ -345,18 +345,18 @@ describe('AnalysisView', () => {
     expect(clustersBtn.classList.contains('active')).toBe(true);
   });
 
-  it('"State Evolution" tab appears and switches view', async () => {
+  it('"Event Feed" tab appears and switches view', async () => {
     renderAnalysis();
     await tick();
 
     await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
-      expect(screen.getByText('State Evolution')).toBeInTheDocument();
+      expect(screen.getByText('Event Feed')).toBeInTheDocument();
     });
 
-    await fireEvent.click(screen.getByText('State Evolution'));
-    const stateBtn = screen.getByText('State Evolution');
+    await fireEvent.click(screen.getByText('Event Feed'));
+    const stateBtn = screen.getByText('Event Feed');
     expect(stateBtn.classList.contains('active')).toBe(true);
   });
 

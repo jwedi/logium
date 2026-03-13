@@ -62,7 +62,7 @@ async fn main() {
         .with_state(state);
 
     // Serve static files from ui/dist if it exists, with SPA fallback to index.html
-    let static_dir = PathBuf::from("../ui/dist");
+    let static_dir = PathBuf::from("ui/dist");
     if static_dir.exists() {
         app = app.fallback_service(
             ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html"))),

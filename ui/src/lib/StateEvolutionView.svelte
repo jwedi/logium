@@ -1,16 +1,39 @@
 <script lang="ts">
-  import type { StateChange, Source, LogRule, StateValue } from './api';
+  import type {
+    RuleMatch,
+    StateChange,
+    PatternMatch,
+    Source,
+    LogRule,
+    Pattern,
+    StateValue,
+  } from './api';
   import { formatTimestamp } from './formatUtils';
 
   let {
+    ruleMatches,
     stateChanges,
+    patternMatches,
     sourceList,
     ruleList,
-  }: { stateChanges: StateChange[]; sourceList: Source[]; ruleList: LogRule[] } = $props();
+    patternList,
+  }: {
+    ruleMatches: RuleMatch[];
+    stateChanges: StateChange[];
+    patternMatches: PatternMatch[];
+    sourceList: Source[];
+    ruleList: LogRule[];
+    patternList: Pattern[];
+  } = $props();
 
   let filterSource: string = $state('all');
+  let filterRule: string = $state('all');
   let filterKey: string = $state('all');
-  let selectedChange: StateChange | null = $state(null);
+
+  // Panels open for inline state snapshot, keyed by `${timestamp}|${rule_id}|${source_id}`
+  let openStatePanels: Set<string> = $state(new Set());
+  // Raw line expanded, keyed same way
+  let openRawLines: Set<string> = $state(new Set());
 
   function formatStateValue(sv: StateValue): string {
     if ('String' in sv) return sv.String;
@@ -24,31 +47,119 @@
     return ruleList.find((r) => r.id === id)?.name ?? `Rule #${id}`;
   }
 
-  function getSourceColor(name: string): string {
+  function getSourceName(id: number): string {
+    return sourceList.find((s) => s.id === id)?.name ?? `Source #${id}`;
+  }
+
+  function getSourceColor(id: number): string {
+    return sourceList.find((s) => s.id === id)?.color ?? 'var(--accent)';
+  }
+
+  function getSourceColorByName(name: string): string {
     return sourceList.find((s) => s.name === name)?.color ?? 'var(--accent)';
   }
 
-  function closeModal() {
-    selectedChange = null;
+  function getPatternName(id: number): string {
+    return patternList.find((p) => p.id === id)?.name ?? `Pattern #${id}`;
   }
 
-  let sourceNames = $derived([...new Set(stateChanges.map((sc) => sc.source_name))].sort());
+  // Join key for looking up state changes (same fields as StateChange has)
+  function joinKey(rm: RuleMatch): string {
+    return `${rm.log_line.timestamp}|${rm.rule_id}|${rm.source_id}`;
+  }
+
+  // Toggle key for tracking open panels — includes raw line to disambiguate
+  // multiple matches from the same source/rule at the same timestamp
+  function rowKey(rm: RuleMatch): string {
+    return `${rm.log_line.timestamp}|${rm.rule_id}|${rm.source_id}|${rm.log_line.raw}`;
+  }
+
+  function toggleStatePanel(key: string) {
+    const next = new Set(openStatePanels);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    openStatePanels = next;
+  }
+
+  function toggleRawLine(key: string) {
+    const next = new Set(openRawLines);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    openRawLines = next;
+  }
+
+  // Build lookup: (timestamp, rule_id, source_id) -> StateChange[]
+  // StateChange has source_id? Let's check: StateChange has source_id and rule_id and timestamp
+  // We need to match stateChanges to ruleMatches
+  let stateChangesByKey = $derived.by(() => {
+    const map = new Map<string, StateChange[]>();
+    for (const sc of stateChanges) {
+      // StateChange has source_id, rule_id, timestamp
+      const key = `${sc.timestamp}|${sc.rule_id}|${sc.source_id}`;
+      let arr = map.get(key);
+      if (!arr) {
+        arr = [];
+        map.set(key, arr);
+      }
+      arr.push(sc);
+    }
+    return map;
+  });
+
+  // Derived: unique source names from ruleMatches (by source_id)
+  let sourceOptions = $derived(
+    [...new Set(ruleMatches.map((rm) => rm.source_id))].map((id) => ({
+      id,
+      name: getSourceName(id),
+    })),
+  );
+
+  // Derived: unique state keys from stateChanges
   let stateKeys = $derived([...new Set(stateChanges.map((sc) => sc.state_key))].sort());
 
-  let filteredChanges = $derived(
-    stateChanges.filter((sc) => {
-      if (filterSource !== 'all' && sc.source_name !== filterSource) return false;
-      if (filterKey !== 'all' && sc.state_key !== filterKey) return false;
+  // Filtered rule matches
+  let filteredMatches = $derived(
+    ruleMatches.filter((rm) => {
+      if (filterSource !== 'all' && String(rm.source_id) !== filterSource) return false;
+      if (filterRule !== 'all' && String(rm.rule_id) !== filterRule) return false;
+      if (filterKey !== 'all') {
+        // Only include if this match has a state change with this key
+        const scs = stateChangesByKey.get(joinKey(rm)) ?? [];
+        if (!scs.some((sc) => sc.state_key === filterKey)) return false;
+      }
       return true;
     }),
   );
 
-  let stateSnapshot = $derived.by(() => {
-    if (!selectedChange) return null;
-    const ts = selectedChange.timestamp;
+  type MatchRow = { kind: 'match'; rm: RuleMatch };
+  type PatternRow = { kind: 'pattern'; pm: PatternMatch };
+  type FeedRow = MatchRow | PatternRow;
+
+  // Merge and sort by timestamp ascending
+  let feedRows: FeedRow[] = $derived.by(() => {
+    const rows: FeedRow[] = [
+      ...filteredMatches.map((rm): MatchRow => ({ kind: 'match', rm })),
+      ...patternMatches.map((pm): PatternRow => ({ kind: 'pattern', pm })),
+    ];
+    rows.sort((a, b) => {
+      const ta = a.kind === 'match' ? a.rm.log_line.timestamp : a.pm.timestamp;
+      const tb = b.kind === 'match' ? b.rm.log_line.timestamp : b.pm.timestamp;
+      return ta < tb ? -1 : ta > tb ? 1 : 0;
+    });
+    return rows;
+  });
+
+  // Compute state snapshot up to (and including) a given timestamp
+  function computeStateSnapshot(upToTimestamp: string): Map<string, Map<string, StateValue>> {
     const map = new Map<string, Map<string, StateValue>>();
     for (const sc of stateChanges) {
-      if (sc.timestamp > ts) break;
+      if (sc.timestamp > upToTimestamp) break;
       if (sc.new_value === null) {
         map.get(sc.source_name)?.delete(sc.state_key);
       } else {
@@ -62,17 +173,26 @@
     }
     for (const [k, v] of map) if (v.size === 0) map.delete(k);
     return map;
-  });
+  }
 </script>
 
-<div class="state-evolution">
+<div class="event-feed">
   <div class="filter-bar">
     <label>
       Source
       <select bind:value={filterSource}>
         <option value="all">All sources</option>
-        {#each sourceNames as name}
-          <option value={name}>{name}</option>
+        {#each sourceOptions as src}
+          <option value={String(src.id)}>{src.name}</option>
+        {/each}
+      </select>
+    </label>
+    <label>
+      Rule
+      <select bind:value={filterRule}>
+        <option value="all">All rules</option>
+        {#each ruleList as rule}
+          <option value={String(rule.id)}>{rule.name}</option>
         {/each}
       </select>
     </label>
@@ -86,122 +206,126 @@
       </select>
     </label>
     <span class="count"
-      >{filteredChanges.length} change{filteredChanges.length !== 1 ? 's' : ''}</span
+      >{filteredMatches.length} event{filteredMatches.length !== 1 ? 's' : ''}</span
     >
   </div>
 
-  {#if filteredChanges.length === 0}
-    <div class="empty">No state changes to display.</div>
+  {#if feedRows.length === 0}
+    <div class="empty">No events to display.</div>
   {:else}
-    <div class="table-container">
-      <table>
-        <thead>
-          <tr>
-            <th>Timestamp</th>
-            <th>Source</th>
-            <th>Key</th>
-            <th>Change</th>
-            <th>Rule</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each filteredChanges as sc}
-            <tr onclick={() => (selectedChange = sc)}>
-              <td class="ts" title={sc.timestamp}>{formatTimestamp(sc.timestamp)}</td>
-              <td class="source" style="color:{getSourceColor(sc.source_name)}">{sc.source_name}</td
-              >
-              <td class="key">{sc.state_key}</td>
-              <td class="change">
-                <span class="old-value"
-                  >{sc.old_value ? formatStateValue(sc.old_value) : '(none)'}</span
+    <div class="feed">
+      {#each feedRows as row}
+        {#if row.kind === 'pattern'}
+          <div class="pattern-separator">
+            <span class="pattern-diamond">&#9670;</span>
+            <span class="pattern-label">Pattern matched: {getPatternName(row.pm.pattern_id)}</span>
+            <span class="pattern-time" title={row.pm.timestamp}
+              >{formatTimestamp(row.pm.timestamp)}</span
+            >
+          </div>
+        {:else}
+          {@const rm = row.rm}
+          {@const key = rowKey(rm)}
+          {@const scs = stateChangesByKey.get(joinKey(rm)) ?? []}
+          {@const stateOpen = openStatePanels.has(key)}
+          {@const rawOpen = openRawLines.has(key)}
+          <div class="event-card">
+            <div class="color-bar" style="background:{getSourceColor(rm.source_id)}"></div>
+            <div class="card-body">
+              <div class="card-headline">
+                <span class="ts" title={rm.log_line.timestamp}
+                  >{formatTimestamp(rm.log_line.timestamp)}</span
                 >
-                <span class="arrow">&rarr;</span>
-                <span class="new-value"
-                  >{sc.new_value ? formatStateValue(sc.new_value) : '(none)'}</span
+                <span class="source-name" style="color:{getSourceColor(rm.source_id)}"
+                  >{getSourceName(rm.source_id)}</span
                 >
-              </td>
-              <td class="rule">{getRuleName(sc.rule_id)}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+                <span class="event-text">
+                  {#if rm.event_text}
+                    {rm.event_text}
+                  {:else}
+                    <span class="rule-name-fallback">[{getRuleName(rm.rule_id)}]</span>
+                  {/if}
+                </span>
+              </div>
+              <div class="card-chips-row">
+                {#if scs.length > 0}
+                  <span class="chips-label">&#8627;</span>
+                  {#each scs as sc}
+                    <span
+                      class="state-chip"
+                      class:chip-clear={sc.new_value === null}
+                      title={sc.old_value !== null
+                        ? `was: ${formatStateValue(sc.old_value)}`
+                        : 'new key'}
+                    >
+                      {sc.state_key}
+                      {#if sc.new_value !== null}
+                        <span class="chip-arrow">&#8594;</span>
+                        <span class="chip-value">{formatStateValue(sc.new_value)}</span>
+                      {:else}
+                        <span class="chip-clear-mark">&#x2715;</span>
+                      {/if}
+                    </span>
+                  {/each}
+                {/if}
+                <div class="card-actions">
+                  <button
+                    class="action-btn"
+                    class:active={rawOpen}
+                    onclick={() => toggleRawLine(key)}
+                    type="button"
+                    title="Toggle raw log line">&#9654; raw</button
+                  >
+                  <button
+                    class="action-btn"
+                    class:active={stateOpen}
+                    onclick={() => toggleStatePanel(key)}
+                    type="button"
+                    title="Toggle state at this moment"
+                    >&#8801; state {stateOpen ? '&#9650;' : ''}</button
+                  >
+                </div>
+              </div>
+              {#if rawOpen}
+                <div class="raw-line">{rm.log_line.raw}</div>
+              {/if}
+              {#if stateOpen}
+                {@const snapshot = computeStateSnapshot(rm.log_line.timestamp)}
+                <div class="state-panel">
+                  <div class="state-panel-header">State at this moment</div>
+                  {#if snapshot.size === 0}
+                    <div class="state-panel-empty">No accumulated state at this point.</div>
+                  {:else}
+                    {#each [...snapshot.entries()].sort( ([a], [b]) => a.localeCompare(b), ) as [srcName, entries]}
+                      <div class="state-source-group">
+                        <span
+                          class="state-source-name"
+                          style="color:{getSourceColorByName(srcName)}">{srcName}</span
+                        >
+                        <div class="state-entries">
+                          {#each [...entries.entries()] as [k, val]}
+                            <span class="state-kv">
+                              <span class="state-k">{k}</span>
+                              <span class="state-eq">=</span>
+                              <span class="state-v">{formatStateValue(val)}</span>
+                            </span>
+                          {/each}
+                        </div>
+                      </div>
+                    {/each}
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          </div>
+        {/if}
+      {/each}
     </div>
   {/if}
 </div>
 
-{#if selectedChange}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="modal-overlay" onclick={closeModal}>
-    <div class="modal" onclick={(e) => e.stopPropagation()}>
-      <div class="modal-header">
-        <h2>State Change Detail</h2>
-        <button class="close-btn" onclick={closeModal} type="button">&times;</button>
-      </div>
-      <div class="modal-body">
-        <div class="detail-section">
-          <div class="detail-row">
-            <span class="label">Timestamp</span><span class="mono">{selectedChange.timestamp}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Source</span><span
-              style="color:{getSourceColor(selectedChange.source_name)}"
-              >{selectedChange.source_name}</span
-            >
-          </div>
-          <div class="detail-row">
-            <span class="label">Key</span><span class="mono cyan">{selectedChange.state_key}</span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Change</span>
-            <span class="mono">
-              <span class="old-value"
-                >{selectedChange.old_value
-                  ? formatStateValue(selectedChange.old_value)
-                  : '(none)'}</span
-              >
-              <span class="arrow"> → </span>
-              <span class="new-value"
-                >{selectedChange.new_value
-                  ? formatStateValue(selectedChange.new_value)
-                  : '(none)'}</span
-              >
-            </span>
-          </div>
-          <div class="detail-row">
-            <span class="label">Rule</span><span>{getRuleName(selectedChange.rule_id)}</span>
-          </div>
-        </div>
-
-        {#if stateSnapshot && stateSnapshot.size > 0}
-          <div class="snapshot-section">
-            <h3>State at this point</h3>
-            {#each [...stateSnapshot.entries()].sort( ([a], [b]) => a.localeCompare(b), ) as [srcName, entries]}
-              <div class="source-group">
-                <div class="source-label" style="color:{getSourceColor(srcName)}">
-                  Current state of {srcName}
-                </div>
-                {#each [...entries.entries()] as [key, val]}
-                  <div class="state-entry">
-                    <span class="state-key">{key}</span>
-                    <span class="state-value">{formatStateValue(val)}</span>
-                  </div>
-                {/each}
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <div class="snapshot-section">
-            <div class="empty-state">No accumulated state at this point.</div>
-          </div>
-        {/if}
-      </div>
-    </div>
-  </div>
-{/if}
-
 <style>
-  .state-evolution {
+  .event-feed {
     margin-top: 8px;
   }
 
@@ -210,6 +334,7 @@
     align-items: center;
     gap: 16px;
     margin-bottom: 12px;
+    flex-wrap: wrap;
   }
 
   .filter-bar label {
@@ -241,38 +366,70 @@
     padding: 32px;
   }
 
-  .table-container {
-    overflow-x: auto;
+  .feed {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
-  table {
-    width: 100%;
-    border-collapse: collapse;
+  /* Pattern separator row */
+  .pattern-separator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(187, 154, 247, 0.08);
+    border: 1px solid rgba(187, 154, 247, 0.25);
+    border-radius: var(--radius);
     font-size: 13px;
   }
 
-  th {
-    text-align: left;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--border);
-    color: var(--text-dim);
-    font-weight: 600;
+  .pattern-diamond {
+    color: var(--purple);
     font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
   }
 
-  td {
-    padding: 6px 12px;
-    border-bottom: 1px solid var(--bg-secondary);
+  .pattern-label {
+    color: var(--purple);
+    font-weight: 600;
+    flex: 1;
   }
 
-  tbody tr {
-    cursor: pointer;
+  .pattern-time {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
   }
 
-  tbody tr:hover {
+  /* Event card */
+  .event-card {
+    display: flex;
     background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .color-bar {
+    width: 4px;
+    flex-shrink: 0;
+  }
+
+  .card-body {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .card-headline {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
   }
 
   .ts {
@@ -280,160 +437,171 @@
     font-size: 12px;
     color: var(--text-dim);
     white-space: nowrap;
+    flex-shrink: 0;
   }
 
-  .source {
-    font-weight: 500;
+  .source-name {
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
   }
 
-  .key {
+  .event-text {
+    font-size: 13px;
+    color: var(--text);
+    flex: 1;
+    min-width: 0;
+  }
+
+  .rule-name-fallback {
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  .card-chips-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .chips-label {
+    font-size: 13px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+
+  .state-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 7px;
+    background: rgba(122, 162, 247, 0.1);
+    border: 1px solid rgba(122, 162, 247, 0.25);
+    border-radius: 10px;
     font-family: var(--font-mono);
+    font-size: 11px;
     color: var(--cyan);
+    cursor: default;
   }
 
-  .change {
-    font-family: var(--font-mono);
-    font-size: 12px;
+  .state-chip.chip-clear {
+    background: rgba(247, 118, 142, 0.1);
+    border-color: rgba(247, 118, 142, 0.25);
+    color: var(--red);
   }
 
-  .old-value {
+  .chip-arrow {
     color: var(--text-dim);
+    font-size: 10px;
   }
 
-  .arrow {
-    color: var(--text-dim);
-    margin: 0 6px;
-  }
-
-  .new-value {
+  .chip-value {
     color: var(--text);
   }
 
-  .rule {
-    font-size: 12px;
-    color: var(--text-dim);
+  .chip-clear-mark {
+    color: var(--red);
   }
 
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+  .card-actions {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
+    gap: 6px;
+    margin-left: auto;
   }
 
-  .modal {
-    background: var(--bg-secondary);
+  .action-btn {
+    padding: 2px 8px;
+    font-size: 11px;
+    border-radius: 10px;
+    background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    width: 520px;
-    max-width: 90vw;
-    max-height: 80vh;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .modal-header h2 {
-    margin: 0;
-    font-size: 16px;
-  }
-
-  .close-btn {
-    background: none;
-    border: none;
+    color: var(--text-dim);
     cursor: pointer;
-    color: var(--text-dim);
-    font-size: 20px;
-    line-height: 1;
-    padding: 0 4px;
+    white-space: nowrap;
   }
 
-  .modal-body {
-    overflow-y: auto;
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
+  .action-btn:hover {
+    color: var(--text);
+    background: var(--bg-hover);
   }
 
-  .detail-section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .detail-row {
-    display: flex;
-    gap: 12px;
-    font-size: 13px;
-  }
-
-  .label {
-    width: 80px;
-    flex-shrink: 0;
-    color: var(--text-dim);
-  }
-
-  .mono {
-    font-family: var(--font-mono);
-  }
-
-  .accent {
+  .action-btn.active {
+    background: rgba(122, 162, 247, 0.12);
+    border-color: rgba(122, 162, 247, 0.3);
     color: var(--accent);
   }
 
-  .cyan {
-    color: var(--cyan);
+  /* Raw log line */
+  .raw-line {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--bg);
+    border-radius: var(--radius);
+    padding: 6px 10px;
+    white-space: pre;
+    overflow-x: auto;
+    margin-top: 2px;
   }
 
-  .snapshot-section h3 {
-    margin: 0 0 12px;
-    font-size: 13px;
-    color: var(--text-dim);
+  /* Inline state panel */
+  .state-panel {
+    margin-top: 4px;
+    padding: 8px 10px;
+    background: var(--bg);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+  }
+
+  .state-panel-header {
+    font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-  }
-
-  .source-group {
-    margin-bottom: 16px;
-  }
-
-  .source-label {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--accent);
+    color: var(--text-dim);
     margin-bottom: 6px;
   }
 
-  .state-entry {
-    display: flex;
-    gap: 12px;
-    font-family: var(--font-mono);
+  .state-panel-empty {
     font-size: 12px;
-    padding: 2px 0;
-  }
-
-  .state-key {
-    color: var(--cyan);
-    min-width: 120px;
-  }
-
-  .state-value {
-    color: var(--text);
-  }
-
-  .empty-state {
     color: var(--text-dim);
-    font-size: 13px;
+  }
+
+  .state-source-group {
+    margin-bottom: 8px;
+  }
+
+  .state-source-name {
+    font-size: 12px;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 3px;
+  }
+
+  .state-entries {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .state-kv {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .state-k {
+    color: var(--cyan);
+  }
+
+  .state-eq {
+    color: var(--text-dim);
+  }
+
+  .state-v {
+    color: var(--text);
   }
 </style>
