@@ -90,7 +90,30 @@ case "${1:-dev}" in
         ok "Starting Logium in production mode..."
         log "Server: http://localhost:3000"
         echo ""
-        (cd "$ROOT/crates/logium-server" && "$ROOT/target/release/logium-server")
+        (cd "$ROOT/crates/logium-server" && exec "$ROOT/target/release/logium-server") &
+        BACKEND_PID=$!
+
+        # Wait for backend to start
+        sleep 1
+        if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+            err "Backend failed to start."
+            exit 1
+        fi
+        ok "Backend running (PID $BACKEND_PID)"
+
+        log "Starting frontend dev server on http://localhost:5173..."
+        (cd "$ROOT/ui" && npm run dev -- --open) &
+        FRONTEND_PID=$!
+        ok "Frontend dev server running (PID $FRONTEND_PID)"
+
+        echo ""
+        ok "Logium is running!"
+        log "Frontend (dev):  http://localhost:5173"
+        log "Backend API:     http://localhost:3000/api"
+        log "Press Ctrl+C to stop."
+        echo ""
+
+        wait
         ;;
 
     dev|"")

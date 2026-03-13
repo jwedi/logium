@@ -772,3 +772,47 @@ Each source now has a persistent `color` field. Migration `20240101000002_source
 **Status:** Done
 
 Added optional `event_text: Option<String>` to `LogRule` and `event_text: Option<String>` to `RuleMatch`. Migration `20240101000003_rule_event_text.sql` adds the column to the `rules` table. Engine `resolve_event_text()` helper replaces `{key}` placeholders in the template string with extracted state values at match time. All three `RuleMatch` construction sites in `engine.rs` (`dry_run_rule`, `analyze`, `analyze_streaming`) populate `event_text` via `CompiledRule`. `db.create_rule()` and `db.update_rule()` accept `event_text: Option<&str>`. Routes pass `body.event_text.as_deref()`. Frontend: `LogRule` and `RuleMatch` interfaces updated in `api.ts`. `RuleEditor.svelte` adds an "Event Text" input field with a `{key}` hint showing available extracted keys. `AnalysisView.svelte` rule matches table shows resolved event text prominently with the raw line dimmed below when event text is present.
+
+---
+
+### 62. Event Feed View — Replace State Evolution Tab with Proposal A
+
+**Status:** Done — rewrote StateEvolutionView.svelte as card-based Event Feed with inline state snapshot toggle
+
+Replace the "State Evolution" tab with a unified "Event Feed" — one card per rule match, pattern matches as full-width separator rows, chronological scroll.
+
+**Core layout per card:**
+- Left color bar (source color, full card height)
+- `timestamp  source  event_text` (or `[RuleName]` if no event_text)
+- Second line: inline state chips `key → new_value` for each state change this match triggered (old value in tooltip; null new_value shown as `key ✕`)
+- `[▶ raw]` button: toggles raw log line inline below chips
+- `[≡ state]` button: toggles inline "State at this moment" panel showing full accumulated state of all sources up to this timestamp; multiple panels openable simultaneously for before/after comparison
+
+**Pattern match rows:** full-width purple separator `◆ Pattern matched: PatternName   HH:MM:SS`
+
+**Filter bar:** Source / Rule / Key dropdowns + "N events" count
+
+**State snapshot algorithm:** replays `stateChanges[]` up to clicked row's timestamp. Computed lazily per-row, stored in a `Set<string>` of expanded row keys.
+
+**Data join:** `StateChange` → `RuleMatch` via `(timestamp, rule_id, source_id)`. No backend changes needed.
+
+**Files changed:**
+- `ui/src/lib/StateEvolutionView.svelte` — full rewrite (new props: `ruleMatches`, `stateChanges`, `patternMatches`, `sourceList`, `ruleList`, `patternList`)
+- `ui/src/lib/AnalysisView.svelte` — updated tab label to "Event Feed" and call site to pass `ruleMatches` and `patternMatches`
+- `ui/src/lib/__tests__/StateEvolutionView.svelte.test.ts` — rewritten for new interface (17 tests)
+- `ui/src/lib/__tests__/__snapshots__/StateEvolutionView.svelte.test.ts.snap` — deleted (regenerated)
+- `ui/src/lib/__tests__/AnalysisView.svelte.test.ts` — updated tab name reference and snapshot
+
+---
+
+### 63. Event Feed — Pattern Match Row Consistency & State Button
+
+**Status:** Done — restructured pattern rows as cards with left timestamp and inline state snapshot panel
+
+Improve pattern match rows in the Event Feed tab:
+1. **Structural consistency**: move timestamp to the left (same position as rule match cards), add purple left color bar, restructure using the same `.event-card` layout
+2. **State button**: add `≡ state` toggle button that expands an inline panel showing `PatternMatch.state_snapshot` grouped by source, with each entry's `set_at` timestamp displayed alongside its value
+
+**Files changed:**
+- `ui/src/lib/StateEvolutionView.svelte`
+- `ui/src/lib/__tests__/StateEvolutionView.svelte.test.ts`
