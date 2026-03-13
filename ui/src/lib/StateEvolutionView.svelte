@@ -214,14 +214,61 @@
     <div class="empty">No events to display.</div>
   {:else}
     <div class="feed">
-      {#each feedRows as row}
+      {#each feedRows as row, rowIdx}
         {#if row.kind === 'pattern'}
-          <div class="pattern-separator">
-            <span class="pattern-diamond">&#9670;</span>
-            <span class="pattern-label">Pattern matched: {getPatternName(row.pm.pattern_id)}</span>
-            <span class="pattern-time" title={row.pm.timestamp}
-              >{formatTimestamp(row.pm.timestamp)}</span
-            >
+          {@const pm = row.pm}
+          {@const pmKey = `pm_${rowIdx}|${pm.pattern_id}|${pm.timestamp}`}
+          {@const pmStateOpen = openStatePanels.has(pmKey)}
+          <div class="event-card">
+            <div class="color-bar" style="background:var(--purple)"></div>
+            <div class="card-body">
+              <div class="card-headline">
+                <span class="ts" title={pm.timestamp}>{formatTimestamp(pm.timestamp)}</span>
+                <span style="color:var(--purple);font-size:12px">&#9670;</span>
+                <span style="color:var(--purple);font-weight:600"
+                  >Pattern matched: {getPatternName(pm.pattern_id)}</span
+                >
+              </div>
+              <div class="card-chips-row">
+                <div class="card-actions">
+                  <button
+                    class="action-btn"
+                    class:active={pmStateOpen}
+                    onclick={() => toggleStatePanel(pmKey)}
+                    type="button"
+                    title="Toggle pattern state snapshot"
+                    >&#8801; state {pmStateOpen ? '&#9650;' : ''}</button
+                  >
+                </div>
+              </div>
+              {#if pmStateOpen}
+                <div class="state-panel">
+                  <div class="state-panel-header">State at match time</div>
+                  {#if Object.keys(pm.state_snapshot).length === 0}
+                    <div class="state-panel-empty">No state at match time.</div>
+                  {:else}
+                    {#each Object.entries(pm.state_snapshot).sort( ([a], [b]) => a.localeCompare(b), ) as [srcName, entries]}
+                      <div class="state-source-group">
+                        <span
+                          class="state-source-name"
+                          style="color:{getSourceColorByName(srcName)}">{srcName}</span
+                        >
+                        <div class="state-entries">
+                          {#each Object.entries(entries) as [k, tv]}
+                            <span class="state-kv">
+                              <span class="state-k">{k}</span>
+                              <span class="state-eq">=</span>
+                              <span class="state-v">{formatStateValue(tv.value)}</span>
+                              <span class="pm-set-at">({formatTimestamp(tv.set_at)})</span>
+                            </span>
+                          {/each}
+                        </div>
+                      </div>
+                    {/each}
+                  {/if}
+                </div>
+              {/if}
+            </div>
           </div>
         {:else}
           {@const rm = row.rm}
@@ -370,36 +417,6 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
-  }
-
-  /* Pattern separator row */
-  .pattern-separator {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    background: rgba(187, 154, 247, 0.08);
-    border: 1px solid rgba(187, 154, 247, 0.25);
-    border-radius: var(--radius);
-    font-size: 13px;
-  }
-
-  .pattern-diamond {
-    color: var(--purple);
-    font-size: 12px;
-  }
-
-  .pattern-label {
-    color: var(--purple);
-    font-weight: 600;
-    flex: 1;
-  }
-
-  .pattern-time {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-dim);
-    white-space: nowrap;
   }
 
   /* Event card */
@@ -603,5 +620,12 @@
 
   .state-v {
     color: var(--text);
+  }
+
+  .pm-set-at {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-left: 4px;
   }
 </style>

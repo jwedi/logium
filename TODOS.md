@@ -802,3 +802,17 @@ Replace the "State Evolution" tab with a unified "Event Feed" — one card per r
 - `ui/src/lib/__tests__/StateEvolutionView.svelte.test.ts` — rewritten for new interface (17 tests)
 - `ui/src/lib/__tests__/__snapshots__/StateEvolutionView.svelte.test.ts.snap` — deleted (regenerated)
 - `ui/src/lib/__tests__/AnalysisView.svelte.test.ts` — updated tab name reference and snapshot
+
+---
+
+### 63. Event Feed — Pattern Match Row Consistency & State Button
+
+**Status:** Done — restructured pattern rows as cards with left timestamp and inline state snapshot panel
+
+Improve pattern match rows in the Event Feed tab:
+1. **Structural consistency**: move timestamp to the left (same position as rule match cards), add purple left color bar, restructure using the same `.event-card` layout
+2. **State button**: add `≡ state` toggle button that expands an inline panel showing `PatternMatch.state_snapshot` grouped by source, with each entry's `set_at` timestamp displayed alongside its value
+
+**Files changed:**
+- `ui/src/lib/StateEvolutionView.svelte`
+- `ui/src/lib/__tests__/StateEvolutionView.svelte.test.ts`

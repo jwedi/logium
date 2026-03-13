@@ -115,6 +115,85 @@ describe('StateEvolutionView (Event Feed)', () => {
       [makePattern({ id: 1, name: 'AuthFailure' })],
     );
     expect(screen.getByText('Pattern matched: AuthFailure')).toBeInTheDocument();
+
+    // Timestamp should appear to the left of the pattern name in DOM order
+    const card = document.querySelector('.event-card');
+    expect(card).toBeInTheDocument();
+    const tsEl = card!.querySelector('.ts');
+    const labelEl =
+      card!.querySelector('[style*="Pattern matched"]') ??
+      screen.getByText('Pattern matched: AuthFailure');
+    expect(tsEl).toBeInTheDocument();
+    // ts appears before label in DOM
+    expect(tsEl!.compareDocumentPosition(labelEl)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it('pattern state panel expands on button click showing state_snapshot with set_at times', async () => {
+    const pm = makePatternMatch({
+      pattern_id: 1,
+      timestamp: '2024-01-15T10:30:05.000',
+      state_snapshot: {
+        nginx: {
+          session: { value: { String: 'abc123' }, set_at: '2024-01-15T10:23:44.000' },
+        },
+      },
+    });
+    renderFeed(
+      [],
+      [],
+      [pm],
+      [makeSource({ id: 1, name: 'nginx' })],
+      [makeRule()],
+      [makePattern({ id: 1, name: 'AuthFailure' })],
+    );
+
+    // Panel not visible initially
+    expect(screen.queryByText('State at match time')).not.toBeInTheDocument();
+
+    const stateBtn = screen.getByTitle('Toggle pattern state snapshot');
+    await fireEvent.click(stateBtn);
+
+    expect(screen.getByText('State at match time')).toBeInTheDocument();
+    const panel = document.querySelector('.state-panel');
+    expect(panel).toBeInTheDocument();
+    expect(panel!.textContent).toContain('session');
+    expect(panel!.textContent).toContain('abc123');
+    // set_at time is shown
+    expect(panel!.textContent).toContain('10:23:44');
+
+    // Click again to collapse
+    await fireEvent.click(stateBtn);
+    expect(screen.queryByText('State at match time')).not.toBeInTheDocument();
+  });
+
+  it('multiple pattern state panels can be open simultaneously', async () => {
+    const pm1 = makePatternMatch({
+      pattern_id: 1,
+      timestamp: '2024-01-15T10:30:05.000',
+      state_snapshot: {},
+    });
+    const pm2 = makePatternMatch({
+      pattern_id: 2,
+      timestamp: '2024-01-15T10:31:05.000',
+      state_snapshot: {},
+    });
+    renderFeed(
+      [],
+      [],
+      [pm1, pm2],
+      [makeSource()],
+      [makeRule()],
+      [makePattern({ id: 1, name: 'PatA' }), makePattern({ id: 2, name: 'PatB' })],
+    );
+
+    const stateBtns = screen.getAllByTitle('Toggle pattern state snapshot');
+    expect(stateBtns.length).toBe(2);
+
+    await fireEvent.click(stateBtns[0]);
+    await fireEvent.click(stateBtns[1]);
+
+    const panels = document.querySelectorAll('.state-panel');
+    expect(panels.length).toBe(2);
   });
 
   it('pattern rows are always visible regardless of rule/source filter', async () => {
