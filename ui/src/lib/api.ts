@@ -46,6 +46,7 @@ export interface ExtractionRule {
   pattern: string | null;
   static_value: string | null;
   mode: 'Replace' | 'Accumulate';
+  event_text_only: boolean;
 }
 
 export interface LogRule {

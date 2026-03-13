@@ -29,6 +29,7 @@
     pattern: string;
     static_value: string;
     mode: 'Replace' | 'Accumulate';
+    event_text_only: boolean;
   }[] = $state([]);
 
   // Source-level dry run state (create form)
@@ -52,7 +53,14 @@
   function addNewExtractionRule() {
     newExtractionRules = [
       ...newExtractionRules,
-      { state_key: '', extraction_type: 'Parsed', pattern: '', static_value: '', mode: 'Replace' },
+      {
+        state_key: '',
+        extraction_type: 'Parsed',
+        pattern: '',
+        static_value: '',
+        mode: 'Replace',
+        event_text_only: false,
+      },
     ];
   }
 
@@ -84,6 +92,7 @@
           pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
           static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
           mode: er.mode,
+          event_text_only: er.event_text_only,
         })),
       };
       newDryRunResults = await analysisApi.dryRun(projectId, data);
@@ -113,6 +122,7 @@
           pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
           static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
           mode: er.mode,
+          event_text_only: er.event_text_only,
         })),
         event_text: null,
       });

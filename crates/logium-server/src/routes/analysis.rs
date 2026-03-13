@@ -504,6 +504,8 @@ struct DryRunExtractionRule {
     pattern: Option<String>,
     static_value: Option<String>,
     mode: String,
+    #[serde(default)]
+    event_text_only: bool,
 }
 
 fn default_limit() -> usize {
@@ -575,6 +577,7 @@ async fn dry_run(
                 pattern: e.pattern,
                 static_value: e.static_value,
                 mode,
+                event_text_only: e.event_text_only,
             }
         })
         .collect();

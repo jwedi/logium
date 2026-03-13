@@ -816,3 +816,24 @@ Improve pattern match rows in the Event Feed tab:
 **Files changed:**
 - `ui/src/lib/StateEvolutionView.svelte`
 - `ui/src/lib/__tests__/StateEvolutionView.svelte.test.ts`
+
+---
+
+### 64. Event Text–Only Extraction Param Flag
+
+**Status:** Done — added `event_text_only: bool` field to `ExtractionRule`; engine skips state write and `StateChange` emission for flagged rules while still making the value available for `{key}` substitution in `event_text`; SQLite migration `20240101000004_extraction_event_text_only.sql` adds the column with `DEFAULT 0`; UI adds a checkbox in the extraction rule row that disables (dims) the Mode select when checked.
+
+**Files changed:**
+- `crates/logium-core/src/model.rs` — added `event_text_only: bool` to `ExtractionRule`
+- `crates/logium-core/src/engine.rs` — guard in `apply_mutations()` to skip `event_text_only` rules; new unit test `test_apply_mutations_skips_event_text_only`; all existing `ExtractionRule` literals updated
+- `crates/logium-core/tests/real_data_tests.rs` — updated all `ExtractionRule` literals
+- `crates/logium-server/migrations/20240101000004_extraction_event_text_only.sql` — new migration
+- `crates/logium-server/src/db.rs` — updated SELECT, INSERT (create + update), import path, `CreateExtractionRule` struct, and test fixtures
+- `crates/logium-server/src/routes/analysis.rs` — updated `DryRunExtractionRule` struct and construction
+- `ui/src/lib/api.ts` — added `event_text_only: boolean` to `ExtractionRule` interface
+- `ui/src/lib/RuleEditor.svelte` — added field to edit state, new rule default, serialisation, and checkbox UI
+- `ui/src/lib/RuleCreator.svelte` — updated extraction rule type and serialisation
+- `ui/src/lib/RuleList.svelte` — updated extraction rule type and serialisation
+- `ui/src/lib/__tests__/fixtures.ts` — added `event_text_only: false` to fixture objects
+- `ui/src/lib/__tests__/RuleEditor.svelte.test.ts` — updated inline `ExtractionRule` objects
+- `ui/src/lib/__tests__/RuleCreator.svelte.test.ts` — updated inline `ExtractionRule` objects

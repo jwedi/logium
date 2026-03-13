@@ -164,6 +164,7 @@ fn test_zookeeper_cross_source() {
             pattern: None,
             static_value: Some("warn".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: None,
     };
@@ -183,6 +184,7 @@ fn test_zookeeper_cross_source() {
             pattern: None,
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: None,
     };
@@ -263,6 +265,7 @@ fn test_nginx_cross_source() {
             pattern: Some(r#"HTTP/1\.\d"\s+(?P<status>\d+)"#.into()),
             static_value: None,
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: None,
     };
@@ -341,6 +344,7 @@ fn test_syslog_cross_source() {
             pattern: None,
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: None,
     };
@@ -360,6 +364,7 @@ fn test_syslog_cross_source() {
             pattern: Some(r"rhost=(?P<rhost>\S+)".into()),
             static_value: None,
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: None,
     };
@@ -460,6 +465,7 @@ fn test_timestamp_template_reuse() {
             pattern: None,
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: None,
     };
@@ -545,6 +551,7 @@ fn test_cross_source_state_ref() {
             pattern: Some(r"(?P<level>INFO|WARN|ERROR)".into()),
             static_value: None,
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: None,
     };
@@ -702,6 +709,7 @@ fn test_multiline_cross_source() {
             pattern: None,
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: None,
     };
@@ -722,6 +730,7 @@ fn test_multiline_cross_source() {
             pattern: None,
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: None,
     };

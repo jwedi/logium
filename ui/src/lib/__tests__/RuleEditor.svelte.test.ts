@@ -90,6 +90,7 @@ describe('RuleEditor', () => {
           pattern: 'ERROR (.+)',
           static_value: null,
           mode: 'Replace',
+          event_text_only: false,
         },
       ],
     });
@@ -215,6 +216,7 @@ describe('RuleEditor', () => {
           pattern: '.+',
           static_value: null,
           mode: 'Replace',
+          event_text_only: false,
         },
         {
           id: 2,
@@ -223,6 +225,7 @@ describe('RuleEditor', () => {
           pattern: null,
           static_value: 'err',
           mode: 'Replace',
+          event_text_only: false,
         },
       ],
     });
@@ -248,6 +251,7 @@ describe('RuleEditor', () => {
           pattern: 'ERROR (.+)',
           static_value: null,
           mode: 'Replace',
+          event_text_only: false,
         },
       ],
     });
@@ -264,6 +268,7 @@ describe('RuleEditor', () => {
           pattern: null,
           static_value: 'error',
           mode: 'Replace',
+          event_text_only: false,
         },
       ],
     });
@@ -281,6 +286,7 @@ describe('RuleEditor', () => {
           pattern: null,
           static_value: null,
           mode: 'Replace',
+          event_text_only: false,
         },
       ],
     });
@@ -362,6 +368,7 @@ describe('RuleEditor', () => {
           pattern: 'ERROR (?P<message>.+)',
           static_value: null,
           mode: 'Replace',
+          event_text_only: false,
         },
       ],
     });
@@ -384,6 +391,7 @@ describe('RuleEditor', () => {
           pattern: null,
           static_value: 'error',
           mode: 'Replace',
+          event_text_only: false,
         },
       ],
     });
@@ -406,6 +414,7 @@ describe('RuleEditor', () => {
           pattern: null,
           static_value: null,
           mode: 'Replace',
+          event_text_only: false,
         },
       ],
     });
@@ -441,6 +450,7 @@ describe('RuleEditor', () => {
           pattern: null,
           static_value: 'err',
           mode: 'Replace',
+          event_text_only: false,
         },
       ],
     });

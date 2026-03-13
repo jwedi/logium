@@ -751,7 +751,7 @@ impl Database {
             .collect();
 
         let ext_rows = sqlx::query(
-            "SELECT id, extraction_type, state_key, pattern, static_value, mode
+            "SELECT id, extraction_type, state_key, pattern, static_value, mode, event_text_only
              FROM extraction_rules WHERE rule_id = ? ORDER BY id",
         )
         .bind(rule_id)
@@ -770,6 +770,7 @@ impl Database {
                     pattern: r.get("pattern"),
                     static_value: r.get("static_value"),
                     mode: parse_extraction_mode(&mode_str)?,
+                    event_text_only: r.get::<i64, _>("event_text_only") != 0,
                 })
             })
             .collect();
@@ -824,8 +825,8 @@ impl Database {
             let ext_type_str = extraction_type_to_str(&er.extraction_type);
             let mode_str = extraction_mode_to_str(&er.mode);
             let id = sqlx::query_scalar::<_, i64>(
-                "INSERT INTO extraction_rules (rule_id, extraction_type, state_key, pattern, static_value, mode)
-                 VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+                "INSERT INTO extraction_rules (rule_id, extraction_type, state_key, pattern, static_value, mode, event_text_only)
+                 VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
             )
             .bind(rule_id)
             .bind(ext_type_str)
@@ -833,6 +834,7 @@ impl Database {
             .bind(er.pattern.as_deref())
             .bind(er.static_value.as_deref())
             .bind(mode_str)
+            .bind(er.event_text_only as i64)
             .fetch_one(&self.pool)
             .await?;
             built_ext_rules.push(ExtractionRule {
@@ -842,6 +844,7 @@ impl Database {
                 pattern: er.pattern.clone(),
                 static_value: er.static_value.clone(),
                 mode: er.mode.clone(),
+                event_text_only: er.event_text_only,
             });
         }
 
@@ -912,8 +915,8 @@ impl Database {
             let ext_type_str = extraction_type_to_str(&er.extraction_type);
             let mode_str = extraction_mode_to_str(&er.mode);
             let er_id = sqlx::query_scalar::<_, i64>(
-                "INSERT INTO extraction_rules (rule_id, extraction_type, state_key, pattern, static_value, mode)
-                 VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+                "INSERT INTO extraction_rules (rule_id, extraction_type, state_key, pattern, static_value, mode, event_text_only)
+                 VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id",
             )
             .bind(id)
             .bind(ext_type_str)
@@ -921,6 +924,7 @@ impl Database {
             .bind(er.pattern.as_deref())
             .bind(er.static_value.as_deref())
             .bind(mode_str)
+            .bind(er.event_text_only as i64)
             .fetch_one(&self.pool)
             .await?;
             built_ext_rules.push(ExtractionRule {
@@ -930,6 +934,7 @@ impl Database {
                 pattern: er.pattern.clone(),
                 static_value: er.static_value.clone(),
                 mode: er.mode.clone(),
+                event_text_only: er.event_text_only,
             });
         }
 
@@ -1316,6 +1321,7 @@ impl Database {
                     pattern: er.pattern.clone(),
                     static_value: er.static_value.clone(),
                     mode: er.mode.clone(),
+                    event_text_only: er.event_text_only,
                 })
                 .collect();
             let new_rule = self
@@ -1439,6 +1445,8 @@ pub struct CreateExtractionRule {
     pub pattern: Option<String>,
     pub static_value: Option<String>,
     pub mode: ExtractionMode,
+    #[serde(default)]
+    pub event_text_only: bool,
 }
 
 /// Input type for creating pattern predicates (no id yet).
@@ -1833,6 +1841,7 @@ mod tests {
                     pattern: None,
                     static_value: Some("error".to_string()),
                     mode: ExtractionMode::Replace,
+                    event_text_only: false,
                 }],
                 None,
             )
@@ -2088,6 +2097,7 @@ mod tests {
                     pattern: None,
                     static_value: Some("error".to_string()),
                     mode: ExtractionMode::Replace,
+                    event_text_only: false,
                 }],
                 None,
             )
