@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import {
     rules as rulesApi,
     rulesets as rulesetsApi,
@@ -12,6 +13,7 @@
   } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
   import { detectGroups, testPattern } from './regexUtils';
+  import StateKeyInput from './StateKeyInput.svelte';
 
   let {
     projectId,
@@ -48,6 +50,15 @@
   let dryRunLoading = $state(false);
   let dryRunResults: RuleMatch[] = $state([]);
   let dryRunError = $state('');
+  let knownKeys = $state<string[]>([]);
+
+  let allKeys = $derived.by(() => {
+    const keys = new Set(knownKeys);
+    for (const er of extractionRules) {
+      if (er.state_key.trim()) keys.add(er.state_key.trim());
+    }
+    return [...keys].sort();
+  });
 
   function escapeRegex(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -127,6 +138,21 @@
       /* ignore */
     }
   }
+
+  onMount(async () => {
+    try {
+      const existingRules = await rulesApi.list(projectId);
+      const keys = new Set<string>();
+      for (const r of existingRules) {
+        for (const er of r.extraction_rules) {
+          if (er.state_key.trim()) keys.add(er.state_key.trim());
+        }
+      }
+      knownKeys = [...keys].sort();
+    } catch {
+      // non-fatal — suggestions just won't be pre-populated
+    }
+  });
 
   $effect(() => {
     selectedText;
@@ -277,7 +303,7 @@
             <div class="group-row-top">
               <div class="field">
                 <label>State Key</label>
-                <input type="text" bind:value={er.state_key} placeholder="state_key" />
+                <StateKeyInput bind:value={er.state_key} knownKeys={allKeys} />
               </div>
               <div class="field">
                 <label>Type</label>

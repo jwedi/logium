@@ -11,15 +11,18 @@
   } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
   import { testPattern, toJsRegex } from './regexUtils';
+  import StateKeyInput from './StateKeyInput.svelte';
 
   let {
     rule,
     projectId,
+    knownKeys = [],
     onSave,
     onCancel,
   }: {
     rule: LogRule;
     projectId: number;
+    knownKeys?: string[];
     onSave: () => void;
     onCancel: () => void;
   } = $props();
@@ -57,6 +60,14 @@
       event_text_only: er.event_text_only ?? false,
     })),
   );
+
+  let allKeys = $derived.by(() => {
+    const keys = new Set(knownKeys);
+    for (const er of editExtractionRules) {
+      if (er.state_key.trim()) keys.add(er.state_key.trim());
+    }
+    return [...keys].sort();
+  });
 
   const eventTextTooltip =
     'Optional template shown in place of the raw log line in analysis results. Use {key} to reference extracted state values.';
@@ -311,7 +322,7 @@
     <div class="extraction-row">
       <div class="field">
         <label>Key</label>
-        <input type="text" bind:value={er.state_key} placeholder="state_key" />
+        <StateKeyInput bind:value={er.state_key} knownKeys={allKeys} />
       </div>
       <div class="field">
         <label>Type</label>

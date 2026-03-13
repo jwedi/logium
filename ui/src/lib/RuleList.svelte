@@ -10,6 +10,7 @@
   } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
   import RuleEditor from './RuleEditor.svelte';
+  import StateKeyInput from './StateKeyInput.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -31,6 +32,16 @@
     mode: 'Replace' | 'Accumulate';
     event_text_only: boolean;
   }[] = $state([]);
+
+  let allStateKeys = $derived.by(() => {
+    const keys = new Set<string>();
+    for (const r of ruleList) {
+      for (const er of r.extraction_rules) {
+        if (er.state_key.trim()) keys.add(er.state_key.trim());
+      }
+    }
+    return [...keys].sort();
+  });
 
   // Source-level dry run state (create form)
   let availableSources: Source[] = $state([]);
@@ -196,7 +207,7 @@
       <div class="new-extraction-row">
         <div class="field">
           <label>Key</label>
-          <input type="text" bind:value={er.state_key} placeholder="state_key" />
+          <StateKeyInput bind:value={er.state_key} knownKeys={allStateKeys} />
         </div>
         <div class="field">
           <label>Type</label>
@@ -345,6 +356,7 @@
             <RuleEditor
               rule={JSON.parse(JSON.stringify(rule))}
               {projectId}
+              knownKeys={allStateKeys}
               onSave={() => {
                 editingId = null;
                 load();

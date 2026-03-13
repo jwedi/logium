@@ -837,3 +837,18 @@ Improve pattern match rows in the Event Feed tab:
 - `ui/src/lib/__tests__/fixtures.ts` — added `event_text_only: false` to fixture objects
 - `ui/src/lib/__tests__/RuleEditor.svelte.test.ts` — updated inline `ExtractionRule` objects
 - `ui/src/lib/__tests__/RuleCreator.svelte.test.ts` — updated inline `ExtractionRule` objects
+
+---
+
+### 65. State Key Autocomplete in Extraction Rules
+
+**Status:** Done — added searchable combobox for state_key input
+
+Replace the plain text input for extraction rule `state_key` with a searchable combobox dropdown that suggests all previously used state keys across the project. Substring-filtered as you type; selecting a suggestion sets the value; typing a new key without selecting still works.
+
+**Files changed:**
+- `ui/src/lib/StateKeyInput.svelte` — new reusable combobox component
+- `ui/src/lib/RuleList.svelte` — derive `allStateKeys`, pass to RuleEditor, replace input in new-rule form
+- `ui/src/lib/RuleEditor.svelte` — accept `knownKeys` prop, augment with sibling keys, replace input
+- `ui/src/lib/RuleCreator.svelte` — fetch project-wide keys on mount, replace input
+- `ui/src/lib/__tests__/StateKeyInput.svelte.test.ts` — unit tests for the combobox
