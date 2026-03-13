@@ -10,6 +10,7 @@
   } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
   import RuleEditor from './RuleEditor.svelte';
+  import StateKeyInput from './StateKeyInput.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -29,7 +30,18 @@
     pattern: string;
     static_value: string;
     mode: 'Replace' | 'Accumulate';
+    event_text_only: boolean;
   }[] = $state([]);
+
+  let allStateKeys = $derived.by(() => {
+    const keys = new Set<string>();
+    for (const r of ruleList) {
+      for (const er of r.extraction_rules) {
+        if (er.state_key.trim()) keys.add(er.state_key.trim());
+      }
+    }
+    return [...keys].sort();
+  });
 
   // Source-level dry run state (create form)
   let availableSources: Source[] = $state([]);
@@ -52,7 +64,14 @@
   function addNewExtractionRule() {
     newExtractionRules = [
       ...newExtractionRules,
-      { state_key: '', extraction_type: 'Parsed', pattern: '', static_value: '', mode: 'Replace' },
+      {
+        state_key: '',
+        extraction_type: 'Parsed',
+        pattern: '',
+        static_value: '',
+        mode: 'Replace',
+        event_text_only: false,
+      },
     ];
   }
 
@@ -84,6 +103,7 @@
           pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
           static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
           mode: er.mode,
+          event_text_only: er.event_text_only,
         })),
       };
       newDryRunResults = await analysisApi.dryRun(projectId, data);
@@ -113,6 +133,7 @@
           pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
           static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
           mode: er.mode,
+          event_text_only: er.event_text_only,
         })),
         event_text: null,
       });
@@ -186,7 +207,7 @@
       <div class="new-extraction-row">
         <div class="field">
           <label>Key</label>
-          <input type="text" bind:value={er.state_key} placeholder="state_key" />
+          <StateKeyInput bind:value={er.state_key} knownKeys={allStateKeys} />
         </div>
         <div class="field">
           <label>Type</label>
@@ -335,6 +356,7 @@
             <RuleEditor
               rule={JSON.parse(JSON.stringify(rule))}
               {projectId}
+              knownKeys={allStateKeys}
               onSave={() => {
                 editingId = null;
                 load();

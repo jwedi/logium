@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import {
     rules as rulesApi,
     rulesets as rulesetsApi,
@@ -12,6 +13,7 @@
   } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
   import { detectGroups, testPattern } from './regexUtils';
+  import StateKeyInput from './StateKeyInput.svelte';
 
   let {
     projectId,
@@ -36,6 +38,7 @@
     pattern: string;
     static_value: string;
     mode: 'Replace' | 'Accumulate';
+    event_text_only: boolean;
   }[] = $state([]);
   let saving = $state(false);
   let suggestLoading = $state(false);
@@ -47,6 +50,15 @@
   let dryRunLoading = $state(false);
   let dryRunResults: RuleMatch[] = $state([]);
   let dryRunError = $state('');
+  let knownKeys = $state<string[]>([]);
+
+  let allKeys = $derived.by(() => {
+    const keys = new Set(knownKeys);
+    for (const er of extractionRules) {
+      if (er.state_key.trim()) keys.add(er.state_key.trim());
+    }
+    return [...keys].sort();
+  });
 
   function escapeRegex(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -74,6 +86,7 @@
       pattern: pattern,
       static_value: '',
       mode: 'Replace' as const,
+      event_text_only: false,
     }));
   }
 
@@ -86,6 +99,7 @@
         pattern: '',
         static_value: '',
         mode: 'Replace',
+        event_text_only: false,
       },
     ];
   }
@@ -125,6 +139,21 @@
     }
   }
 
+  onMount(async () => {
+    try {
+      const existingRules = await rulesApi.list(projectId);
+      const keys = new Set<string>();
+      for (const r of existingRules) {
+        for (const er of r.extraction_rules) {
+          if (er.state_key.trim()) keys.add(er.state_key.trim());
+        }
+      }
+      knownKeys = [...keys].sort();
+    } catch {
+      // non-fatal — suggestions just won't be pre-populated
+    }
+  });
+
   $effect(() => {
     selectedText;
     fetchSuggestion();
@@ -155,6 +184,7 @@
           pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
           static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
           mode: er.mode,
+          event_text_only: er.event_text_only,
         })),
       };
       dryRunResults = await analysisApi.dryRun(projectId, data);
@@ -191,6 +221,7 @@
           pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
           static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
           mode: er.mode,
+          event_text_only: er.event_text_only,
         })),
         event_text: null,
       });
@@ -272,7 +303,7 @@
             <div class="group-row-top">
               <div class="field">
                 <label>State Key</label>
-                <input type="text" bind:value={er.state_key} placeholder="state_key" />
+                <StateKeyInput bind:value={er.state_key} knownKeys={allKeys} />
               </div>
               <div class="field">
                 <label>Type</label>

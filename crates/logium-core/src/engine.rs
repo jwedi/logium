@@ -965,6 +965,9 @@ impl StateManager {
         let mut changes = Vec::new();
 
         for rule in rules {
+            if rule.event_text_only {
+                continue;
+            }
             match rule.extraction_type {
                 ExtractionType::Clear => {
                     let old = state.remove(&rule.state_key).map(|t| t.value);
@@ -1935,6 +1938,7 @@ mod tests {
             pattern: None,
             static_value: Some("new".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }];
         sm.apply_mutations(1, &extractions, &rules, test_ts());
 
@@ -1970,6 +1974,7 @@ mod tests {
             pattern: None,
             static_value: Some("b".into()),
             mode: ExtractionMode::Accumulate,
+            event_text_only: false,
         }];
         sm.apply_mutations(1, &extractions, &rules, test_ts());
 
@@ -2007,6 +2012,7 @@ mod tests {
             pattern: Some(r"(?P<count>\d+)".into()),
             static_value: None,
             mode: ExtractionMode::Accumulate,
+            event_text_only: false,
         }];
         sm.apply_mutations(1, &extractions, &rules, test_ts());
 
@@ -2042,6 +2048,7 @@ mod tests {
             pattern: None,
             static_value: None,
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }];
         sm.apply_mutations(1, &extractions, &rules, test_ts());
 
@@ -2065,6 +2072,7 @@ mod tests {
                 pattern: Some(r"players: (?P<player_count>\d+)".into()),
                 static_value: None,
                 mode: ExtractionMode::Replace,
+                event_text_only: false,
             }],
             event_text: None,
         };
@@ -2091,6 +2099,7 @@ mod tests {
                 pattern: None,
                 static_value: Some("error_detected".into()),
                 mode: ExtractionMode::Replace,
+                event_text_only: false,
             }],
             event_text: None,
         };
@@ -2614,6 +2623,7 @@ mod tests {
                 pattern: Some(r"region (?P<region>\S+)".into()),
                 static_value: None,
                 mode: ExtractionMode::Replace,
+                event_text_only: false,
             }],
             event_text: None,
         };
@@ -2634,6 +2644,7 @@ mod tests {
                 pattern: Some(r"Players online: (?P<player_count>\d+)".into()),
                 static_value: None,
                 mode: ExtractionMode::Replace,
+                event_text_only: false,
             }],
             event_text: None,
         };
@@ -2654,6 +2665,7 @@ mod tests {
                 pattern: Some(r"region (?P<region>\S+)".into()),
                 static_value: None,
                 mode: ExtractionMode::Replace,
+                event_text_only: false,
             }],
             event_text: None,
         };
@@ -2802,6 +2814,7 @@ mod tests {
                     pattern: Some(r"region (?P<region>\S+)".into()),
                     static_value: None,
                     mode: ExtractionMode::Replace,
+                    event_text_only: false,
                 }],
                 event_text: None,
             },
@@ -2820,6 +2833,7 @@ mod tests {
                     pattern: Some(r"Players online: (?P<player_count>\d+)".into()),
                     static_value: None,
                     mode: ExtractionMode::Replace,
+                    event_text_only: false,
                 }],
                 event_text: None,
             },
@@ -2838,6 +2852,7 @@ mod tests {
                     pattern: Some(r"region (?P<region>\S+)".into()),
                     static_value: None,
                     mode: ExtractionMode::Replace,
+                    event_text_only: false,
                 }],
                 event_text: None,
             },
@@ -2972,6 +2987,7 @@ mod tests {
             pattern: None,
             static_value: Some("new".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }];
         let changes = sm.apply_mutations(1, &extractions, &rules, test_ts());
 
@@ -3007,6 +3023,7 @@ mod tests {
             pattern: None,
             static_value: None,
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }];
         let changes = sm.apply_mutations(1, &extractions, &rules, test_ts());
 
@@ -3035,6 +3052,7 @@ mod tests {
             pattern: None,
             static_value: Some("val".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }];
         let changes = sm.apply_mutations(1, &extractions, &rules, test_ts());
 
@@ -3070,10 +3088,40 @@ mod tests {
             pattern: None,
             static_value: Some("same".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }];
         let changes = sm.apply_mutations(1, &extractions, &rules, test_ts());
 
         assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn test_apply_mutations_skips_event_text_only() {
+        let sources = vec![Source {
+            id: 1,
+            name: "src1".into(),
+            template_id: 1,
+            file_path: "".into(),
+            color: String::new(),
+        }];
+        let mut sm = StateManager::new(&sources);
+
+        let extractions: HashMap<String, StateValue> = HashMap::new();
+        let rules = vec![ExtractionRule {
+            id: 1,
+            extraction_type: ExtractionType::Static,
+            state_key: "event_only_key".into(),
+            pattern: None,
+            static_value: Some("ephemeral".into()),
+            mode: ExtractionMode::Replace,
+            event_text_only: true,
+        }];
+        let changes = sm.apply_mutations(1, &extractions, &rules, test_ts());
+
+        // No state changes emitted
+        assert!(changes.is_empty());
+        // Key was not written to state
+        assert!(!sm.per_source_state[&1].contains_key("event_only_key"));
     }
 
     #[test]
@@ -3123,6 +3171,7 @@ mod tests {
                     pattern: Some(r"region (?P<region>\S+)".into()),
                     static_value: None,
                     mode: ExtractionMode::Replace,
+                    event_text_only: false,
                 }],
                 event_text: None,
             },
@@ -3141,6 +3190,7 @@ mod tests {
                     pattern: Some(r"Players online: (?P<player_count>\d+)".into()),
                     static_value: None,
                     mode: ExtractionMode::Replace,
+                    event_text_only: false,
                 }],
                 event_text: None,
             },
@@ -4018,6 +4068,7 @@ mod tests {
                 pattern: Some(r"count=(?P<count>\d+)".into()),
                 static_value: None,
                 mode: ExtractionMode::Replace,
+                event_text_only: false,
             }],
             event_text: None,
         };
@@ -4174,6 +4225,7 @@ mod tests {
                 pattern: None,
                 static_value: Some("info".into()),
                 mode: ExtractionMode::Replace,
+                event_text_only: false,
             }],
             event_text: None,
         };
@@ -4305,6 +4357,7 @@ mod tests {
                 pattern: Some(r"Server status: (?P<status>\S+)".into()),
                 static_value: None,
                 mode: ExtractionMode::Replace,
+                event_text_only: false,
             }],
             event_text: None,
         };

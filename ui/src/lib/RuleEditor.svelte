@@ -11,15 +11,18 @@
   } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
   import { testPattern, toJsRegex } from './regexUtils';
+  import StateKeyInput from './StateKeyInput.svelte';
 
   let {
     rule,
     projectId,
+    knownKeys = [],
     onSave,
     onCancel,
   }: {
     rule: LogRule;
     projectId: number;
+    knownKeys?: string[];
     onSave: () => void;
     onCancel: () => void;
   } = $props();
@@ -45,6 +48,7 @@
     pattern: string;
     static_value: string;
     mode: 'Replace' | 'Accumulate';
+    event_text_only: boolean;
   }[] = $state(
     initER.map((er) => ({
       id: er.id,
@@ -53,8 +57,17 @@
       pattern: er.pattern ?? '',
       static_value: er.static_value ?? '',
       mode: er.mode,
+      event_text_only: er.event_text_only ?? false,
     })),
   );
+
+  let allKeys = $derived.by(() => {
+    const keys = new Set(knownKeys);
+    for (const er of editExtractionRules) {
+      if (er.state_key.trim()) keys.add(er.state_key.trim());
+    }
+    return [...keys].sort();
+  });
 
   const eventTextTooltip =
     'Optional template shown in place of the raw log line in analysis results. Use {key} to reference extracted state values.';
@@ -154,6 +167,7 @@
         pattern: '',
         static_value: '',
         mode: 'Replace',
+        event_text_only: false,
       },
     ];
   }
@@ -188,6 +202,7 @@
           pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
           static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
           mode: er.mode,
+          event_text_only: er.event_text_only,
         })),
       };
       dryRunResults = await analysisApi.dryRun(projectId, data);
@@ -230,6 +245,7 @@
             pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
             static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
             mode: er.mode,
+            event_text_only: er.event_text_only,
           }),
         ),
         event_text: editEventText.trim() || null,
@@ -306,7 +322,7 @@
     <div class="extraction-row">
       <div class="field">
         <label>Key</label>
-        <input type="text" bind:value={er.state_key} placeholder="state_key" />
+        <StateKeyInput bind:value={er.state_key} knownKeys={allKeys} />
       </div>
       <div class="field">
         <label>Type</label>
@@ -316,13 +332,20 @@
           <option value="Clear">Clear</option>
         </select>
       </div>
-      <div class="field">
+      <div class="field" class:dimmed={er.event_text_only}>
         <label>Mode</label>
-        <select bind:value={er.mode}>
+        <select bind:value={er.mode} disabled={er.event_text_only}>
           <option value="Replace">Replace</option>
           <option value="Accumulate">Accumulate</option>
         </select>
       </div>
+      <label
+        class="field field-checkbox"
+        title="Extract for event text only — does not write to state"
+      >
+        <input type="checkbox" bind:checked={er.event_text_only} />
+        <span>Event text only</span>
+      </label>
       {#if er.extraction_type === 'Parsed'}
         <div class="field" style="flex:2">
           <label>Pattern</label>
@@ -518,6 +541,24 @@
 
   .remove-extraction {
     margin-bottom: 2px;
+  }
+
+  .field-checkbox {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .field-checkbox span {
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .dimmed {
+    opacity: 0.45;
   }
 
   .event-text-section {

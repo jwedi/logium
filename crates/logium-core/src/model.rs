@@ -145,6 +145,10 @@ pub struct ExtractionRule {
     pub pattern: Option<String>,
     pub static_value: Option<String>,
     pub mode: ExtractionMode,
+    /// When true, the extracted value is available for `{key}` substitution in `event_text`
+    /// but is not written to the per-source state map and does not emit a `StateChange`.
+    #[serde(default)]
+    pub event_text_only: bool,
 }
 
 /// A log rule combining match rules and extraction rules.

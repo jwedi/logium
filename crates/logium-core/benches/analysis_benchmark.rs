@@ -64,6 +64,7 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
             pattern: Some(r#"HTTP/1\.\d"\s+(?P<status>\d+)"#.into()),
             static_value: None,
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: Option::None,
     };
@@ -82,6 +83,7 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
             pattern: None,
             static_value: Some("true".into()),
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: Option::None,
     };
@@ -167,6 +169,7 @@ fn bench_nginx_large(c: &mut Criterion) {
             pattern: Some(r#"HTTP/1\.\d"\s+(?P<status>\d+)"#.into()),
             static_value: None,
             mode: ExtractionMode::Replace,
+            event_text_only: false,
         }],
         event_text: Option::None,
     };

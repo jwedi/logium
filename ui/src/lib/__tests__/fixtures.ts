@@ -91,6 +91,7 @@ export function makeRuleWithExtractions(overrides: Partial<LogRule> = {}): LogRu
         pattern: 'ERROR (?P<message>.+)',
         static_value: null,
         mode: 'Replace',
+        event_text_only: false,
       },
       {
         id: 2,
@@ -99,6 +100,7 @@ export function makeRuleWithExtractions(overrides: Partial<LogRule> = {}): LogRu
         pattern: null,
         static_value: 'error',
         mode: 'Replace',
+        event_text_only: false,
       },
     ],
     event_text: null,

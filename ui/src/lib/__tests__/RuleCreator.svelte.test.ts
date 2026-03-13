@@ -190,6 +190,7 @@ describe('RuleCreator', () => {
         pattern: 'ERROR (?P<message>.+)',
         static_value: null,
         mode: 'Replace',
+        event_text_only: false,
       },
     ]);
 
