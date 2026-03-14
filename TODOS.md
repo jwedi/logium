@@ -900,3 +900,15 @@ Added a `⊞ rule` action button alongside the existing "raw" and "state" button
 **Files changed:**
 - `ui/src/lib/AnalysisView.svelte` — added histogram block (with `filteredResult.rule_matches.length > 0` guard) above `<StateEvolutionView>` and above `<ErrorClusteringView>`
 - `ui/src/lib/__tests__/__snapshots__/AnalysisView.svelte.test.ts.snap` — updated snapshot
+
+---
+
+### 70. Make "New Rule" form consistent with Edit Rule
+
+**Status:** Done — Unified the create and edit flows by making `RuleEditor.svelte` handle both modes via an optional `rule` prop.
+
+When `rule` is absent (create mode), all fields default to empty, `save()` calls `rulesApi.create()`, and the footer button reads "Create"/"Creating...". The entire inline create form in `RuleList.svelte` was removed and replaced with `<RuleEditor>` (no `rule` prop).
+
+**Files changed:**
+- `ui/src/lib/RuleEditor.svelte` — made `rule` prop optional (`rule?: LogRule`), updated init state to use optional chaining with defaults, branched `save()` on `rule` presence, updated footer button label
+- `ui/src/lib/RuleList.svelte` — removed all create-form state/helpers (`newName`, `newMatchMode`, `newMatchPattern`, `newExtractionRules`, dry-run state, `addNewExtractionRule`, `removeNewExtractionRule`, `loadSources`, `runNewDryRun`, `formatStateValue`, `createRule`), replaced inline form with `<RuleEditor>`, removed unused CSS
