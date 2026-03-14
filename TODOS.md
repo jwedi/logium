@@ -852,3 +852,16 @@ Replace the plain text input for extraction rule `state_key` with a searchable c
 - `ui/src/lib/RuleEditor.svelte` — accept `knownKeys` prop, augment with sibling keys, replace input
 - `ui/src/lib/RuleCreator.svelte` — fetch project-wide keys on mount, replace input
 - `ui/src/lib/__tests__/StateKeyInput.svelte.test.ts` — unit tests for the combobox
+
+---
+
+### 66. Make Event Feed Default Tab and Remove Timeline
+
+**Status:** Done — Event Feed is now the first and default tab; Timeline removed
+
+Moved Event Feed tab to first position and set it as the default `viewMode`. Removed the Timeline tab button, `TimelineView` import, and timeline content block from `AnalysisView.svelte`. Deleted dead files: `TimelineView.svelte`, `TimelineAxis.svelte`, and their test/snapshot files.
+
+**Files changed:**
+- `ui/src/lib/AnalysisView.svelte` — removed `'timeline'` from viewMode type, changed default to `'state'`, moved Event Feed tab first, removed Timeline button and block
+- `ui/src/lib/__tests__/AnalysisView.svelte.test.ts` — updated default tab test, removed timeline tab tests
+- Deleted: `TimelineView.svelte`, `TimelineAxis.svelte`, `TimelineView.svelte.test.ts`, `TimelineAxis.svelte.test.ts`, and their snapshots

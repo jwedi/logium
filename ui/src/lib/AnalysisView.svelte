@@ -18,7 +18,6 @@
   } from './api';
   import LogViewer from './LogViewer.svelte';
   import EventDensityHistogram from './EventDensityHistogram.svelte';
-  import TimelineView from './TimelineView.svelte';
   import StateEvolutionView from './StateEvolutionView.svelte';
   import ErrorClusteringView from './ErrorClusteringView.svelte';
   import { getInvalidationStamp } from './analysisInvalidation.svelte';
@@ -35,7 +34,7 @@
   let running = $state(false);
   let error: string | null = $state(null);
   let selectedSourceId: number | null = $state(null);
-  let viewMode: 'table' | 'logs' | 'timeline' | 'state' | 'clusters' = $state('table');
+  let viewMode: 'table' | 'logs' | 'state' | 'clusters' = $state('state');
   let linesProcessed: number = $state(0);
   let autoTriggered = $state(false);
   let currentHandle: { close: () => void } | null = $state(null);
@@ -516,6 +515,13 @@
 
   <div class="view-tabs">
     <button
+      class:active={viewMode === 'state'}
+      onclick={() => {
+        viewMode = 'state';
+        navigateTarget = null;
+      }}>Event Feed</button
+    >
+    <button
       class:active={viewMode === 'table'}
       onclick={() => {
         viewMode = 'table';
@@ -528,20 +534,6 @@
         viewMode = 'logs';
         navigateTarget = null;
       }}>Logs</button
-    >
-    <button
-      class:active={viewMode === 'timeline'}
-      onclick={() => {
-        viewMode = 'timeline';
-        navigateTarget = null;
-      }}>Timeline</button
-    >
-    <button
-      class:active={viewMode === 'state'}
-      onclick={() => {
-        viewMode = 'state';
-        navigateTarget = null;
-      }}>Event Feed</button
     >
     <button
       class:active={viewMode === 'clusters'}
@@ -654,14 +646,6 @@
     {:else}
       <div class="text-muted">Select a log source above</div>
     {/if}
-  {:else if viewMode === 'timeline'}
-    <TimelineView
-      result={filteredResult}
-      {sourceList}
-      {ruleList}
-      {patternList}
-      onNavigate={handleNavigate}
-    />
   {:else if viewMode === 'state'}
     <StateEvolutionView
       ruleMatches={filteredResult.rule_matches}

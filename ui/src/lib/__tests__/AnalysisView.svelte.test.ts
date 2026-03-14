@@ -132,7 +132,7 @@ describe('AnalysisView', () => {
     expect(getRunButton()).toBeInTheDocument();
   });
 
-  it('tab defaults to "Table" with active class', async () => {
+  it('tab defaults to "Event Feed" with active class', async () => {
     renderAnalysis();
     await tick();
 
@@ -140,46 +140,24 @@ describe('AnalysisView', () => {
     await fireEvent.click(getRunButton());
     vi.advanceTimersByTime(200);
     await waitFor(() => {
+      expect(screen.getByText('Event Feed')).toBeInTheDocument();
+    });
+
+    const eventFeedBtn = screen.getByText('Event Feed');
+    expect(eventFeedBtn.classList.contains('active')).toBe(true);
+  });
+
+  it('clicking "Table" switches view', async () => {
+    renderAnalysis();
+    await tick();
+
+    await fireEvent.click(getRunButton());
+    vi.advanceTimersByTime(200);
+    await waitFor(() => {
       expect(screen.getByText('Table')).toBeInTheDocument();
     });
 
-    const tableBtn = screen.getByText('Table');
-    expect(tableBtn.classList.contains('active')).toBe(true);
-  });
-
-  it('clicking "Timeline" tab switches view', async () => {
-    renderAnalysis();
-    await tick();
-
-    await fireEvent.click(getRunButton());
-    vi.advanceTimersByTime(200);
-    await waitFor(() => {
-      expect(screen.getByText('Timeline')).toBeInTheDocument();
-    });
-
-    await fireEvent.click(screen.getByText('Timeline'));
-    const timelineBtn = screen.getByText('Timeline');
-    expect(timelineBtn.classList.contains('active')).toBe(true);
-
-    // Zoom controls appear in timeline mode
-    expect(screen.getByTitle('Zoom in')).toBeInTheDocument();
-  });
-
-  it('clicking "Table" switches back', async () => {
-    renderAnalysis();
-    await tick();
-
-    await fireEvent.click(getRunButton());
-    vi.advanceTimersByTime(200);
-    await waitFor(() => {
-      expect(screen.getByText('Timeline')).toBeInTheDocument();
-    });
-
-    // Switch to timeline
-    await fireEvent.click(screen.getByText('Timeline'));
-    // Switch back to table
     await fireEvent.click(screen.getByText('Table'));
-
     const tableBtn = screen.getByText('Table');
     expect(tableBtn.classList.contains('active')).toBe(true);
   });
