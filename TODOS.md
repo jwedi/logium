@@ -865,3 +865,15 @@ Moved Event Feed tab to first position and set it as the default `viewMode`. Rem
 - `ui/src/lib/AnalysisView.svelte` — removed `'timeline'` from viewMode type, changed default to `'state'`, moved Event Feed tab first, removed Timeline button and block
 - `ui/src/lib/__tests__/AnalysisView.svelte.test.ts` — updated default tab test, removed timeline tab tests
 - Deleted: `TimelineView.svelte`, `TimelineAxis.svelte`, `TimelineView.svelte.test.ts`, `TimelineAxis.svelte.test.ts`, and their snapshots
+
+---
+
+### 67. Rules View — Free-text Search and Expand All
+
+**Status:** Done — Added free-text search box that filters by name/pattern/state key and auto-expands matches; added Expand All checkbox.
+
+Added a search bar and "Expand all" checkbox to `RuleList.svelte`. The search input filters rules by name, match pattern, and extraction rule state key, and auto-expands matching rules. The Expand All checkbox reveals all rule details at once. A "No rules match" message is shown when the search has no hits.
+
+**Files changed:**
+- `ui/src/lib/RuleList.svelte` — added `searchQuery`, `expandAll`, `isSearchActive`, `filteredRules` state/derived; search-bar toolbar; updated `{#each}` to use `filteredRules`; updated expand condition; added no-match message; added CSS
+- `ui/src/lib/__tests__/RuleList.svelte.test.ts` — new test file with 10 tests covering search, auto-expand, no-match message, expand-all, and coexistence of search + expand-all

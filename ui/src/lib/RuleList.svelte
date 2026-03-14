@@ -18,6 +18,8 @@
   let loading = $state(false);
   let expandedId: number | null = $state(null);
   let editingId: number | null = $state(null);
+  let searchQuery = $state('');
+  let expandAll = $state(false);
 
   // Create form state
   let newName = $state('');
@@ -41,6 +43,25 @@
       }
     }
     return [...keys].sort();
+  });
+
+  let isSearchActive = $derived(searchQuery.trim() !== '');
+
+  let filteredRules = $derived.by(() => {
+    if (!isSearchActive) return ruleList;
+    const q = searchQuery.trim().toLowerCase();
+    return ruleList.filter((rule) => {
+      if (rule.name.toLowerCase().includes(q)) return true;
+      if (rule.match_rules.some((mr) => mr.pattern.toLowerCase().includes(q))) return true;
+      if (
+        rule.extraction_rules.some(
+          (er) =>
+            er.state_key.toLowerCase().includes(q) || (er.pattern ?? '').toLowerCase().includes(q),
+        )
+      )
+        return true;
+      return false;
+    });
   });
 
   // Source-level dry run state (create form)
@@ -176,6 +197,21 @@
   </button>
 </div>
 
+{#if ruleList.length > 0}
+  <div class="search-bar">
+    <input
+      type="search"
+      bind:value={searchQuery}
+      placeholder="Search rules..."
+      class="rule-search"
+    />
+    <label class="expand-all-label">
+      <input type="checkbox" bind:checked={expandAll} />
+      Expand all
+    </label>
+  </div>
+{/if}
+
 {#if showCreate}
   <div class="create-form card">
     <h3>New Rule</h3>
@@ -309,9 +345,11 @@
     state when matched. Create one with the form above, or run an analysis first and
     <strong>select text in the log viewer</strong> to generate a rule from a real log line.
   </div>
+{:else if filteredRules.length === 0}
+  <div class="empty">No rules match "{searchQuery}".</div>
 {:else}
   <div class="rule-list">
-    {#each ruleList as rule}
+    {#each filteredRules as rule}
       <div class="rule-card card">
         <div
           class="rule-header"
@@ -351,7 +389,7 @@
           </div>
         </div>
 
-        {#if expandedId === rule.id}
+        {#if expandedId === rule.id || expandAll || isSearchActive}
           {#if editingId === rule.id}
             <RuleEditor
               rule={JSON.parse(JSON.stringify(rule))}
@@ -605,5 +643,26 @@
   button.small {
     padding: 2px 8px;
     font-size: 12px;
+  }
+
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .rule-search {
+    flex: 1;
+    max-width: 320px;
+  }
+
+  .expand-all-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
   }
 </style>
