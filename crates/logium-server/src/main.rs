@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
-use tower_http::services::{ServeDir, ServeFile};
 use tracing_subscriber::EnvFilter;
 
 mod db;
@@ -14,8 +13,7 @@ mod routes;
 mod embedded {
     use axum::{
         body::Body,
-        extract::Uri,
-        http::{StatusCode, header},
+        http::{StatusCode, Uri, header},
         response::{IntoResponse, Response},
     };
     use rust_embed::RustEmbed;
@@ -112,6 +110,7 @@ async fn main() {
     }
     #[cfg(debug_assertions)]
     {
+        use tower_http::services::{ServeDir, ServeFile};
         let static_dir = PathBuf::from("ui/dist");
         if static_dir.exists() {
             app = app.fallback_service(
