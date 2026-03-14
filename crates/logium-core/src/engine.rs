@@ -935,20 +935,37 @@ pub struct StateManager {
     pub per_source_state: HashMap<u64, Arc<HashMap<String, TrackedValue>>>,
     pub source_names: HashMap<u64, String>,
     name_to_id: HashMap<String, u64>,
+    /// Maps ruleset name → source IDs whose template matches the ruleset's template_id.
+    ruleset_to_source_ids: HashMap<String, Vec<u64>>,
 }
 
 impl StateManager {
-    pub fn new(sources: &[Source]) -> Self {
+    pub fn new(sources: &[Source], rulesets: &[Ruleset]) -> Self {
         let mut source_names = HashMap::new();
         let mut name_to_id = HashMap::new();
         for src in sources {
             source_names.insert(src.id, src.name.clone());
             name_to_id.insert(src.name.clone(), src.id);
         }
+        // Build ruleset_name → [source_id] index:
+        // For each ruleset, find all sources whose template_id matches the ruleset's template_id.
+        let mut ruleset_to_source_ids: HashMap<String, Vec<u64>> = HashMap::new();
+        for rs in rulesets {
+            let source_ids: Vec<u64> = sources
+                .iter()
+                .filter(|s| s.template_id == rs.template_id)
+                .map(|s| s.id)
+                .collect();
+            ruleset_to_source_ids
+                .entry(rs.name.clone())
+                .or_default()
+                .extend(source_ids);
+        }
         Self {
             per_source_state: HashMap::new(),
             source_names,
             name_to_id,
+            ruleset_to_source_ids,
         }
     }
 
@@ -1028,10 +1045,27 @@ impl StateManager {
         changes
     }
 
-    /// Resolve the value of a source's state key by source name.
+    /// Resolve the value of a source's state key by source name (kept for internal use).
     pub fn get_state_by_name(&self, source_name: &str, key: &str) -> Option<&StateValue> {
         let id = self.name_to_id.get(source_name)?;
         self.per_source_state.get(id)?.get(key).map(|t| &t.value)
+    }
+
+    /// Resolve a state key across all sources belonging to a ruleset (OR semantics).
+    /// Returns the first value found among all sources whose template matches the ruleset.
+    pub fn get_state_by_ruleset(&self, ruleset_name: &str, key: &str) -> Option<&StateValue> {
+        let source_ids = self.ruleset_to_source_ids.get(ruleset_name)?;
+        for id in source_ids {
+            if let Some(val) = self
+                .per_source_state
+                .get(id)
+                .and_then(|s| s.get(key))
+                .map(|t| &t.value)
+            {
+                return Some(val);
+            }
+        }
+        None
     }
 
     /// Snapshot all state, keyed by source name.
@@ -1153,15 +1187,15 @@ impl PatternEvaluator {
 
 /// Evaluate a single predicate against the current state.
 fn evaluate_predicate(pred: &PatternPredicate, state: &StateManager) -> bool {
-    let current_val = state.get_state_by_name(&pred.source_name, &pred.state_key);
+    let current_val = state.get_state_by_ruleset(&pred.ruleset_name, &pred.state_key);
 
     // Resolve the operand
     let operand_val: Option<StateValue> = match &pred.operand {
         Operand::Literal(v) => Some(v.clone()),
         Operand::StateRef {
-            source_name,
+            ruleset_name,
             state_key,
-        } => state.get_state_by_name(source_name, state_key).cloned(),
+        } => state.get_state_by_ruleset(ruleset_name, state_key).cloned(),
     };
 
     match pred.operator {
@@ -1295,7 +1329,7 @@ pub fn analyze(
     // --- Phase 2: sequential merge + state mutations + pattern evaluation ---
     let merger = ProcessedLineMerger::new(processed_sources);
 
-    let mut state_manager = StateManager::new(sources);
+    let mut state_manager = StateManager::new(sources, rulesets);
     let source_name_cache = state_manager.source_names.clone();
     let mut pattern_eval = PatternEvaluator::new(patterns);
 
@@ -1483,7 +1517,7 @@ pub fn analyze_streaming(
     // --- Phase 2: sequential merge + state mutations + pattern evaluation ---
     let merger = ProcessedLineMerger::new(processed_sources);
 
-    let mut state_manager = StateManager::new(sources);
+    let mut state_manager = StateManager::new(sources, rulesets);
     let source_name_cache = state_manager.source_names.clone();
     let mut pattern_eval = PatternEvaluator::new(patterns);
 
@@ -1921,7 +1955,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -1957,7 +1991,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "tags".into(),
             TrackedValue {
@@ -1993,7 +2027,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "count".into(),
             TrackedValue {
@@ -2031,7 +2065,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -2129,9 +2163,26 @@ mod tests {
             Source {
                 id: 2,
                 name: "client".into(),
-                template_id: 1,
+                template_id: 2,
                 file_path: "".into(),
                 color: String::new(),
+            },
+        ]
+    }
+
+    fn make_rulesets() -> Vec<Ruleset> {
+        vec![
+            Ruleset {
+                id: 1,
+                name: "server_rs".into(),
+                template_id: 1,
+                rule_ids: vec![],
+            },
+            Ruleset {
+                id: 2,
+                name: "client_rs".into(),
+                template_id: 2,
+                rule_ids: vec![],
             },
         ]
     }
@@ -2139,20 +2190,21 @@ mod tests {
     #[test]
     fn test_simple_two_predicate_pattern() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
 
         let pattern = Pattern {
             id: 1,
             name: "test_pattern".into(),
             predicates: vec![
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rs".into(),
                     state_key: "status".into(),
                     operator: Operator::Eq,
                     operand: Operand::Literal(StateValue::String("running".into())),
                 },
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rs".into(),
                     state_key: "players".into(),
                     operator: Operator::Gt,
                     operand: Operand::Literal(StateValue::Integer(0)),
@@ -2193,20 +2245,21 @@ mod tests {
     #[test]
     fn test_predicate_invalidation_resets_progress() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
 
         let pattern = Pattern {
             id: 1,
             name: "test".into(),
             predicates: vec![
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rs".into(),
                     state_key: "status".into(),
                     operator: Operator::Eq,
                     operand: Operand::Literal(StateValue::String("running".into())),
                 },
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rs".into(),
                     state_key: "count".into(),
                     operator: Operator::Gt,
                     operand: Operand::Literal(StateValue::Integer(10)),
@@ -2251,13 +2304,14 @@ mod tests {
     #[test]
     fn test_pattern_refire_after_match() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
 
         let pattern = Pattern {
             id: 1,
             name: "test".into(),
             predicates: vec![PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "flag".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::Bool(true)),
@@ -2288,17 +2342,18 @@ mod tests {
     #[test]
     fn test_cross_source_state_reference() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
 
         let pattern = Pattern {
             id: 1,
             name: "cross_source".into(),
             predicates: vec![PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "region".into(),
                 operator: Operator::Eq,
                 operand: Operand::StateRef {
-                    source_name: "client".into(),
+                    ruleset_name: "client_rs".into(),
                     state_key: "region".into(),
                 },
             }],
@@ -2339,7 +2394,8 @@ mod tests {
     #[test]
     fn test_all_operators() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "val".into(),
             TrackedValue {
@@ -2358,7 +2414,7 @@ mod tests {
         // Eq
         assert!(evaluate_predicate(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::Integer(10)),
@@ -2369,7 +2425,7 @@ mod tests {
         // Neq
         assert!(evaluate_predicate(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Neq,
                 operand: Operand::Literal(StateValue::Integer(5)),
@@ -2380,7 +2436,7 @@ mod tests {
         // Gt
         assert!(evaluate_predicate(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Gt,
                 operand: Operand::Literal(StateValue::Integer(5)),
@@ -2391,7 +2447,7 @@ mod tests {
         // Lt
         assert!(evaluate_predicate(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Lt,
                 operand: Operand::Literal(StateValue::Integer(20)),
@@ -2402,7 +2458,7 @@ mod tests {
         // Gte (equal case)
         assert!(evaluate_predicate(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Gte,
                 operand: Operand::Literal(StateValue::Integer(10)),
@@ -2413,7 +2469,7 @@ mod tests {
         // Lte (equal case)
         assert!(evaluate_predicate(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Lte,
                 operand: Operand::Literal(StateValue::Integer(10)),
@@ -2424,7 +2480,7 @@ mod tests {
         // Contains
         assert!(evaluate_predicate(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "name".into(),
                 operator: Operator::Contains,
                 operand: Operand::Literal(StateValue::String("world".into())),
@@ -2435,7 +2491,7 @@ mod tests {
         // Exists
         assert!(evaluate_predicate(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Exists,
                 operand: Operand::Literal(StateValue::Bool(false)),
@@ -2446,7 +2502,7 @@ mod tests {
         // Exists - false case
         assert!(!evaluate_predicate(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "nonexistent".into(),
                 operator: Operator::Exists,
                 operand: Operand::Literal(StateValue::Bool(false)),
@@ -2578,9 +2634,21 @@ mod tests {
 
         let ts_template = make_ts_template();
 
-        let template = SourceTemplate {
+        // Server and client use different templates so rulesets can distinguish them.
+        let server_template = SourceTemplate {
             id: 1,
-            name: "default".into(),
+            name: "server_tmpl".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
+            json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
+        };
+        let client_template = SourceTemplate {
+            id: 2,
+            name: "client_tmpl".into(),
             timestamp_template_id: 1,
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
@@ -2601,7 +2669,7 @@ mod tests {
             Source {
                 id: 2,
                 name: "client".into(),
-                template_id: 1,
+                template_id: 2,
                 file_path: client_log.path().to_str().unwrap().into(),
                 color: String::new(),
             },
@@ -2672,29 +2740,38 @@ mod tests {
 
         let rules = vec![server_region_rule, player_count_rule, client_region_rule];
 
-        let rulesets = vec![Ruleset {
-            id: 1,
-            name: "server_rules".into(),
-            template_id: 1,
-            rule_ids: vec![1, 2, 3],
-        }];
+        let rulesets = vec![
+            Ruleset {
+                id: 1,
+                name: "server_rules".into(),
+                template_id: 1,
+                rule_ids: vec![1, 2],
+            },
+            Ruleset {
+                id: 2,
+                name: "client_rules".into(),
+                template_id: 2,
+                rule_ids: vec![3],
+            },
+        ];
 
-        // Pattern: detect when server and client are in same region AND player count > 50
+        // Pattern: detect when server_rules and client_rules are in same region AND
+        // server_rules has player_count > 50
         let pattern = Pattern {
             id: 1,
             name: "cross_source_detect".into(),
             predicates: vec![
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rules".into(),
                     state_key: "region".into(),
                     operator: Operator::Eq,
                     operand: Operand::StateRef {
-                        source_name: "client".into(),
+                        ruleset_name: "client_rules".into(),
                         state_key: "region".into(),
                     },
                 },
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rules".into(),
                     state_key: "player_count".into(),
                     operator: Operator::Gt,
                     operand: Operand::Literal(StateValue::Integer(50)),
@@ -2704,7 +2781,7 @@ mod tests {
 
         let result = analyze(
             &sources,
-            &[template],
+            &[server_template, client_template],
             &[ts_template],
             &rules,
             &rulesets,
@@ -2769,9 +2846,10 @@ mod tests {
         .unwrap();
 
         let ts_template = make_ts_template();
-        let template = SourceTemplate {
+        // Server and client use different templates so rulesets can distinguish them.
+        let server_template = SourceTemplate {
             id: 1,
-            name: "default".into(),
+            name: "server_tmpl".into(),
             timestamp_template_id: 1,
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
@@ -2780,6 +2858,18 @@ mod tests {
             file_name_regex: None,
             log_content_regex: None,
         };
+        let client_template = SourceTemplate {
+            id: 2,
+            name: "client_tmpl".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
+            json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
+        };
+        let templates = vec![server_template, client_template];
 
         let sources = vec![
             Source {
@@ -2792,7 +2882,7 @@ mod tests {
             Source {
                 id: 2,
                 name: "client".into(),
-                template_id: 1,
+                template_id: 2,
                 file_path: client_log.path().to_str().unwrap().into(),
                 color: String::new(),
             },
@@ -2858,28 +2948,36 @@ mod tests {
             },
         ];
 
-        let rulesets = vec![Ruleset {
-            id: 1,
-            name: "server_rules".into(),
-            template_id: 1,
-            rule_ids: vec![1, 2, 3],
-        }];
+        let rulesets = vec![
+            Ruleset {
+                id: 1,
+                name: "server_rules".into(),
+                template_id: 1,
+                rule_ids: vec![1, 2],
+            },
+            Ruleset {
+                id: 2,
+                name: "client_rules".into(),
+                template_id: 2,
+                rule_ids: vec![3],
+            },
+        ];
 
         let pattern = Pattern {
             id: 1,
             name: "cross_source_detect".into(),
             predicates: vec![
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rules".into(),
                     state_key: "region".into(),
                     operator: Operator::Eq,
                     operand: Operand::StateRef {
-                        source_name: "client".into(),
+                        ruleset_name: "client_rules".into(),
                         state_key: "region".into(),
                     },
                 },
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rules".into(),
                     state_key: "player_count".into(),
                     operator: Operator::Gt,
                     operand: Operand::Literal(StateValue::Integer(50)),
@@ -2891,7 +2989,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         analyze_streaming(
             &sources,
-            std::slice::from_ref(&template),
+            &templates,
             std::slice::from_ref(&ts_template),
             &rules,
             &rulesets,
@@ -2904,7 +3002,7 @@ mod tests {
         // Also run synchronous analysis for comparison
         let sync_result = analyze(
             &sources,
-            std::slice::from_ref(&template),
+            &templates,
             std::slice::from_ref(&ts_template),
             &rules,
             &rulesets,
@@ -2970,7 +3068,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -3006,7 +3104,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -3042,7 +3140,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -3071,7 +3169,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -3104,7 +3202,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -4373,7 +4471,7 @@ mod tests {
             id: 1,
             name: "status_running".into(),
             predicates: vec![PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "rules".into(),
                 state_key: "status".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("running".into())),

@@ -912,3 +912,19 @@ When `rule` is absent (create mode), all fields default to empty, `save()` calls
 **Files changed:**
 - `ui/src/lib/RuleEditor.svelte` — made `rule` prop optional (`rule?: LogRule`), updated init state to use optional chaining with defaults, branched `save()` on `rule` presence, updated footer button label
 - `ui/src/lib/RuleList.svelte` — removed all create-form state/helpers (`newName`, `newMatchMode`, `newMatchPattern`, `newExtractionRules`, dry-run state, `addNewExtractionRule`, `removeNewExtractionRule`, `loadSources`, `runNewDryRun`, `formatStateValue`, `createRule`), replaced inline form with `<RuleEditor>`, removed unused CSS
+
+### 71. Pattern Portability — Bind Predicates to Ruleset — Done
+
+**Status:** Done — Migrated `PatternPredicate.source_name` to `ruleset_name` and `Operand::StateRef { source_name }` to `{ ruleset_name }` across the entire stack. Resolution semantics: ruleset → template_id → all sources with that template (OR, first match wins).
+
+`StateManager` now accepts `rulesets: &[Ruleset]` at construction and builds a `ruleset_name → Vec<source_id>` index. `get_state_by_ruleset()` returns the first non-None state value across sources in that ruleset. Cross-source integration tests updated to use separate `template_id`s per source so distinct rulesets can target each independently. Legacy deserialization in `deserialize_operand()` falls back to `source_name` JSON key for backward compatibility.
+
+**Files changed:**
+- `crates/logium-server/migrations/20260314000000_pattern_predicates_ruleset.sql` — new migration: renames column and migrates existing data
+- `crates/logium-core/src/model.rs` — renamed `source_name` to `ruleset_name` in `PatternPredicate` and `Operand::StateRef`
+- `crates/logium-core/src/engine.rs` — `StateManager` tracks ruleset→source_ids index; `analyze()` / `analyze_streaming()` pass rulesets; all tests updated
+- `crates/logium-core/tests/real_data_tests.rs` — all cross-source tests use per-source templates and named rulesets
+- `crates/logium-core/benches/analysis_benchmark.rs` — updated to use `ruleset_name` and per-source templates in cross-source bench
+- `crates/logium-server/src/db.rs` — CRUD updated; `serialize_operand` / `deserialize_operand` updated with legacy fallback; tests updated
+- `ui/src/lib/api.ts` — `PatternPredicate` and `StateRef` types use `ruleset_name`
+- `ui/src/lib/PatternEditor.svelte` — source dropdown replaced with ruleset dropdown; state keys scoped to selected ruleset

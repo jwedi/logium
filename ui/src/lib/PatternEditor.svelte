@@ -1,11 +1,11 @@
 <script lang="ts">
   import {
     patterns as patternsApi,
-    sources as sourcesApi,
+    rulesets as rulesetsApi,
     rules as rulesApi,
     type Pattern,
     type PatternPredicate,
-    type Source,
+    type Ruleset,
     type StateValue,
     type LogRule,
   } from './api';
@@ -14,7 +14,7 @@
   let { projectId }: { projectId: number } = $props();
 
   let patternList: Pattern[] = $state([]);
-  let sourceList: Source[] = $state([]);
+  let rulesetList: Ruleset[] = $state([]);
   let ruleList: LogRule[] = $state([]);
   let loading = $state(false);
   let editingPattern = $state<Pattern | null>(null);
@@ -27,7 +27,7 @@
 
   function emptyPredicate(): PatternPredicate {
     return {
-      source_name: '',
+      ruleset_name: '',
       state_key: '',
       operator: 'Eq',
       operand: { Literal: { String: '' } },
@@ -39,11 +39,11 @@
   }
 
   function getStateRef(op: PatternPredicate['operand']): {
-    source_name: string;
+    ruleset_name: string;
     state_key: string;
   } {
     if ('StateRef' in op) return op.StateRef;
-    return { source_name: '', state_key: '' };
+    return { ruleset_name: '', state_key: '' };
   }
 
   function getLiteralString(op: PatternPredicate['operand']): string {
@@ -60,13 +60,13 @@
     pred.operand = { Literal: { String: value } };
   }
 
-  function setStateRef(pred: PatternPredicate, srcName: string, stateKey: string) {
-    pred.operand = { StateRef: { source_name: srcName, state_key: stateKey } };
+  function setStateRef(pred: PatternPredicate, rulesetName: string, stateKey: string) {
+    pred.operand = { StateRef: { ruleset_name: rulesetName, state_key: stateKey } };
   }
 
   function toggleOperandType(pred: PatternPredicate) {
     if (isLiteral(pred.operand)) {
-      pred.operand = { StateRef: { source_name: '', state_key: '' } };
+      pred.operand = { StateRef: { ruleset_name: '', state_key: '' } };
     } else {
       pred.operand = { Literal: { String: '' } };
     }
@@ -91,9 +91,9 @@
   async function load() {
     loading = true;
     try {
-      [patternList, sourceList, ruleList] = await Promise.all([
+      [patternList, rulesetList, ruleList] = await Promise.all([
         patternsApi.list(projectId),
-        sourcesApi.list(projectId),
+        rulesetsApi.list(projectId),
         rulesApi.list(projectId),
       ]);
     } catch (e: any) {
@@ -103,7 +103,24 @@
     }
   }
 
-  let availableStateKeys = $derived.by(() => {
+  // Derive available state keys scoped to a given ruleset.
+  // Returns state keys extracted by rules belonging to the specified ruleset.
+  function stateKeysForRuleset(rulesetName: string): string[] {
+    const rs = rulesetList.find((r) => r.name === rulesetName);
+    if (!rs) return [];
+    const keys = new Set<string>();
+    for (const rule of ruleList) {
+      if (rs.rule_ids.includes(rule.id)) {
+        for (const er of rule.extraction_rules) {
+          keys.add(er.state_key);
+        }
+      }
+    }
+    return [...keys].sort();
+  }
+
+  // All state keys across all rules (for fallback when no ruleset selected)
+  let allStateKeys = $derived.by(() => {
     const keys = new Set<string>();
     for (const rule of ruleList) {
       for (const er of rule.extraction_rules) {
@@ -223,11 +240,11 @@
 
           <div class="predicate-fields">
             <div class="field">
-              <label>Source</label>
-              <select bind:value={pred.source_name}>
+              <label>Ruleset</label>
+              <select bind:value={pred.ruleset_name}>
                 <option value="">Select...</option>
-                {#each sourceList as src}
-                  <option value={src.name}>{src.name}</option>
+                {#each rulesetList as rs}
+                  <option value={rs.name}>{rs.name}</option>
                 {/each}
               </select>
             </div>
@@ -235,7 +252,7 @@
               <label>State Key</label>
               <select bind:value={pred.state_key}>
                 <option value="">Select...</option>
-                {#each availableStateKeys as key}
+                {#each pred.ruleset_name ? stateKeysForRuleset(pred.ruleset_name) : allStateKeys as key}
                   <option value={key}>{key}</option>
                 {/each}
               </select>
@@ -265,7 +282,7 @@
               {:else}
                 <div class="row">
                   <select
-                    value={getStateRef(pred.operand).source_name}
+                    value={getStateRef(pred.operand).ruleset_name}
                     onchange={(e) =>
                       setStateRef(
                         pred,
@@ -274,9 +291,9 @@
                       )}
                     style="flex:1"
                   >
-                    <option value="">Select source...</option>
-                    {#each sourceList as src}
-                      <option value={src.name}>{src.name}</option>
+                    <option value="">Select ruleset...</option>
+                    {#each rulesetList as rs}
+                      <option value={rs.name}>{rs.name}</option>
                     {/each}
                   </select>
                   <select
@@ -284,13 +301,13 @@
                     onchange={(e) =>
                       setStateRef(
                         pred,
-                        getStateRef(pred.operand).source_name,
+                        getStateRef(pred.operand).ruleset_name,
                         (e.target as HTMLSelectElement).value,
                       )}
                     style="flex:1"
                   >
                     <option value="">Select key...</option>
-                    {#each availableStateKeys as key}
+                    {#each getStateRef(pred.operand).ruleset_name ? stateKeysForRuleset(getStateRef(pred.operand).ruleset_name) : allStateKeys as key}
                       <option value={key}>{key}</option>
                     {/each}
                   </select>

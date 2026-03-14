@@ -1145,7 +1145,7 @@ impl Database {
 
     async fn get_predicates(&self, pattern_id: i64) -> Result<Vec<PatternPredicate>, DbError> {
         let rows = sqlx::query(
-            "SELECT source_name, state_key, operator, operand_type, operand_value
+            "SELECT ruleset_name, state_key, operator, operand_type, operand_value
              FROM pattern_predicates WHERE pattern_id = ? ORDER BY order_index",
         )
         .bind(pattern_id)
@@ -1217,12 +1217,12 @@ impl Database {
         for (idx, p) in predicates.iter().enumerate() {
             let (operand_type, operand_value) = serialize_operand(&p.operand);
             sqlx::query(
-                "INSERT INTO pattern_predicates (pattern_id, order_index, source_name, state_key, operator, operand_type, operand_value)
+                "INSERT INTO pattern_predicates (pattern_id, order_index, ruleset_name, state_key, operator, operand_type, operand_value)
                  VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(pattern_id)
             .bind(idx as i64)
-            .bind(&p.source_name)
+            .bind(&p.ruleset_name)
             .bind(&p.state_key)
             .bind(operator_to_str(&p.operator))
             .bind(operand_type)
@@ -1231,7 +1231,7 @@ impl Database {
             .await?;
 
             built.push(PatternPredicate {
-                source_name: p.source_name.clone(),
+                ruleset_name: p.ruleset_name.clone(),
                 state_key: p.state_key.clone(),
                 operator: p.operator.clone(),
                 operand: p.operand.clone(),
@@ -1364,13 +1364,13 @@ impl Database {
                 .await?;
         }
 
-        // 5. Patterns (predicates use source_name strings, no ID FKs)
+        // 5. Patterns (predicates use ruleset_name strings, no ID FKs)
         for pattern in &data.patterns {
             let create_predicates: Vec<CreatePredicate> = pattern
                 .predicates
                 .iter()
                 .map(|p| CreatePredicate {
-                    source_name: p.source_name.clone(),
+                    ruleset_name: p.ruleset_name.clone(),
                     state_key: p.state_key.clone(),
                     operator: p.operator.clone(),
                     operand: p.operand.clone(),
@@ -1452,7 +1452,7 @@ pub struct CreateExtractionRule {
 /// Input type for creating pattern predicates (no id yet).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CreatePredicate {
-    pub source_name: String,
+    pub ruleset_name: String,
     pub state_key: String,
     pub operator: Operator,
     pub operand: Operand,
@@ -1493,7 +1493,7 @@ fn row_to_source(row: &sqlx::sqlite::SqliteRow) -> Source {
 }
 
 fn row_to_predicate(row: &sqlx::sqlite::SqliteRow) -> Result<PatternPredicate, DbError> {
-    let source_name: String = row.get("source_name");
+    let ruleset_name: String = row.get("ruleset_name");
     let state_key: String = row.get("state_key");
     let operator_str: String = row.get("operator");
     let operand_type: String = row.get("operand_type");
@@ -1503,7 +1503,7 @@ fn row_to_predicate(row: &sqlx::sqlite::SqliteRow) -> Result<PatternPredicate, D
     let operand = deserialize_operand(&operand_type, &operand_value)?;
 
     Ok(PatternPredicate {
-        source_name,
+        ruleset_name,
         state_key,
         operator,
         operand,
@@ -1599,11 +1599,11 @@ fn serialize_operand(operand: &Operand) -> (&'static str, String) {
             ("literal", json)
         }
         Operand::StateRef {
-            source_name,
+            ruleset_name,
             state_key,
         } => {
             let json = serde_json::json!({
-                "source_name": source_name,
+                "ruleset_name": ruleset_name,
                 "state_key": state_key,
             })
             .to_string();
@@ -1623,16 +1623,19 @@ fn deserialize_operand(operand_type: &str, operand_value: &str) -> Result<Operan
             let obj: serde_json::Value = serde_json::from_str(operand_value).map_err(|e| {
                 DbError::InvalidData(format!("invalid state_ref operand JSON: {e}"))
             })?;
-            let source_name = obj["source_name"]
-                .as_str()
-                .ok_or_else(|| DbError::InvalidData("missing source_name in state_ref".into()))?
+            // Support both old "source_name" key (legacy) and new "ruleset_name" key.
+            let ruleset_name = obj
+                .get("ruleset_name")
+                .or_else(|| obj.get("source_name"))
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| DbError::InvalidData("missing ruleset_name in state_ref".into()))?
                 .to_string();
             let state_key = obj["state_key"]
                 .as_str()
                 .ok_or_else(|| DbError::InvalidData("missing state_key in state_ref".into()))?
                 .to_string();
             Ok(Operand::StateRef {
-                source_name,
+                ruleset_name,
                 state_key,
             })
         }
@@ -1936,13 +1939,13 @@ mod tests {
                 "test_pattern",
                 &[
                     CreatePredicate {
-                        source_name: "server".to_string(),
+                        ruleset_name: "server_rs".to_string(),
                         state_key: "status".to_string(),
                         operator: Operator::Eq,
                         operand: Operand::Literal(StateValue::String("running".to_string())),
                     },
                     CreatePredicate {
-                        source_name: "server".to_string(),
+                        ruleset_name: "server_rs".to_string(),
                         state_key: "count".to_string(),
                         operator: Operator::Gt,
                         operand: Operand::Literal(StateValue::Integer(10)),
@@ -1952,7 +1955,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(pattern.predicates.len(), 2);
-        assert_eq!(pattern.predicates[0].source_name, "server");
+        assert_eq!(pattern.predicates[0].ruleset_name, "server_rs");
 
         // Verify operand round-trip
         if let Operand::Literal(StateValue::String(ref s)) = pattern.predicates[0].operand {
@@ -1991,11 +1994,11 @@ mod tests {
                 p.id,
                 "cross_source",
                 &[CreatePredicate {
-                    source_name: "server".to_string(),
+                    ruleset_name: "server_rs".to_string(),
                     state_key: "region".to_string(),
                     operator: Operator::Eq,
                     operand: Operand::StateRef {
-                        source_name: "client".to_string(),
+                        ruleset_name: "client_rs".to_string(),
                         state_key: "region".to_string(),
                     },
                 }],
@@ -2005,11 +2008,11 @@ mod tests {
 
         let fetched = db.get_pattern(p.id, pattern.id as i64).await.unwrap();
         if let Operand::StateRef {
-            ref source_name,
+            ref ruleset_name,
             ref state_key,
         } = fetched.predicates[0].operand
         {
-            assert_eq!(source_name, "client");
+            assert_eq!(ruleset_name, "client_rs");
             assert_eq!(state_key, "region");
         } else {
             panic!("expected state_ref operand");
@@ -2110,7 +2113,7 @@ mod tests {
             src.id,
             "failure_pattern",
             &[CreatePredicate {
-                source_name: "server".to_string(),
+                ruleset_name: "main_rules".to_string(),
                 state_key: "status".to_string(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("error".to_string())),

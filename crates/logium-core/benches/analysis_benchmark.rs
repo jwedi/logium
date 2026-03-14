@@ -24,9 +24,20 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
         extraction_regex: Some(r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2})".into()),
         default_year: None,
     };
-    let tmpl = SourceTemplate {
+    let tmpl_a = SourceTemplate {
         id: 1,
-        name: "nginx".into(),
+        name: "nginx_a".into(),
+        timestamp_template_id: 1,
+        line_delimiter: "\n".into(),
+        content_regex: None,
+        continuation_regex: None,
+        json_timestamp_field: None,
+        file_name_regex: None,
+        log_content_regex: None,
+    };
+    let tmpl_b = SourceTemplate {
+        id: 2,
+        name: "nginx_b".into(),
         timestamp_template_id: 1,
         line_delimiter: "\n".into(),
         content_regex: None,
@@ -45,13 +56,13 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
     let src_b = Source {
         id: 2,
         name: "source_b".into(),
-        template_id: 1,
+        template_id: 2,
         file_path: fixture_path("nginx", "source_b.log"),
         color: String::new(),
     };
-    let status_rule = LogRule {
+    let status_rule_a = LogRule {
         id: 1,
-        name: "extract_status".into(),
+        name: "extract_status_a".into(),
         match_mode: MatchMode::Any,
         match_rules: vec![MatchRule {
             id: 1,
@@ -68,43 +79,49 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
         }],
         event_text: Option::None,
     };
-    let method_rule = LogRule {
+    let status_rule_b = LogRule {
         id: 2,
-        name: "detect_method".into(),
+        name: "extract_status_b".into(),
         match_mode: MatchMode::Any,
         match_rules: vec![MatchRule {
             id: 2,
-            pattern: r"GET|POST|PUT".into(),
+            pattern: r#"HTTP/1\.\d"\s+\d+"#.into(),
         }],
         extraction_rules: vec![ExtractionRule {
             id: 2,
-            extraction_type: ExtractionType::Static,
-            state_key: "method_seen".into(),
-            pattern: None,
-            static_value: Some("true".into()),
+            extraction_type: ExtractionType::Parsed,
+            state_key: "status".into(),
+            pattern: Some(r#"HTTP/1\.\d"\s+(?P<status>\d+)"#.into()),
+            static_value: None,
             mode: ExtractionMode::Replace,
             event_text_only: false,
         }],
         event_text: Option::None,
     };
-    let ruleset = Ruleset {
+    let ruleset_a = Ruleset {
         id: 1,
-        name: "nginx_rules".into(),
+        name: "nginx_rules_a".into(),
         template_id: 1,
-        rule_ids: vec![1, 2],
+        rule_ids: vec![1],
+    };
+    let ruleset_b = Ruleset {
+        id: 2,
+        name: "nginx_rules_b".into(),
+        template_id: 2,
+        rule_ids: vec![2],
     };
     let pattern = Pattern {
         id: 1,
         name: "both_404".into(),
         predicates: vec![
             PatternPredicate {
-                source_name: "source_a".into(),
+                ruleset_name: "nginx_rules_a".into(),
                 state_key: "status".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::Integer(404)),
             },
             PatternPredicate {
-                source_name: "source_b".into(),
+                ruleset_name: "nginx_rules_b".into(),
                 state_key: "status".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::Integer(404)),
@@ -116,10 +133,10 @@ fn bench_nginx_pipeline(c: &mut Criterion) {
         b.iter(|| {
             analyze(
                 &[src_a.clone(), src_b.clone()],
-                std::slice::from_ref(&tmpl),
+                &[tmpl_a.clone(), tmpl_b.clone()],
                 std::slice::from_ref(&ts),
-                &[status_rule.clone(), method_rule.clone()],
-                std::slice::from_ref(&ruleset),
+                &[status_rule_a.clone(), status_rule_b.clone()],
+                &[ruleset_a.clone(), ruleset_b.clone()],
                 std::slice::from_ref(&pattern),
                 &TimeRange::default(),
             )
@@ -183,7 +200,7 @@ fn bench_nginx_large(c: &mut Criterion) {
         id: 1,
         name: "detect_404".into(),
         predicates: vec![PatternPredicate {
-            source_name: "nginx_full".into(),
+            ruleset_name: "nginx_rules".into(),
             state_key: "status".into(),
             operator: Operator::Eq,
             operand: Operand::Literal(StateValue::Integer(404)),

@@ -77,10 +77,10 @@ export interface TrackedValue {
 }
 
 export interface PatternPredicate {
-  source_name: string;
+  ruleset_name: string;
   state_key: string;
   operator: string;
-  operand: { Literal: StateValue } | { StateRef: { source_name: string; state_key: string } };
+  operand: { Literal: StateValue } | { StateRef: { ruleset_name: string; state_key: string } };
 }
 
 export interface Pattern {
