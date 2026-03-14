@@ -852,3 +852,63 @@ Replace the plain text input for extraction rule `state_key` with a searchable c
 - `ui/src/lib/RuleEditor.svelte` — accept `knownKeys` prop, augment with sibling keys, replace input
 - `ui/src/lib/RuleCreator.svelte` — fetch project-wide keys on mount, replace input
 - `ui/src/lib/__tests__/StateKeyInput.svelte.test.ts` — unit tests for the combobox
+
+---
+
+### 66. Make Event Feed Default Tab and Remove Timeline
+
+**Status:** Done — Event Feed is now the first and default tab; Timeline removed
+
+Moved Event Feed tab to first position and set it as the default `viewMode`. Removed the Timeline tab button, `TimelineView` import, and timeline content block from `AnalysisView.svelte`. Deleted dead files: `TimelineView.svelte`, `TimelineAxis.svelte`, and their test/snapshot files.
+
+**Files changed:**
+- `ui/src/lib/AnalysisView.svelte` — removed `'timeline'` from viewMode type, changed default to `'state'`, moved Event Feed tab first, removed Timeline button and block
+- `ui/src/lib/__tests__/AnalysisView.svelte.test.ts` — updated default tab test, removed timeline tab tests
+- Deleted: `TimelineView.svelte`, `TimelineAxis.svelte`, `TimelineView.svelte.test.ts`, `TimelineAxis.svelte.test.ts`, and their snapshots
+
+---
+
+### 67. Rules View — Free-text Search and Expand All
+
+**Status:** Done — Added free-text search box that filters by name/pattern/state key and auto-expands matches; added Expand All checkbox.
+
+Added a search bar and "Expand all" checkbox to `RuleList.svelte`. The search input filters rules by name, match pattern, and extraction rule state key, and auto-expands matching rules. The Expand All checkbox reveals all rule details at once. A "No rules match" message is shown when the search has no hits.
+
+**Files changed:**
+- `ui/src/lib/RuleList.svelte` — added `searchQuery`, `expandAll`, `isSearchActive`, `filteredRules` state/derived; search-bar toolbar; updated `{#each}` to use `filteredRules`; updated expand condition; added no-match message; added CSS
+- `ui/src/lib/__tests__/RuleList.svelte.test.ts` — new test file with 10 tests covering search, auto-expand, no-match message, expand-all, and coexistence of search + expand-all
+
+---
+
+### 68. Event Feed — "rule" expand button
+
+**Status:** Done — Added "rule" toggle button to rule match cards showing rule name, match mode, and patterns inline.
+
+Added a `⊞ rule` action button alongside the existing "raw" and "state" buttons on rule match cards in the Event Feed. Clicking it expands an inline panel showing the rule name (styled with accent color), match mode (in monospace cyan), and all match patterns (each as a code block on its own line). Multiple panels can be open simultaneously. Falls back to `Rule #<id>` when the rule isn't found in `ruleList`.
+
+**Files changed:**
+- `ui/src/lib/StateEvolutionView.svelte` — added `openRulePanels` state set, `toggleRulePanel()` function, rule button in `.card-actions`, rule panel template block, and CSS for `.rule-panel`, `.rule-panel-name`, `.rule-panel-mode`, `.rule-mode-badge`, `.rule-panel-patterns`, `.rule-pattern`, `.rule-panel-missing`
+- `ui/src/lib/__tests__/__snapshots__/AnalysisView.svelte.test.ts.snap` — updated snapshot to include new rule button
+
+
+---
+
+### 69. Match Density histogram in Event Feed and Clusters views
+
+**Status:** Done — Added `EventDensityHistogram` to the Event Feed (`viewMode === 'state'`) and Clusters (`viewMode === 'clusters'`) views, matching the existing Table view behavior.
+
+**Files changed:**
+- `ui/src/lib/AnalysisView.svelte` — added histogram block (with `filteredResult.rule_matches.length > 0` guard) above `<StateEvolutionView>` and above `<ErrorClusteringView>`
+- `ui/src/lib/__tests__/__snapshots__/AnalysisView.svelte.test.ts.snap` — updated snapshot
+
+---
+
+### 70. Make "New Rule" form consistent with Edit Rule
+
+**Status:** Done — Unified the create and edit flows by making `RuleEditor.svelte` handle both modes via an optional `rule` prop.
+
+When `rule` is absent (create mode), all fields default to empty, `save()` calls `rulesApi.create()`, and the footer button reads "Create"/"Creating...". The entire inline create form in `RuleList.svelte` was removed and replaced with `<RuleEditor>` (no `rule` prop).
+
+**Files changed:**
+- `ui/src/lib/RuleEditor.svelte` — made `rule` prop optional (`rule?: LogRule`), updated init state to use optional chaining with defaults, branched `save()` on `rule` presence, updated footer button label
+- `ui/src/lib/RuleList.svelte` — removed all create-form state/helpers (`newName`, `newMatchMode`, `newMatchPattern`, `newExtractionRules`, dry-run state, `addNewExtractionRule`, `removeNewExtractionRule`, `loadSources`, `runNewDryRun`, `formatStateValue`, `createRule`), replaced inline form with `<RuleEditor>`, removed unused CSS

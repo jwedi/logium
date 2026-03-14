@@ -1,16 +1,7 @@
 <script lang="ts">
-  import {
-    rules as rulesApi,
-    sources as sourcesApi,
-    analysis as analysisApi,
-    type LogRule,
-    type Source,
-    type RuleMatch,
-    type DryRunRequest,
-  } from './api';
+  import { rules as rulesApi, type LogRule } from './api';
   import { invalidateAnalysis } from './analysisInvalidation.svelte';
   import RuleEditor from './RuleEditor.svelte';
-  import StateKeyInput from './StateKeyInput.svelte';
 
   let { projectId }: { projectId: number } = $props();
 
@@ -18,20 +9,10 @@
   let loading = $state(false);
   let expandedId: number | null = $state(null);
   let editingId: number | null = $state(null);
+  let searchQuery = $state('');
+  let expandAll = $state(false);
 
-  // Create form state
-  let newName = $state('');
-  let newMatchMode: 'Any' | 'All' = $state('Any');
-  let newMatchPattern = $state('');
   let showCreate = $state(false);
-  let newExtractionRules: {
-    state_key: string;
-    extraction_type: 'Parsed' | 'Static' | 'Clear';
-    pattern: string;
-    static_value: string;
-    mode: 'Replace' | 'Accumulate';
-    event_text_only: boolean;
-  }[] = $state([]);
 
   let allStateKeys = $derived.by(() => {
     const keys = new Set<string>();
@@ -43,12 +24,24 @@
     return [...keys].sort();
   });
 
-  // Source-level dry run state (create form)
-  let availableSources: Source[] = $state([]);
-  let newSelectedSourceId: number | '' = $state('');
-  let newDryRunLoading = $state(false);
-  let newDryRunResults: RuleMatch[] = $state([]);
-  let newDryRunError = $state('');
+  let isSearchActive = $derived(searchQuery.trim() !== '');
+
+  let filteredRules = $derived.by(() => {
+    if (!isSearchActive) return ruleList;
+    const q = searchQuery.trim().toLowerCase();
+    return ruleList.filter((rule) => {
+      if (rule.name.toLowerCase().includes(q)) return true;
+      if (rule.match_rules.some((mr) => mr.pattern.toLowerCase().includes(q))) return true;
+      if (
+        rule.extraction_rules.some(
+          (er) =>
+            er.state_key.toLowerCase().includes(q) || (er.pattern ?? '').toLowerCase().includes(q),
+        )
+      )
+        return true;
+      return false;
+    });
+  });
 
   async function load() {
     loading = true;
@@ -58,96 +51,6 @@
       alert(e.message);
     } finally {
       loading = false;
-    }
-  }
-
-  function addNewExtractionRule() {
-    newExtractionRules = [
-      ...newExtractionRules,
-      {
-        state_key: '',
-        extraction_type: 'Parsed',
-        pattern: '',
-        static_value: '',
-        mode: 'Replace',
-        event_text_only: false,
-      },
-    ];
-  }
-
-  function removeNewExtractionRule(i: number) {
-    newExtractionRules = newExtractionRules.filter((_, idx) => idx !== i);
-  }
-
-  async function loadSources() {
-    try {
-      availableSources = await sourcesApi.list(projectId);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  async function runNewDryRun() {
-    if (newSelectedSourceId === '' || !newMatchPattern.trim()) return;
-    newDryRunLoading = true;
-    newDryRunError = '';
-    newDryRunResults = [];
-    try {
-      const data: DryRunRequest = {
-        source_id: newSelectedSourceId as number,
-        match_mode: newMatchMode,
-        match_rules: [{ pattern: newMatchPattern }],
-        extraction_rules: newExtractionRules.map((er) => ({
-          extraction_type: er.extraction_type,
-          state_key: er.state_key,
-          pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
-          static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
-          mode: er.mode,
-          event_text_only: er.event_text_only,
-        })),
-      };
-      newDryRunResults = await analysisApi.dryRun(projectId, data);
-    } catch (e: any) {
-      newDryRunError = e.message;
-    } finally {
-      newDryRunLoading = false;
-    }
-  }
-
-  function formatStateValue(sv: Record<string, unknown>): string {
-    const key = Object.keys(sv)[0];
-    return String(sv[key]);
-  }
-
-  async function createRule() {
-    if (!newName.trim() || !newMatchPattern.trim()) return;
-    try {
-      await rulesApi.create(projectId, {
-        name: newName.trim(),
-        match_mode: newMatchMode,
-        match_rules: [{ id: 0, pattern: newMatchPattern }],
-        extraction_rules: newExtractionRules.map((er) => ({
-          id: 0,
-          extraction_type: er.extraction_type,
-          state_key: er.state_key,
-          pattern: er.extraction_type === 'Parsed' ? er.pattern || null : null,
-          static_value: er.extraction_type === 'Static' ? er.static_value || null : null,
-          mode: er.mode,
-          event_text_only: er.event_text_only,
-        })),
-        event_text: null,
-      });
-      newName = '';
-      newMatchPattern = '';
-      newExtractionRules = [];
-      newSelectedSourceId = '';
-      newDryRunResults = [];
-      newDryRunError = '';
-      showCreate = false;
-      await load();
-      invalidateAnalysis();
-    } catch (e: any) {
-      alert(e.message);
     }
   }
 
@@ -165,7 +68,6 @@
   $effect(() => {
     projectId;
     load();
-    loadSources();
   });
 </script>
 
@@ -176,129 +78,31 @@
   </button>
 </div>
 
-{#if showCreate}
-  <div class="create-form card">
-    <h3>New Rule</h3>
-    <div class="form-fields">
-      <div class="field">
-        <label>Name</label>
-        <input type="text" bind:value={newName} placeholder="Rule name..." />
-      </div>
-      <div class="field">
-        <label>Match Mode</label>
-        <select bind:value={newMatchMode}>
-          <option value="Any">Any</option>
-          <option value="All">All</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Match Pattern (regex)</label>
-        <textarea rows="2" bind:value={newMatchPattern} placeholder="e\.g\. ERROR.*timeout"
-        ></textarea>
-      </div>
-    </div>
-
-    <div class="section-header">
-      <h4>Extraction Rules</h4>
-      <button class="small" onclick={addNewExtractionRule}>+ Add</button>
-    </div>
-
-    {#each newExtractionRules as er, i}
-      <div class="new-extraction-row">
-        <div class="field">
-          <label>Key</label>
-          <StateKeyInput bind:value={er.state_key} knownKeys={allStateKeys} />
-        </div>
-        <div class="field">
-          <label>Type</label>
-          <select bind:value={er.extraction_type}>
-            <option value="Parsed">Parsed</option>
-            <option value="Static">Static</option>
-            <option value="Clear">Clear</option>
-          </select>
-        </div>
-        <div class="field">
-          <label>Mode</label>
-          <select bind:value={er.mode}>
-            <option value="Replace">Replace</option>
-            <option value="Accumulate">Accumulate</option>
-          </select>
-        </div>
-        {#if er.extraction_type === 'Parsed'}
-          <div class="field" style="flex:2">
-            <label>Pattern</label>
-            <input type="text" bind:value={er.pattern} placeholder="e.g. ERROR (?P<message>.+)" />
-          </div>
-        {/if}
-        {#if er.extraction_type === 'Static'}
-          <div class="field" style="flex:2">
-            <label>Value</label>
-            <input type="text" bind:value={er.static_value} placeholder="static value..." />
-          </div>
-        {/if}
-        <button class="small danger remove-extraction" onclick={() => removeNewExtractionRule(i)}
-          >x</button
-        >
-      </div>
-    {/each}
-
-    <div class="dry-run-section">
-      <h4>Test Against Source</h4>
-      {#if availableSources.length === 0}
-        <div class="hint">No sources available</div>
-      {:else}
-        <div class="dry-run-controls">
-          <select bind:value={newSelectedSourceId}>
-            <option value="">Select a source...</option>
-            {#each availableSources as src}
-              <option value={src.id}>{src.name}</option>
-            {/each}
-          </select>
-          <button
-            class="small"
-            onclick={runNewDryRun}
-            disabled={newDryRunLoading || newSelectedSourceId === '' || !newMatchPattern.trim()}
-          >
-            {newDryRunLoading ? 'Running...' : 'Run'}
-          </button>
-        </div>
-        {#if newDryRunError}
-          <div class="hint error">{newDryRunError}</div>
-        {/if}
-        {#if newDryRunResults.length > 0}
-          <div class="dry-run-results">
-            <div class="hint">
-              {newDryRunResults.length} match{newDryRunResults.length === 1 ? '' : 'es'} found
-            </div>
-            {#each newDryRunResults as rm}
-              <div class="dry-run-match">
-                <code>{rm.log_line.raw}</code>
-                {#if Object.keys(rm.extracted_state).length > 0}
-                  <div class="extraction-chips">
-                    {#each Object.entries(rm.extracted_state) as [key, value]}
-                      <span class="chip"
-                        >{key}: {formatStateValue(value as Record<string, unknown>)}</span
-                      >
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
-      {/if}
-    </div>
-
-    <div class="actions">
-      <button
-        class="primary"
-        onclick={createRule}
-        disabled={!newName.trim() || !newMatchPattern.trim()}
-      >
-        Create
-      </button>
-    </div>
+{#if ruleList.length > 0}
+  <div class="search-bar">
+    <input
+      type="search"
+      bind:value={searchQuery}
+      placeholder="Search rules..."
+      class="rule-search"
+    />
+    <label class="expand-all-label">
+      <input type="checkbox" bind:checked={expandAll} />
+      Expand all
+    </label>
   </div>
+{/if}
+
+{#if showCreate}
+  <RuleEditor
+    {projectId}
+    knownKeys={allStateKeys}
+    onSave={() => {
+      showCreate = false;
+      load();
+    }}
+    onCancel={() => (showCreate = false)}
+  />
 {/if}
 
 {#if loading}
@@ -309,9 +113,11 @@
     state when matched. Create one with the form above, or run an analysis first and
     <strong>select text in the log viewer</strong> to generate a rule from a real log line.
   </div>
+{:else if filteredRules.length === 0}
+  <div class="empty">No rules match "{searchQuery}".</div>
 {:else}
   <div class="rule-list">
-    {#each ruleList as rule}
+    {#each filteredRules as rule}
       <div class="rule-card card">
         <div
           class="rule-header"
@@ -351,7 +157,7 @@
           </div>
         </div>
 
-        {#if expandedId === rule.id}
+        {#if expandedId === rule.id || expandAll || isSearchActive}
           {#if editingId === rule.id}
             <RuleEditor
               rule={JSON.parse(JSON.stringify(rule))}
@@ -409,16 +215,6 @@
 
   .header-row h2 {
     margin: 0;
-  }
-
-  .create-form {
-    margin-bottom: 20px;
-  }
-
-  .form-fields {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
   }
 
   .rule-list {
@@ -503,107 +299,29 @@
     color: var(--green);
   }
 
-  .section-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 12px;
-  }
-
-  .section-header h4 {
-    margin: 0;
-  }
-
-  .new-extraction-row {
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-    padding: 8px;
-    background: var(--bg);
-    border-radius: var(--radius);
-    margin-top: 4px;
-  }
-
-  .new-extraction-row .field {
-    flex: 1;
-  }
-
-  .remove-extraction {
-    margin-bottom: 2px;
-  }
-
-  .dry-run-section {
-    margin-top: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .dry-run-section h4 {
-    margin: 0;
-  }
-
-  .dry-run-controls {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .dry-run-controls select {
-    flex: 1;
-  }
-
-  .dry-run-results {
-    max-height: 200px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .dry-run-match {
-    padding: 6px 8px;
-    background: var(--bg);
-    border-radius: var(--radius);
-  }
-
-  .dry-run-match code {
-    display: block;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
-
-  .extraction-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 4px;
-  }
-
-  .chip {
-    display: inline-block;
-    padding: 1px 6px;
-    background: var(--green);
-    color: var(--bg);
-    border-radius: 4px;
-    font-size: 11px;
-    font-family: var(--font-mono);
-  }
-
-  .hint {
-    font-size: 12px;
-    color: var(--text-muted);
-    font-style: italic;
-  }
-
-  .hint.error {
-    color: var(--yellow);
-  }
-
   button.small {
     padding: 2px 8px;
     font-size: 12px;
+  }
+
+  .search-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .rule-search {
+    flex: 1;
+    max-width: 320px;
+  }
+
+  .expand-all-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    white-space: nowrap;
   }
 </style>

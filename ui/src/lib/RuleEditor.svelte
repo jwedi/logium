@@ -14,30 +14,28 @@
   import StateKeyInput from './StateKeyInput.svelte';
 
   let {
-    rule,
+    rule = undefined,
     projectId,
     knownKeys = [],
     onSave,
     onCancel,
   }: {
-    rule: LogRule;
+    rule?: LogRule;
     projectId: number;
     knownKeys?: string[];
     onSave: () => void;
     onCancel: () => void;
   } = $props();
 
-  // Mutable editing copies — destructure prop immediately to avoid Svelte warning
-  const {
-    name: initName,
-    match_mode: initMode,
-    match_rules: initMR,
-    extraction_rules: initER,
-    event_text: initEventText,
-  } = rule;
+  // Mutable editing copies — guard against missing rule (create mode)
+  const initName = rule?.name ?? '';
+  const initMode = rule?.match_mode ?? 'Any';
+  const initMR = rule?.match_rules ?? [{ id: 0, pattern: '' }];
+  const initER = rule?.extraction_rules ?? [];
+  const initEventText = rule?.event_text ?? '';
   let editName = $state(initName);
   let editMatchMode: 'Any' | 'All' = $state(initMode);
-  let editEventText = $state(initEventText ?? '');
+  let editEventText = $state(initEventText);
   let editMatchPatterns: { id: number; pattern: string }[] = $state(
     initMR.map((mr) => ({ id: mr.id, pattern: mr.pattern })),
   );
@@ -51,7 +49,7 @@
     event_text_only: boolean;
   }[] = $state(
     initER.map((er) => ({
-      id: er.id,
+      id: er.id ?? 0,
       state_key: er.state_key,
       extraction_type: er.extraction_type,
       pattern: er.pattern ?? '',
@@ -231,7 +229,7 @@
     if (!canSave) return;
     saving = true;
     try {
-      const payload: Partial<LogRule> = {
+      const payload: Omit<LogRule, 'id'> = {
         name: editName.trim(),
         match_mode: editMatchMode,
         match_rules: editMatchPatterns
@@ -250,7 +248,11 @@
         ),
         event_text: editEventText.trim() || null,
       };
-      await rulesApi.update(projectId, rule.id, payload);
+      if (rule) {
+        await rulesApi.update(projectId, rule.id, payload);
+      } else {
+        await rulesApi.create(projectId, payload);
+      }
       invalidateAnalysis();
       onSave();
     } catch (e: any) {
@@ -470,7 +472,7 @@
   <div class="editor-footer">
     <button onclick={onCancel}>Cancel</button>
     <button class="primary" onclick={save} disabled={saving || !canSave}>
-      {saving ? 'Saving...' : 'Save'}
+      {saving ? (rule ? 'Saving...' : 'Creating...') : rule ? 'Save' : 'Create'}
     </button>
   </div>
 </div>

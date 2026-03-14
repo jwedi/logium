@@ -18,7 +18,6 @@
   } from './api';
   import LogViewer from './LogViewer.svelte';
   import EventDensityHistogram from './EventDensityHistogram.svelte';
-  import TimelineView from './TimelineView.svelte';
   import StateEvolutionView from './StateEvolutionView.svelte';
   import ErrorClusteringView from './ErrorClusteringView.svelte';
   import { getInvalidationStamp } from './analysisInvalidation.svelte';
@@ -35,9 +34,10 @@
   let running = $state(false);
   let error: string | null = $state(null);
   let selectedSourceId: number | null = $state(null);
-  let viewMode: 'table' | 'logs' | 'timeline' | 'state' | 'clusters' = $state('table');
+  let viewMode: 'table' | 'logs' | 'state' | 'clusters' = $state('state');
   let linesProcessed: number = $state(0);
   let autoTriggered = $state(false);
+  let autoRunProjectId: number | null = null; // plain var — changing it must not trigger reactivity
   let currentHandle: { close: () => void } | null = $state(null);
   let lastRunStamp = $state(0);
 
@@ -318,7 +318,19 @@
   $effect(() => {
     projectId;
     result = getCachedAnalysis(projectId);
-    load();
+    load().then(() => {
+      if (
+        autoRunProjectId !== projectId &&
+        !getCachedAnalysis(projectId) &&
+        !running &&
+        sourceList.length > 0 &&
+        ruleList.length > 0 &&
+        rulesetList.length > 0
+      ) {
+        autoRunProjectId = projectId;
+        runAnalysis(false);
+      }
+    });
   });
 
   // Auto-rerun analysis when rules/patterns/rulesets change
@@ -516,6 +528,13 @@
 
   <div class="view-tabs">
     <button
+      class:active={viewMode === 'state'}
+      onclick={() => {
+        viewMode = 'state';
+        navigateTarget = null;
+      }}>Event Feed</button
+    >
+    <button
       class:active={viewMode === 'table'}
       onclick={() => {
         viewMode = 'table';
@@ -528,20 +547,6 @@
         viewMode = 'logs';
         navigateTarget = null;
       }}>Logs</button
-    >
-    <button
-      class:active={viewMode === 'timeline'}
-      onclick={() => {
-        viewMode = 'timeline';
-        navigateTarget = null;
-      }}>Timeline</button
-    >
-    <button
-      class:active={viewMode === 'state'}
-      onclick={() => {
-        viewMode = 'state';
-        navigateTarget = null;
-      }}>Event Feed</button
     >
     <button
       class:active={viewMode === 'clusters'}
@@ -654,15 +659,20 @@
     {:else}
       <div class="text-muted">Select a log source above</div>
     {/if}
-  {:else if viewMode === 'timeline'}
-    <TimelineView
-      result={filteredResult}
-      {sourceList}
-      {ruleList}
-      {patternList}
-      onNavigate={handleNavigate}
-    />
   {:else if viewMode === 'state'}
+    {#if filteredResult.rule_matches.length > 0}
+      <EventDensityHistogram
+        ruleMatches={filteredResult.rule_matches}
+        onBucketClick={(match) => {
+          handleNavigate(match.source_id, match.log_line.raw);
+        }}
+        onTimeRangeSelect={(start, end) => {
+          timeStart = start;
+          timeEnd = end;
+          runAnalysis();
+        }}
+      />
+    {/if}
     <StateEvolutionView
       ruleMatches={filteredResult.rule_matches}
       stateChanges={filteredResult.state_changes}
@@ -672,6 +682,19 @@
       {patternList}
     />
   {:else if viewMode === 'clusters'}
+    {#if filteredResult.rule_matches.length > 0}
+      <EventDensityHistogram
+        ruleMatches={filteredResult.rule_matches}
+        onBucketClick={(match) => {
+          handleNavigate(match.source_id, match.log_line.raw);
+        }}
+        onTimeRangeSelect={(start, end) => {
+          timeStart = start;
+          timeEnd = end;
+          runAnalysis();
+        }}
+      />
+    {/if}
     <ErrorClusteringView {projectId} {sourceList} />
   {/if}
 {:else if !running}
@@ -695,7 +718,7 @@
       </li>
     </ul>
     {#if sourceList.length > 0 && ruleList.length > 0 && rulesetList.length > 0}
-      <p>Ready — click <strong>Run Analysis</strong> above.</p>
+      <p>Ready — starting analysis…</p>
     {:else}
       <p>Complete the steps above, then click <strong>Run Analysis</strong>.</p>
     {/if}
