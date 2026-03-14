@@ -317,7 +317,10 @@
 
   $effect(() => {
     projectId;
-    result = getCachedAnalysis(projectId);
+    const cached = getCachedAnalysis(projectId);
+    if (!running) {
+      result = cached;
+    }
     load().then(() => {
       if (
         autoRunProjectId !== projectId &&

@@ -406,6 +406,8 @@ export const analysis = {
       `${proto}//${window.location.host}/api/projects/${pid}/analyze/ws${qs}`,
     );
 
+    let finished = false;
+
     ws.onmessage = (ev) => {
       const event: AnalysisEvent = JSON.parse(ev.data);
       switch (event.type) {
@@ -422,10 +424,12 @@ export const analysis = {
           callbacks.onProgress(event.data.lines_processed);
           break;
         case 'complete':
+          finished = true;
           callbacks.onComplete(event.data);
           ws.close();
           break;
         case 'error':
+          finished = true;
           callbacks.onError(event.data.message);
           ws.close();
           break;
@@ -433,10 +437,23 @@ export const analysis = {
     };
 
     ws.onerror = () => {
+      finished = true;
       callbacks.onError('WebSocket connection failed');
     };
 
-    return { close: () => ws.close() };
+    ws.onclose = () => {
+      if (!finished) {
+        finished = true;
+        callbacks.onError('Connection to server lost');
+      }
+    };
+
+    return {
+      close: () => {
+        finished = true;
+        ws.close();
+      },
+    };
   },
   exportJson: (pid: number, timeRange?: TimeRange, include?: string[]) => {
     const params = new URLSearchParams({ format: 'json' });
