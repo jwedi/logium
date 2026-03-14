@@ -877,3 +877,15 @@ Added a search bar and "Expand all" checkbox to `RuleList.svelte`. The search in
 **Files changed:**
 - `ui/src/lib/RuleList.svelte` — added `searchQuery`, `expandAll`, `isSearchActive`, `filteredRules` state/derived; search-bar toolbar; updated `{#each}` to use `filteredRules`; updated expand condition; added no-match message; added CSS
 - `ui/src/lib/__tests__/RuleList.svelte.test.ts` — new test file with 10 tests covering search, auto-expand, no-match message, expand-all, and coexistence of search + expand-all
+
+---
+
+### 68. Event Feed — "rule" expand button
+
+**Status:** Done — Added "rule" toggle button to rule match cards showing rule name, match mode, and patterns inline.
+
+Added a `⊞ rule` action button alongside the existing "raw" and "state" buttons on rule match cards in the Event Feed. Clicking it expands an inline panel showing the rule name (styled with accent color), match mode (in monospace cyan), and all match patterns (each as a code block on its own line). Multiple panels can be open simultaneously. Falls back to `Rule #<id>` when the rule isn't found in `ruleList`.
+
+**Files changed:**
+- `ui/src/lib/StateEvolutionView.svelte` — added `openRulePanels` state set, `toggleRulePanel()` function, rule button in `.card-actions`, rule panel template block, and CSS for `.rule-panel`, `.rule-panel-name`, `.rule-panel-mode`, `.rule-mode-badge`, `.rule-panel-patterns`, `.rule-pattern`, `.rule-panel-missing`
+- `ui/src/lib/__tests__/__snapshots__/AnalysisView.svelte.test.ts.snap` — updated snapshot to include new rule button

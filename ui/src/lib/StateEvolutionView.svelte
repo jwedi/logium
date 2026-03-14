@@ -34,6 +34,8 @@
   let openStatePanels: Set<string> = $state(new Set());
   // Raw line expanded, keyed same way
   let openRawLines: Set<string> = $state(new Set());
+  // Rule panel expanded, keyed same way
+  let openRulePanels: Set<string> = $state(new Set());
 
   function formatStateValue(sv: StateValue): string {
     if ('String' in sv) return sv.String;
@@ -92,6 +94,13 @@
       next.add(key);
     }
     openRawLines = next;
+  }
+
+  function toggleRulePanel(key: string) {
+    const next = new Set(openRulePanels);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    openRulePanels = next;
   }
 
   // Build lookup: (timestamp, rule_id, source_id) -> StateChange[]
@@ -331,10 +340,38 @@
                     title="Toggle state at this moment"
                     >&#8801; state {stateOpen ? '&#9650;' : ''}</button
                   >
+                  <button
+                    class="action-btn"
+                    class:active={openRulePanels.has(key)}
+                    onclick={() => toggleRulePanel(key)}
+                    type="button"
+                    title="Toggle rule details"
+                    >&#8862; rule{openRulePanels.has(key) ? ' &#9650;' : ''}</button
+                  >
                 </div>
               </div>
               {#if rawOpen}
                 <div class="raw-line">{rm.log_line.raw}</div>
+              {/if}
+              {#if openRulePanels.has(key)}
+                {@const rule = ruleList.find((r) => r.id === rm.rule_id)}
+                <div class="rule-panel">
+                  {#if rule}
+                    <div class="rule-panel-name">{rule.name}</div>
+                    <div class="rule-panel-mode">
+                      match mode: <span class="rule-mode-badge">{rule.match_mode}</span>
+                    </div>
+                    {#if rule.match_rules.length > 0}
+                      <div class="rule-panel-patterns">
+                        {#each rule.match_rules as mr}
+                          <code class="rule-pattern">{mr.pattern}</code>
+                        {/each}
+                      </div>
+                    {/if}
+                  {:else}
+                    <span class="rule-panel-missing">Rule #{rm.rule_id}</span>
+                  {/if}
+                </div>
               {/if}
               {#if stateOpen}
                 {@const snapshot = computeStateSnapshot(rm.log_line.timestamp)}
@@ -627,5 +664,53 @@
     font-size: 10px;
     color: var(--text-dim);
     margin-left: 4px;
+  }
+
+  .rule-panel {
+    margin-top: 6px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .rule-panel-name {
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .rule-panel-mode {
+    color: var(--text-dim);
+  }
+
+  .rule-mode-badge {
+    font-family: var(--font-mono);
+    color: var(--cyan);
+  }
+
+  .rule-panel-patterns {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-top: 2px;
+  }
+
+  .rule-pattern {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text);
+    background: var(--bg);
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .rule-panel-missing {
+    color: var(--text-muted);
+    font-style: italic;
   }
 </style>
