@@ -37,6 +37,7 @@
   let viewMode: 'table' | 'logs' | 'state' | 'clusters' = $state('state');
   let linesProcessed: number = $state(0);
   let autoTriggered = $state(false);
+  let autoRunProjectId: number | null = null; // plain var — changing it must not trigger reactivity
   let currentHandle: { close: () => void } | null = $state(null);
   let lastRunStamp = $state(0);
 
@@ -317,7 +318,19 @@
   $effect(() => {
     projectId;
     result = getCachedAnalysis(projectId);
-    load();
+    load().then(() => {
+      if (
+        autoRunProjectId !== projectId &&
+        !getCachedAnalysis(projectId) &&
+        !running &&
+        sourceList.length > 0 &&
+        ruleList.length > 0 &&
+        rulesetList.length > 0
+      ) {
+        autoRunProjectId = projectId;
+        runAnalysis(false);
+      }
+    });
   });
 
   // Auto-rerun analysis when rules/patterns/rulesets change
@@ -679,7 +692,7 @@
       </li>
     </ul>
     {#if sourceList.length > 0 && ruleList.length > 0 && rulesetList.length > 0}
-      <p>Ready — click <strong>Run Analysis</strong> above.</p>
+      <p>Ready — starting analysis…</p>
     {:else}
       <p>Complete the steps above, then click <strong>Run Analysis</strong>.</p>
     {/if}
