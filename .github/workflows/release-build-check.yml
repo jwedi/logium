@@ -1,0 +1,46 @@
+name: Release Build Check
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "crates/logium-server/**"
+      - "ui/src/**"
+      - "ui/index.html"
+      - "ui/package*.json"
+      - "ui/vite.config.*"
+  pull_request:
+    branches: [master]
+    paths:
+      - "crates/logium-server/**"
+      - "ui/src/**"
+      - "ui/index.html"
+      - "ui/package*.json"
+      - "ui/vite.config.*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-build-check:
+    name: Release Build (embed check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Build frontend
+        working-directory: ui
+        run: npm ci && npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cargo build --release
+        run: cargo build --release --package logium-server
