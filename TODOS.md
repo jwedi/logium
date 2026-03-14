@@ -889,3 +889,14 @@ Added a `⊞ rule` action button alongside the existing "raw" and "state" button
 **Files changed:**
 - `ui/src/lib/StateEvolutionView.svelte` — added `openRulePanels` state set, `toggleRulePanel()` function, rule button in `.card-actions`, rule panel template block, and CSS for `.rule-panel`, `.rule-panel-name`, `.rule-panel-mode`, `.rule-mode-badge`, `.rule-panel-patterns`, `.rule-pattern`, `.rule-panel-missing`
 - `ui/src/lib/__tests__/__snapshots__/AnalysisView.svelte.test.ts.snap` — updated snapshot to include new rule button
+
+
+---
+
+### 69. Match Density histogram in Event Feed and Clusters views
+
+**Status:** Done — Added `EventDensityHistogram` to the Event Feed (`viewMode === 'state'`) and Clusters (`viewMode === 'clusters'`) views, matching the existing Table view behavior.
+
+**Files changed:**
+- `ui/src/lib/AnalysisView.svelte` — added histogram block (with `filteredResult.rule_matches.length > 0` guard) above `<StateEvolutionView>` and above `<ErrorClusteringView>`
+- `ui/src/lib/__tests__/__snapshots__/AnalysisView.svelte.test.ts.snap` — updated snapshot

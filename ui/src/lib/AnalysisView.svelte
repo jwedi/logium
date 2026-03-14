@@ -660,6 +660,19 @@
       <div class="text-muted">Select a log source above</div>
     {/if}
   {:else if viewMode === 'state'}
+    {#if filteredResult.rule_matches.length > 0}
+      <EventDensityHistogram
+        ruleMatches={filteredResult.rule_matches}
+        onBucketClick={(match) => {
+          handleNavigate(match.source_id, match.log_line.raw);
+        }}
+        onTimeRangeSelect={(start, end) => {
+          timeStart = start;
+          timeEnd = end;
+          runAnalysis();
+        }}
+      />
+    {/if}
     <StateEvolutionView
       ruleMatches={filteredResult.rule_matches}
       stateChanges={filteredResult.state_changes}
@@ -669,6 +682,19 @@
       {patternList}
     />
   {:else if viewMode === 'clusters'}
+    {#if filteredResult.rule_matches.length > 0}
+      <EventDensityHistogram
+        ruleMatches={filteredResult.rule_matches}
+        onBucketClick={(match) => {
+          handleNavigate(match.source_id, match.log_line.raw);
+        }}
+        onTimeRangeSelect={(start, end) => {
+          timeStart = start;
+          timeEnd = end;
+          runAnalysis();
+        }}
+      />
+    {/if}
     <ErrorClusteringView {projectId} {sourceList} />
   {/if}
 {:else if !running}
