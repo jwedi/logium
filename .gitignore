@@ -8,3 +8,4 @@ crates/logium-server/uploads/*
 uploads/
 AGENTS.md
 .claude/
+CLAUDE.md
