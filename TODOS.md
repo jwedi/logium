@@ -943,3 +943,17 @@ evaluator count exceeds 100.
 
 **Files changed:**
 - `crates/logium-core/src/engine.rs` — removed `PatternEvaluator`; added `Binding` type alias, `get_state_by_source_id()` and `snapshot_for_binding()` on `StateManager`, `evaluate_predicate_bound()`, `BoundEvaluator`, `cartesian_product()`, `PatternEvaluatorSet`; updated `analyze()` and `analyze_streaming()` call sites; updated all pattern evaluator tests to use new API; added `test_multi_source_per_ruleset_independent_evaluation` and `test_multi_source_per_ruleset_both_match`
+
+---
+
+### 73. Clone Project
+
+**Status:** Done
+
+Added `POST /api/projects/{id}/clone` endpoint that deep-copies all project entities (timestamp templates, source templates, rules, rulesets, patterns, sources) into a new project with a user-supplied name. IDs are remapped throughout; `file_path` and `color` are preserved verbatim on sources. Frontend adds a "Clone" button per project card in `ProjectManager.svelte` with the same inline-input UX as rename (pre-populated with `"{name} (copy)"`).
+
+**Files changed:**
+- `crates/logium-server/src/db.rs` — added `clone_project()` method and `test_clone_project` test
+- `crates/logium-server/src/routes/projects.rs` — added `POST /api/projects/{id}/clone` route and `clone` handler
+- `ui/src/lib/api.ts` — added `projects.clone()` API method
+- `ui/src/lib/ProjectManager.svelte` — added `cloningId`/`cloneName` state, `startClone()`/`cancelClone()`/`cloneProject()` functions, and inline clone UI in the project card template

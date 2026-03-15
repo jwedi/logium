@@ -1,6 +1,6 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 
@@ -15,6 +15,7 @@ pub fn router() -> Router<AppState> {
             "/api/projects/{id}",
             get(get_one).put(update).delete(remove),
         )
+        .route("/api/projects/{id}/clone", post(clone))
 }
 
 #[derive(Deserialize)]
@@ -55,4 +56,18 @@ async fn update(
 async fn remove(State(state): State<AppState>, Path(id): Path<i64>) -> ApiResult<StatusCode> {
     state.db.delete_project(id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct CloneProject {
+    name: String,
+}
+
+async fn clone(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(body): Json<CloneProject>,
+) -> ApiResult<(StatusCode, Json<ProjectRow>)> {
+    let project = state.db.clone_project(id, &body.name).await?;
+    Ok((StatusCode::CREATED, Json(project)))
 }

@@ -204,6 +204,8 @@ export const projects = {
   update: (id: number, data: Partial<Project>) =>
     request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
+  clone: (id: number, data: { name: string }) =>
+    request<Project>(`/projects/${id}/clone`, { method: 'POST', body: JSON.stringify(data) }),
   exportConfig: async (id: number): Promise<Blob> => {
     const res = await fetch(`${BASE}/projects/${id}/export`);
     if (!res.ok) throw new Error(`Export failed: ${res.status}`);

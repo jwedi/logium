@@ -1390,6 +1390,177 @@ impl Database {
     }
 
     // -----------------------------------------------------------------------
+    // Clone project
+    // -----------------------------------------------------------------------
+
+    pub async fn clone_project(
+        &self,
+        source_id: i64,
+        new_name: &str,
+    ) -> Result<ProjectRow, DbError> {
+        let created_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let new_project_id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO projects (name, created_at) VALUES (?, ?) RETURNING id",
+        )
+        .bind(new_name)
+        .bind(&created_at)
+        .fetch_one(&self.pool)
+        .await?;
+        self.seed_default_timestamp_templates(new_project_id)
+            .await?;
+
+        let data = self.load_project_data(source_id).await?;
+
+        let mut tt_id_map: HashMap<u64, u64> = HashMap::new();
+        let mut st_id_map: HashMap<u64, u64> = HashMap::new();
+        let mut rule_id_map: HashMap<u64, u64> = HashMap::new();
+
+        // 1. Timestamp templates
+        for tt in &data.timestamp_templates {
+            let new_tt = self
+                .create_timestamp_template(
+                    new_project_id,
+                    &tt.name,
+                    &tt.format,
+                    tt.extraction_regex.as_deref(),
+                    tt.default_year,
+                )
+                .await?;
+            tt_id_map.insert(tt.id, new_tt.id);
+        }
+
+        // 2. Source templates (remap timestamp_template_id)
+        for st in &data.templates {
+            let new_tt_id = tt_id_map.get(&st.timestamp_template_id).ok_or_else(|| {
+                DbError::InvalidData(format!(
+                    "source template '{}' references unknown tt_id {}",
+                    st.name, st.timestamp_template_id
+                ))
+            })?;
+            let new_st = self
+                .create_template(
+                    new_project_id,
+                    &st.name,
+                    *new_tt_id as i64,
+                    &st.line_delimiter,
+                    st.content_regex.as_deref(),
+                    st.continuation_regex.as_deref(),
+                    st.json_timestamp_field.as_deref(),
+                    st.file_name_regex.as_deref(),
+                    st.log_content_regex.as_deref(),
+                )
+                .await?;
+            st_id_map.insert(st.id, new_st.id);
+        }
+
+        // 3. Rules (with nested match/extraction rules)
+        for rule in &data.rules {
+            let create_match_rules: Vec<CreateMatchRule> = rule
+                .match_rules
+                .iter()
+                .map(|mr| CreateMatchRule {
+                    pattern: mr.pattern.clone(),
+                })
+                .collect();
+            let create_ext_rules: Vec<CreateExtractionRule> = rule
+                .extraction_rules
+                .iter()
+                .map(|er| CreateExtractionRule {
+                    extraction_type: er.extraction_type.clone(),
+                    state_key: er.state_key.clone(),
+                    pattern: er.pattern.clone(),
+                    static_value: er.static_value.clone(),
+                    mode: er.mode.clone(),
+                    event_text_only: er.event_text_only,
+                })
+                .collect();
+            let new_rule = self
+                .create_rule(
+                    new_project_id,
+                    &rule.name,
+                    &rule.match_mode,
+                    &create_match_rules,
+                    &create_ext_rules,
+                    rule.event_text.as_deref(),
+                )
+                .await?;
+            rule_id_map.insert(rule.id, new_rule.id);
+        }
+
+        // 4. Rulesets (remap template_id and rule_ids)
+        for rs in &data.rulesets {
+            let new_st_id = st_id_map.get(&rs.template_id).ok_or_else(|| {
+                DbError::InvalidData(format!(
+                    "ruleset '{}' references unknown template_id {}",
+                    rs.name, rs.template_id
+                ))
+            })?;
+            let remapped_rule_ids: Vec<i64> = rs
+                .rule_ids
+                .iter()
+                .map(|old_id| {
+                    rule_id_map
+                        .get(old_id)
+                        .map(|&new_id| new_id as i64)
+                        .ok_or_else(|| {
+                            DbError::InvalidData(format!(
+                                "ruleset '{}' references unknown rule_id {}",
+                                rs.name, old_id
+                            ))
+                        })
+                })
+                .collect::<Result<_, _>>()?;
+            self.create_ruleset(
+                new_project_id,
+                &rs.name,
+                *new_st_id as i64,
+                &remapped_rule_ids,
+            )
+            .await?;
+        }
+
+        // 5. Patterns (predicates reference ruleset names as strings — no ID remapping needed)
+        for pattern in &data.patterns {
+            let create_predicates: Vec<CreatePredicate> = pattern
+                .predicates
+                .iter()
+                .map(|p| CreatePredicate {
+                    ruleset_name: p.ruleset_name.clone(),
+                    state_key: p.state_key.clone(),
+                    operator: p.operator.clone(),
+                    operand: p.operand.clone(),
+                })
+                .collect();
+            self.create_pattern(new_project_id, &pattern.name, &create_predicates)
+                .await?;
+        }
+
+        // 6. Sources (remap template_id; copy file_path and color verbatim)
+        for source in &data.sources {
+            let new_template_id = st_id_map.get(&source.template_id).ok_or_else(|| {
+                DbError::InvalidData(format!(
+                    "source '{}' references unknown template_id {}",
+                    source.name, source.template_id
+                ))
+            })?;
+            self.create_source(
+                new_project_id,
+                *new_template_id as i64,
+                &source.name,
+                &source.file_path,
+                &source.color,
+            )
+            .await?;
+        }
+
+        Ok(ProjectRow {
+            id: new_project_id,
+            name: new_name.to_string(),
+            created_at,
+        })
+    }
+
+    // -----------------------------------------------------------------------
     // Load all project data (for analysis)
     // -----------------------------------------------------------------------
 
@@ -2200,6 +2371,126 @@ mod tests {
         assert_eq!(result.rules, 0);
         assert_eq!(result.rulesets, 0);
         assert_eq!(result.patterns, 0);
+    }
+
+    #[tokio::test]
+    async fn test_clone_project() {
+        let db = test_db().await;
+
+        // Build source project with full set of entities
+        let src = db.create_project("Source").await.unwrap();
+        let tt = db
+            .create_timestamp_template(
+                src.id,
+                "custom_ts",
+                "%Y-%m-%d",
+                Some(r"\[(.+?)\]"),
+                Some(2025),
+            )
+            .await
+            .unwrap();
+        let st = db
+            .create_template(
+                src.id,
+                "server_log",
+                tt.id as i64,
+                "\n",
+                Some(r"^\d+"),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let rule = db
+            .create_rule(
+                src.id,
+                "error_rule",
+                &MatchMode::Any,
+                &[CreateMatchRule {
+                    pattern: "ERROR".to_string(),
+                }],
+                &[CreateExtractionRule {
+                    extraction_type: ExtractionType::Static,
+                    state_key: "status".to_string(),
+                    pattern: None,
+                    static_value: Some("error".to_string()),
+                    mode: ExtractionMode::Replace,
+                    event_text_only: false,
+                }],
+                None,
+            )
+            .await
+            .unwrap();
+        db.create_ruleset(src.id, "main_rules", st.id as i64, &[rule.id as i64])
+            .await
+            .unwrap();
+        db.create_pattern(
+            src.id,
+            "failure_pattern",
+            &[CreatePredicate {
+                ruleset_name: "main_rules".to_string(),
+                state_key: "status".to_string(),
+                operator: Operator::Eq,
+                operand: Operand::Literal(StateValue::String("error".to_string())),
+            }],
+        )
+        .await
+        .unwrap();
+        db.create_source(
+            src.id,
+            st.id as i64,
+            "server.log",
+            "/var/log/server.log",
+            "#60a5fa",
+        )
+        .await
+        .unwrap();
+
+        // Clone the project
+        let clone = db.clone_project(src.id, "Cloned").await.unwrap();
+        assert_eq!(clone.name, "Cloned");
+        assert_ne!(clone.id, src.id);
+
+        // Load both projects' data and compare entity counts
+        let src_data = db.load_project_data(src.id).await.unwrap();
+        let clone_data = db.load_project_data(clone.id).await.unwrap();
+
+        // Source has 6 seeded + 1 custom TT.
+        // Clone gets 6 seeded (from create_project) + 7 copied = 13 TTs total.
+        assert_eq!(src_data.timestamp_templates.len(), 7);
+        assert_eq!(clone_data.timestamp_templates.len(), 13);
+
+        assert_eq!(src_data.templates.len(), clone_data.templates.len());
+        assert_eq!(src_data.rules.len(), clone_data.rules.len());
+        // Source has 2 rulesets: 1 auto-created default + 1 "main_rules".
+        // Clone gets 1 auto-created default (from create_template) + 2 copied = 3 total.
+        assert_eq!(src_data.rulesets.len(), 2);
+        assert_eq!(clone_data.rulesets.len(), 3);
+        assert_eq!(src_data.patterns.len(), clone_data.patterns.len());
+        assert_eq!(src_data.sources.len(), clone_data.sources.len());
+
+        // Verify file_path and color are preserved in sources
+        let clone_source = &clone_data.sources[0];
+        assert_eq!(clone_source.file_path, "/var/log/server.log");
+        assert_eq!(clone_source.color, "#60a5fa");
+
+        // Verify IDs are different (no shared references)
+        assert_ne!(clone_data.sources[0].id, src_data.sources[0].id);
+        assert_ne!(clone_data.templates[0].id, src_data.templates[0].id);
+        assert_ne!(clone_data.rules[0].id, src_data.rules[0].id);
+
+        // Verify cloned template points to a valid TT within the cloned project
+        let cloned_st = &clone_data.templates[0];
+        let cloned_tt = clone_data
+            .timestamp_templates
+            .iter()
+            .find(|t| t.id == cloned_st.timestamp_template_id)
+            .expect("cloned source template should reference a valid TT in cloned project");
+        assert_eq!(cloned_tt.name, "custom_ts");
+        assert_eq!(cloned_tt.extraction_regex.as_deref(), Some(r"\[(.+?)\]"));
+        assert_eq!(cloned_tt.default_year, Some(2025));
     }
 
     #[tokio::test]

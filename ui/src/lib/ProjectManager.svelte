@@ -22,6 +22,8 @@
   let editingId: number | null = $state(null);
   let editName = $state('');
   let starterMenuId: number | null = $state(null);
+  let cloningId: number | null = $state(null);
+  let cloneName = $state('');
 
   const STARTERS = [
     {
@@ -153,6 +155,29 @@
       editName = '';
     }
   }
+
+  function startClone(project: Project) {
+    cloningId = project.id;
+    cloneName = `${project.name} (copy)`;
+  }
+
+  function cancelClone() {
+    cloningId = null;
+    cloneName = '';
+  }
+
+  async function cloneProject(id: number) {
+    const trimmed = cloneName.trim();
+    if (!trimmed) return;
+    try {
+      const project = await projectsApi.clone(id, { name: trimmed });
+      cloningId = null;
+      cloneName = '';
+      onProjectCreated(project);
+    } catch (e: any) {
+      alert(e.message);
+    }
+  }
 </script>
 
 <h2>Projects</h2>
@@ -186,6 +211,16 @@
                 if (e.key === 'Escape') cancelRename();
               }}
             />
+          {:else if cloningId === project.id}
+            <input
+              type="text"
+              class="rename-input"
+              bind:value={cloneName}
+              onkeydown={(e) => {
+                if (e.key === 'Enter') cloneProject(project.id);
+                if (e.key === 'Escape') cancelClone();
+              }}
+            />
           {:else}
             <span class="project-name">{project.name}</span>
           {/if}
@@ -201,9 +236,19 @@
               Save
             </button>
             <button onclick={cancelRename}>Cancel</button>
+          {:else if cloningId === project.id}
+            <button
+              class="primary"
+              onclick={() => cloneProject(project.id)}
+              disabled={!cloneName.trim()}
+            >
+              Clone
+            </button>
+            <button onclick={cancelClone}>Cancel</button>
           {:else}
             <button onclick={() => onSelect(project.id)}>Open</button>
             <button onclick={() => startRename(project)}>Rename</button>
+            <button onclick={() => startClone(project)}>Clone</button>
             <button onclick={() => exportProject(project.id, project.name)}>Export</button>
             <button onclick={() => startImport(project.id)}>Import</button>
             <div class="starter-dropdown">
