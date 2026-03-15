@@ -184,12 +184,12 @@ pub enum Operator {
     Exists,
 }
 
-/// Operand - can be literal value or reference to another source's state.
+/// Operand - can be literal value or reference to another ruleset's state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Operand {
     Literal(StateValue),
     StateRef {
-        source_name: String,
+        ruleset_name: String,
         state_key: String,
     },
 }
@@ -197,7 +197,7 @@ pub enum Operand {
 /// A single predicate in a pattern.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PatternPredicate {
-    pub source_name: String,
+    pub ruleset_name: String,
     pub state_key: String,
     pub operator: Operator,
     pub operand: Operand,

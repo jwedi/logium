@@ -7,7 +7,10 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 
 use logium_core::model::*;
 
-use crate::routes::import_export::{ImportResult, ProjectExport};
+use crate::routes::import_export::{
+    EntitySelection, ImportAction, ImportItemStatus, ImportPreview, ImportResult, ImportSelections,
+    ProjectExport,
+};
 
 #[derive(Debug)]
 pub enum DbError {
@@ -1145,7 +1148,7 @@ impl Database {
 
     async fn get_predicates(&self, pattern_id: i64) -> Result<Vec<PatternPredicate>, DbError> {
         let rows = sqlx::query(
-            "SELECT source_name, state_key, operator, operand_type, operand_value
+            "SELECT ruleset_name, state_key, operator, operand_type, operand_value
              FROM pattern_predicates WHERE pattern_id = ? ORDER BY order_index",
         )
         .bind(pattern_id)
@@ -1217,12 +1220,12 @@ impl Database {
         for (idx, p) in predicates.iter().enumerate() {
             let (operand_type, operand_value) = serialize_operand(&p.operand);
             sqlx::query(
-                "INSERT INTO pattern_predicates (pattern_id, order_index, source_name, state_key, operator, operand_type, operand_value)
+                "INSERT INTO pattern_predicates (pattern_id, order_index, ruleset_name, state_key, operator, operand_type, operand_value)
                  VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(pattern_id)
             .bind(idx as i64)
-            .bind(&p.source_name)
+            .bind(&p.ruleset_name)
             .bind(&p.state_key)
             .bind(operator_to_str(&p.operator))
             .bind(operand_type)
@@ -1231,7 +1234,7 @@ impl Database {
             .await?;
 
             built.push(PatternPredicate {
-                source_name: p.source_name.clone(),
+                ruleset_name: p.ruleset_name.clone(),
                 state_key: p.state_key.clone(),
                 operator: p.operator.clone(),
                 operand: p.operand.clone(),
@@ -1364,13 +1367,13 @@ impl Database {
                 .await?;
         }
 
-        // 5. Patterns (predicates use source_name strings, no ID FKs)
+        // 5. Patterns (predicates use ruleset_name strings, no ID FKs)
         for pattern in &data.patterns {
             let create_predicates: Vec<CreatePredicate> = pattern
                 .predicates
                 .iter()
                 .map(|p| CreatePredicate {
-                    source_name: p.source_name.clone(),
+                    ruleset_name: p.ruleset_name.clone(),
                     state_key: p.state_key.clone(),
                     operator: p.operator.clone(),
                     operand: p.operand.clone(),
@@ -1386,6 +1389,594 @@ impl Database {
             rules: data.rules.len(),
             rulesets: data.rulesets.len(),
             patterns: data.patterns.len(),
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Import preview
+    // -----------------------------------------------------------------------
+
+    pub async fn get_import_preview(
+        &self,
+        project_id: i64,
+        export: &ProjectExport,
+    ) -> Result<ImportPreview, DbError> {
+        let existing_tts = self.list_timestamp_templates(project_id).await?;
+        let existing_sts = self.list_templates(project_id).await?;
+        let existing_rules = self.list_rules(project_id).await?;
+        let existing_rulesets = self.list_rulesets(project_id).await?;
+        let existing_patterns = self.list_patterns(project_id).await?;
+
+        let tt_map: HashMap<&str, u64> = existing_tts
+            .iter()
+            .map(|e| (e.name.as_str(), e.id))
+            .collect();
+        let st_map: HashMap<&str, u64> = existing_sts
+            .iter()
+            .map(|e| (e.name.as_str(), e.id))
+            .collect();
+        let r_map: HashMap<&str, u64> = existing_rules
+            .iter()
+            .map(|e| (e.name.as_str(), e.id))
+            .collect();
+        let rs_map: HashMap<&str, u64> = existing_rulesets
+            .iter()
+            .map(|e| (e.name.as_str(), e.id))
+            .collect();
+        let pat_map: HashMap<&str, u64> = existing_patterns
+            .iter()
+            .map(|e| (e.name.as_str(), e.id))
+            .collect();
+
+        Ok(ImportPreview {
+            timestamp_templates: export
+                .timestamp_templates
+                .iter()
+                .map(|t| ImportItemStatus {
+                    export_id: t.id,
+                    name: t.name.clone(),
+                    existing_id: tt_map.get(t.name.as_str()).copied(),
+                })
+                .collect(),
+            source_templates: export
+                .source_templates
+                .iter()
+                .map(|t| ImportItemStatus {
+                    export_id: t.id,
+                    name: t.name.clone(),
+                    existing_id: st_map.get(t.name.as_str()).copied(),
+                })
+                .collect(),
+            rules: export
+                .rules
+                .iter()
+                .map(|r| ImportItemStatus {
+                    export_id: r.id,
+                    name: r.name.clone(),
+                    existing_id: r_map.get(r.name.as_str()).copied(),
+                })
+                .collect(),
+            rulesets: export
+                .rulesets
+                .iter()
+                .map(|r| ImportItemStatus {
+                    export_id: r.id,
+                    name: r.name.clone(),
+                    existing_id: rs_map.get(r.name.as_str()).copied(),
+                })
+                .collect(),
+            patterns: export
+                .patterns
+                .iter()
+                .map(|p| ImportItemStatus {
+                    export_id: p.id,
+                    name: p.name.clone(),
+                    existing_id: pat_map.get(p.name.as_str()).copied(),
+                })
+                .collect(),
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Selective import
+    // -----------------------------------------------------------------------
+
+    pub async fn selective_import_project_config(
+        &self,
+        project_id: i64,
+        data: &ProjectExport,
+        selections: &ImportSelections,
+    ) -> Result<ImportResult, DbError> {
+        // Build lookup maps: export_id → EntitySelection
+        let tt_sel: HashMap<u64, &EntitySelection> = selections
+            .timestamp_templates
+            .iter()
+            .map(|s| (s.export_id, s))
+            .collect();
+        let st_sel: HashMap<u64, &EntitySelection> = selections
+            .source_templates
+            .iter()
+            .map(|s| (s.export_id, s))
+            .collect();
+        let r_sel: HashMap<u64, &EntitySelection> =
+            selections.rules.iter().map(|s| (s.export_id, s)).collect();
+        let rs_sel: HashMap<u64, &EntitySelection> = selections
+            .rulesets
+            .iter()
+            .map(|s| (s.export_id, s))
+            .collect();
+        let pat_sel: HashMap<u64, &EntitySelection> = selections
+            .patterns
+            .iter()
+            .map(|s| (s.export_id, s))
+            .collect();
+
+        let mut tt_id_map: HashMap<u64, u64> = HashMap::new();
+        let mut st_id_map: HashMap<u64, u64> = HashMap::new();
+        let mut rule_id_map: HashMap<u64, u64> = HashMap::new();
+        let mut counts = ImportResult {
+            timestamp_templates: 0,
+            source_templates: 0,
+            rules: 0,
+            rulesets: 0,
+            patterns: 0,
+        };
+
+        // 1. Timestamp templates
+        for tt in &data.timestamp_templates {
+            let sel = tt_sel.get(&tt.id);
+            let action = sel.map(|s| &s.action).unwrap_or(&ImportAction::Skip);
+            match action {
+                ImportAction::Skip => {}
+                ImportAction::Add => {
+                    let new_tt = self
+                        .create_timestamp_template(
+                            project_id,
+                            &tt.name,
+                            &tt.format,
+                            tt.extraction_regex.as_deref(),
+                            tt.default_year,
+                        )
+                        .await?;
+                    tt_id_map.insert(tt.id, new_tt.id);
+                    counts.timestamp_templates += 1;
+                }
+                ImportAction::Overwrite => {
+                    let existing_id = sel.and_then(|s| s.existing_id).ok_or_else(|| {
+                        DbError::InvalidData(format!(
+                            "overwrite for timestamp template '{}' requires existing_id",
+                            tt.name
+                        ))
+                    })?;
+                    self.update_timestamp_template(
+                        project_id,
+                        existing_id as i64,
+                        &tt.name,
+                        &tt.format,
+                        tt.extraction_regex.as_deref(),
+                        tt.default_year,
+                    )
+                    .await?;
+                    tt_id_map.insert(tt.id, existing_id);
+                    counts.timestamp_templates += 1;
+                }
+            }
+        }
+
+        // 2. Source templates
+        for st in &data.source_templates {
+            let sel = st_sel.get(&st.id);
+            let action = sel.map(|s| &s.action).unwrap_or(&ImportAction::Skip);
+            match action {
+                ImportAction::Skip => {}
+                ImportAction::Add => {
+                    let new_tt_id =
+                        tt_id_map.get(&st.timestamp_template_id).ok_or_else(|| {
+                            DbError::InvalidData(format!(
+                                "source template '{}' references timestamp_template_id {} which was skipped or missing",
+                                st.name, st.timestamp_template_id
+                            ))
+                        })?;
+                    let new_st = self
+                        .create_template(
+                            project_id,
+                            &st.name,
+                            *new_tt_id as i64,
+                            &st.line_delimiter,
+                            st.content_regex.as_deref(),
+                            st.continuation_regex.as_deref(),
+                            st.json_timestamp_field.as_deref(),
+                            st.file_name_regex.as_deref(),
+                            st.log_content_regex.as_deref(),
+                        )
+                        .await?;
+                    st_id_map.insert(st.id, new_st.id);
+                    counts.source_templates += 1;
+                }
+                ImportAction::Overwrite => {
+                    let existing_id = sel.and_then(|s| s.existing_id).ok_or_else(|| {
+                        DbError::InvalidData(format!(
+                            "overwrite for source template '{}' requires existing_id",
+                            st.name
+                        ))
+                    })?;
+                    let new_tt_id =
+                        tt_id_map.get(&st.timestamp_template_id).ok_or_else(|| {
+                            DbError::InvalidData(format!(
+                                "source template '{}' references timestamp_template_id {} which was skipped or missing",
+                                st.name, st.timestamp_template_id
+                            ))
+                        })?;
+                    self.update_template(
+                        project_id,
+                        existing_id as i64,
+                        &st.name,
+                        *new_tt_id as i64,
+                        &st.line_delimiter,
+                        st.content_regex.as_deref(),
+                        st.continuation_regex.as_deref(),
+                        st.json_timestamp_field.as_deref(),
+                        st.file_name_regex.as_deref(),
+                        st.log_content_regex.as_deref(),
+                    )
+                    .await?;
+                    st_id_map.insert(st.id, existing_id);
+                    counts.source_templates += 1;
+                }
+            }
+        }
+
+        // 3. Rules
+        for rule in &data.rules {
+            let sel = r_sel.get(&rule.id);
+            let action = sel.map(|s| &s.action).unwrap_or(&ImportAction::Skip);
+            let create_match_rules: Vec<CreateMatchRule> = rule
+                .match_rules
+                .iter()
+                .map(|mr| CreateMatchRule {
+                    pattern: mr.pattern.clone(),
+                })
+                .collect();
+            let create_ext_rules: Vec<CreateExtractionRule> = rule
+                .extraction_rules
+                .iter()
+                .map(|er| CreateExtractionRule {
+                    extraction_type: er.extraction_type.clone(),
+                    state_key: er.state_key.clone(),
+                    pattern: er.pattern.clone(),
+                    static_value: er.static_value.clone(),
+                    mode: er.mode.clone(),
+                    event_text_only: er.event_text_only,
+                })
+                .collect();
+            match action {
+                ImportAction::Skip => {}
+                ImportAction::Add => {
+                    let new_rule = self
+                        .create_rule(
+                            project_id,
+                            &rule.name,
+                            &rule.match_mode,
+                            &create_match_rules,
+                            &create_ext_rules,
+                            rule.event_text.as_deref(),
+                        )
+                        .await?;
+                    rule_id_map.insert(rule.id, new_rule.id);
+                    counts.rules += 1;
+                }
+                ImportAction::Overwrite => {
+                    let existing_id = sel.and_then(|s| s.existing_id).ok_or_else(|| {
+                        DbError::InvalidData(format!(
+                            "overwrite for rule '{}' requires existing_id",
+                            rule.name
+                        ))
+                    })?;
+                    self.update_rule(
+                        project_id,
+                        existing_id as i64,
+                        &rule.name,
+                        &rule.match_mode,
+                        &create_match_rules,
+                        &create_ext_rules,
+                        rule.event_text.as_deref(),
+                    )
+                    .await?;
+                    rule_id_map.insert(rule.id, existing_id);
+                    counts.rules += 1;
+                }
+            }
+        }
+
+        // 4. Rulesets
+        for rs in &data.rulesets {
+            let sel = rs_sel.get(&rs.id);
+            let action = sel.map(|s| &s.action).unwrap_or(&ImportAction::Skip);
+            match action {
+                ImportAction::Skip => {}
+                ImportAction::Add => {
+                    let new_st_id = st_id_map.get(&rs.template_id).ok_or_else(|| {
+                        DbError::InvalidData(format!(
+                            "ruleset '{}' references template_id {} which was skipped or missing",
+                            rs.name, rs.template_id
+                        ))
+                    })?;
+                    let remapped_rule_ids: Vec<i64> = rs
+                        .rule_ids
+                        .iter()
+                        .map(|old_id| {
+                            rule_id_map
+                                .get(old_id)
+                                .map(|&new_id| new_id as i64)
+                                .ok_or_else(|| {
+                                    DbError::InvalidData(format!(
+                                        "ruleset '{}' references rule_id {} which was skipped or missing",
+                                        rs.name, old_id
+                                    ))
+                                })
+                        })
+                        .collect::<Result<_, _>>()?;
+                    self.create_ruleset(
+                        project_id,
+                        &rs.name,
+                        *new_st_id as i64,
+                        &remapped_rule_ids,
+                    )
+                    .await?;
+                    counts.rulesets += 1;
+                }
+                ImportAction::Overwrite => {
+                    let existing_id = sel.and_then(|s| s.existing_id).ok_or_else(|| {
+                        DbError::InvalidData(format!(
+                            "overwrite for ruleset '{}' requires existing_id",
+                            rs.name
+                        ))
+                    })?;
+                    let new_st_id = st_id_map.get(&rs.template_id).ok_or_else(|| {
+                        DbError::InvalidData(format!(
+                            "ruleset '{}' references template_id {} which was skipped or missing",
+                            rs.name, rs.template_id
+                        ))
+                    })?;
+                    let remapped_rule_ids: Vec<i64> = rs
+                        .rule_ids
+                        .iter()
+                        .map(|old_id| {
+                            rule_id_map
+                                .get(old_id)
+                                .map(|&new_id| new_id as i64)
+                                .ok_or_else(|| {
+                                    DbError::InvalidData(format!(
+                                        "ruleset '{}' references rule_id {} which was skipped or missing",
+                                        rs.name, old_id
+                                    ))
+                                })
+                        })
+                        .collect::<Result<_, _>>()?;
+                    self.update_ruleset(
+                        project_id,
+                        existing_id as i64,
+                        &rs.name,
+                        *new_st_id as i64,
+                        &remapped_rule_ids,
+                    )
+                    .await?;
+                    counts.rulesets += 1;
+                }
+            }
+        }
+
+        // 5. Patterns
+        for pattern in &data.patterns {
+            let sel = pat_sel.get(&pattern.id);
+            let action = sel.map(|s| &s.action).unwrap_or(&ImportAction::Skip);
+            let create_predicates: Vec<CreatePredicate> = pattern
+                .predicates
+                .iter()
+                .map(|p| CreatePredicate {
+                    ruleset_name: p.ruleset_name.clone(),
+                    state_key: p.state_key.clone(),
+                    operator: p.operator.clone(),
+                    operand: p.operand.clone(),
+                })
+                .collect();
+            match action {
+                ImportAction::Skip => {}
+                ImportAction::Add => {
+                    self.create_pattern(project_id, &pattern.name, &create_predicates)
+                        .await?;
+                    counts.patterns += 1;
+                }
+                ImportAction::Overwrite => {
+                    let existing_id = sel.and_then(|s| s.existing_id).ok_or_else(|| {
+                        DbError::InvalidData(format!(
+                            "overwrite for pattern '{}' requires existing_id",
+                            pattern.name
+                        ))
+                    })?;
+                    self.update_pattern(
+                        project_id,
+                        existing_id as i64,
+                        &pattern.name,
+                        &create_predicates,
+                    )
+                    .await?;
+                    counts.patterns += 1;
+                }
+            }
+        }
+
+        Ok(counts)
+    }
+
+    // -----------------------------------------------------------------------
+    // Clone project
+    // -----------------------------------------------------------------------
+
+    pub async fn clone_project(
+        &self,
+        source_id: i64,
+        new_name: &str,
+    ) -> Result<ProjectRow, DbError> {
+        let created_at = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let new_project_id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO projects (name, created_at) VALUES (?, ?) RETURNING id",
+        )
+        .bind(new_name)
+        .bind(&created_at)
+        .fetch_one(&self.pool)
+        .await?;
+        self.seed_default_timestamp_templates(new_project_id)
+            .await?;
+
+        let data = self.load_project_data(source_id).await?;
+
+        let mut tt_id_map: HashMap<u64, u64> = HashMap::new();
+        let mut st_id_map: HashMap<u64, u64> = HashMap::new();
+        let mut rule_id_map: HashMap<u64, u64> = HashMap::new();
+
+        // 1. Timestamp templates
+        for tt in &data.timestamp_templates {
+            let new_tt = self
+                .create_timestamp_template(
+                    new_project_id,
+                    &tt.name,
+                    &tt.format,
+                    tt.extraction_regex.as_deref(),
+                    tt.default_year,
+                )
+                .await?;
+            tt_id_map.insert(tt.id, new_tt.id);
+        }
+
+        // 2. Source templates (remap timestamp_template_id)
+        for st in &data.templates {
+            let new_tt_id = tt_id_map.get(&st.timestamp_template_id).ok_or_else(|| {
+                DbError::InvalidData(format!(
+                    "source template '{}' references unknown tt_id {}",
+                    st.name, st.timestamp_template_id
+                ))
+            })?;
+            let new_st = self
+                .create_template(
+                    new_project_id,
+                    &st.name,
+                    *new_tt_id as i64,
+                    &st.line_delimiter,
+                    st.content_regex.as_deref(),
+                    st.continuation_regex.as_deref(),
+                    st.json_timestamp_field.as_deref(),
+                    st.file_name_regex.as_deref(),
+                    st.log_content_regex.as_deref(),
+                )
+                .await?;
+            st_id_map.insert(st.id, new_st.id);
+        }
+
+        // 3. Rules (with nested match/extraction rules)
+        for rule in &data.rules {
+            let create_match_rules: Vec<CreateMatchRule> = rule
+                .match_rules
+                .iter()
+                .map(|mr| CreateMatchRule {
+                    pattern: mr.pattern.clone(),
+                })
+                .collect();
+            let create_ext_rules: Vec<CreateExtractionRule> = rule
+                .extraction_rules
+                .iter()
+                .map(|er| CreateExtractionRule {
+                    extraction_type: er.extraction_type.clone(),
+                    state_key: er.state_key.clone(),
+                    pattern: er.pattern.clone(),
+                    static_value: er.static_value.clone(),
+                    mode: er.mode.clone(),
+                    event_text_only: er.event_text_only,
+                })
+                .collect();
+            let new_rule = self
+                .create_rule(
+                    new_project_id,
+                    &rule.name,
+                    &rule.match_mode,
+                    &create_match_rules,
+                    &create_ext_rules,
+                    rule.event_text.as_deref(),
+                )
+                .await?;
+            rule_id_map.insert(rule.id, new_rule.id);
+        }
+
+        // 4. Rulesets (remap template_id and rule_ids)
+        for rs in &data.rulesets {
+            let new_st_id = st_id_map.get(&rs.template_id).ok_or_else(|| {
+                DbError::InvalidData(format!(
+                    "ruleset '{}' references unknown template_id {}",
+                    rs.name, rs.template_id
+                ))
+            })?;
+            let remapped_rule_ids: Vec<i64> = rs
+                .rule_ids
+                .iter()
+                .map(|old_id| {
+                    rule_id_map
+                        .get(old_id)
+                        .map(|&new_id| new_id as i64)
+                        .ok_or_else(|| {
+                            DbError::InvalidData(format!(
+                                "ruleset '{}' references unknown rule_id {}",
+                                rs.name, old_id
+                            ))
+                        })
+                })
+                .collect::<Result<_, _>>()?;
+            self.create_ruleset(
+                new_project_id,
+                &rs.name,
+                *new_st_id as i64,
+                &remapped_rule_ids,
+            )
+            .await?;
+        }
+
+        // 5. Patterns (predicates reference ruleset names as strings — no ID remapping needed)
+        for pattern in &data.patterns {
+            let create_predicates: Vec<CreatePredicate> = pattern
+                .predicates
+                .iter()
+                .map(|p| CreatePredicate {
+                    ruleset_name: p.ruleset_name.clone(),
+                    state_key: p.state_key.clone(),
+                    operator: p.operator.clone(),
+                    operand: p.operand.clone(),
+                })
+                .collect();
+            self.create_pattern(new_project_id, &pattern.name, &create_predicates)
+                .await?;
+        }
+
+        // 6. Sources (remap template_id; copy file_path and color verbatim)
+        for source in &data.sources {
+            let new_template_id = st_id_map.get(&source.template_id).ok_or_else(|| {
+                DbError::InvalidData(format!(
+                    "source '{}' references unknown template_id {}",
+                    source.name, source.template_id
+                ))
+            })?;
+            self.create_source(
+                new_project_id,
+                *new_template_id as i64,
+                &source.name,
+                &source.file_path,
+                &source.color,
+            )
+            .await?;
+        }
+
+        Ok(ProjectRow {
+            id: new_project_id,
+            name: new_name.to_string(),
+            created_at,
         })
     }
 
@@ -1452,7 +2043,7 @@ pub struct CreateExtractionRule {
 /// Input type for creating pattern predicates (no id yet).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CreatePredicate {
-    pub source_name: String,
+    pub ruleset_name: String,
     pub state_key: String,
     pub operator: Operator,
     pub operand: Operand,
@@ -1493,7 +2084,7 @@ fn row_to_source(row: &sqlx::sqlite::SqliteRow) -> Source {
 }
 
 fn row_to_predicate(row: &sqlx::sqlite::SqliteRow) -> Result<PatternPredicate, DbError> {
-    let source_name: String = row.get("source_name");
+    let ruleset_name: String = row.get("ruleset_name");
     let state_key: String = row.get("state_key");
     let operator_str: String = row.get("operator");
     let operand_type: String = row.get("operand_type");
@@ -1503,7 +2094,7 @@ fn row_to_predicate(row: &sqlx::sqlite::SqliteRow) -> Result<PatternPredicate, D
     let operand = deserialize_operand(&operand_type, &operand_value)?;
 
     Ok(PatternPredicate {
-        source_name,
+        ruleset_name,
         state_key,
         operator,
         operand,
@@ -1599,11 +2190,11 @@ fn serialize_operand(operand: &Operand) -> (&'static str, String) {
             ("literal", json)
         }
         Operand::StateRef {
-            source_name,
+            ruleset_name,
             state_key,
         } => {
             let json = serde_json::json!({
-                "source_name": source_name,
+                "ruleset_name": ruleset_name,
                 "state_key": state_key,
             })
             .to_string();
@@ -1623,16 +2214,19 @@ fn deserialize_operand(operand_type: &str, operand_value: &str) -> Result<Operan
             let obj: serde_json::Value = serde_json::from_str(operand_value).map_err(|e| {
                 DbError::InvalidData(format!("invalid state_ref operand JSON: {e}"))
             })?;
-            let source_name = obj["source_name"]
-                .as_str()
-                .ok_or_else(|| DbError::InvalidData("missing source_name in state_ref".into()))?
+            // Support both old "source_name" key (legacy) and new "ruleset_name" key.
+            let ruleset_name = obj
+                .get("ruleset_name")
+                .or_else(|| obj.get("source_name"))
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| DbError::InvalidData("missing ruleset_name in state_ref".into()))?
                 .to_string();
             let state_key = obj["state_key"]
                 .as_str()
                 .ok_or_else(|| DbError::InvalidData("missing state_key in state_ref".into()))?
                 .to_string();
             Ok(Operand::StateRef {
-                source_name,
+                ruleset_name,
                 state_key,
             })
         }
@@ -1936,13 +2530,13 @@ mod tests {
                 "test_pattern",
                 &[
                     CreatePredicate {
-                        source_name: "server".to_string(),
+                        ruleset_name: "server_rs".to_string(),
                         state_key: "status".to_string(),
                         operator: Operator::Eq,
                         operand: Operand::Literal(StateValue::String("running".to_string())),
                     },
                     CreatePredicate {
-                        source_name: "server".to_string(),
+                        ruleset_name: "server_rs".to_string(),
                         state_key: "count".to_string(),
                         operator: Operator::Gt,
                         operand: Operand::Literal(StateValue::Integer(10)),
@@ -1952,7 +2546,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(pattern.predicates.len(), 2);
-        assert_eq!(pattern.predicates[0].source_name, "server");
+        assert_eq!(pattern.predicates[0].ruleset_name, "server_rs");
 
         // Verify operand round-trip
         if let Operand::Literal(StateValue::String(ref s)) = pattern.predicates[0].operand {
@@ -1991,11 +2585,11 @@ mod tests {
                 p.id,
                 "cross_source",
                 &[CreatePredicate {
-                    source_name: "server".to_string(),
+                    ruleset_name: "server_rs".to_string(),
                     state_key: "region".to_string(),
                     operator: Operator::Eq,
                     operand: Operand::StateRef {
-                        source_name: "client".to_string(),
+                        ruleset_name: "client_rs".to_string(),
                         state_key: "region".to_string(),
                     },
                 }],
@@ -2005,11 +2599,11 @@ mod tests {
 
         let fetched = db.get_pattern(p.id, pattern.id as i64).await.unwrap();
         if let Operand::StateRef {
-            ref source_name,
+            ref ruleset_name,
             ref state_key,
         } = fetched.predicates[0].operand
         {
-            assert_eq!(source_name, "client");
+            assert_eq!(ruleset_name, "client_rs");
             assert_eq!(state_key, "region");
         } else {
             panic!("expected state_ref operand");
@@ -2110,7 +2704,7 @@ mod tests {
             src.id,
             "failure_pattern",
             &[CreatePredicate {
-                source_name: "server".to_string(),
+                ruleset_name: "main_rules".to_string(),
                 state_key: "status".to_string(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("error".to_string())),
@@ -2197,6 +2791,126 @@ mod tests {
         assert_eq!(result.rules, 0);
         assert_eq!(result.rulesets, 0);
         assert_eq!(result.patterns, 0);
+    }
+
+    #[tokio::test]
+    async fn test_clone_project() {
+        let db = test_db().await;
+
+        // Build source project with full set of entities
+        let src = db.create_project("Source").await.unwrap();
+        let tt = db
+            .create_timestamp_template(
+                src.id,
+                "custom_ts",
+                "%Y-%m-%d",
+                Some(r"\[(.+?)\]"),
+                Some(2025),
+            )
+            .await
+            .unwrap();
+        let st = db
+            .create_template(
+                src.id,
+                "server_log",
+                tt.id as i64,
+                "\n",
+                Some(r"^\d+"),
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let rule = db
+            .create_rule(
+                src.id,
+                "error_rule",
+                &MatchMode::Any,
+                &[CreateMatchRule {
+                    pattern: "ERROR".to_string(),
+                }],
+                &[CreateExtractionRule {
+                    extraction_type: ExtractionType::Static,
+                    state_key: "status".to_string(),
+                    pattern: None,
+                    static_value: Some("error".to_string()),
+                    mode: ExtractionMode::Replace,
+                    event_text_only: false,
+                }],
+                None,
+            )
+            .await
+            .unwrap();
+        db.create_ruleset(src.id, "main_rules", st.id as i64, &[rule.id as i64])
+            .await
+            .unwrap();
+        db.create_pattern(
+            src.id,
+            "failure_pattern",
+            &[CreatePredicate {
+                ruleset_name: "main_rules".to_string(),
+                state_key: "status".to_string(),
+                operator: Operator::Eq,
+                operand: Operand::Literal(StateValue::String("error".to_string())),
+            }],
+        )
+        .await
+        .unwrap();
+        db.create_source(
+            src.id,
+            st.id as i64,
+            "server.log",
+            "/var/log/server.log",
+            "#60a5fa",
+        )
+        .await
+        .unwrap();
+
+        // Clone the project
+        let clone = db.clone_project(src.id, "Cloned").await.unwrap();
+        assert_eq!(clone.name, "Cloned");
+        assert_ne!(clone.id, src.id);
+
+        // Load both projects' data and compare entity counts
+        let src_data = db.load_project_data(src.id).await.unwrap();
+        let clone_data = db.load_project_data(clone.id).await.unwrap();
+
+        // Source has 6 seeded + 1 custom TT.
+        // Clone gets 6 seeded (from create_project) + 7 copied = 13 TTs total.
+        assert_eq!(src_data.timestamp_templates.len(), 7);
+        assert_eq!(clone_data.timestamp_templates.len(), 13);
+
+        assert_eq!(src_data.templates.len(), clone_data.templates.len());
+        assert_eq!(src_data.rules.len(), clone_data.rules.len());
+        // Source has 2 rulesets: 1 auto-created default + 1 "main_rules".
+        // Clone gets 1 auto-created default (from create_template) + 2 copied = 3 total.
+        assert_eq!(src_data.rulesets.len(), 2);
+        assert_eq!(clone_data.rulesets.len(), 3);
+        assert_eq!(src_data.patterns.len(), clone_data.patterns.len());
+        assert_eq!(src_data.sources.len(), clone_data.sources.len());
+
+        // Verify file_path and color are preserved in sources
+        let clone_source = &clone_data.sources[0];
+        assert_eq!(clone_source.file_path, "/var/log/server.log");
+        assert_eq!(clone_source.color, "#60a5fa");
+
+        // Verify IDs are different (no shared references)
+        assert_ne!(clone_data.sources[0].id, src_data.sources[0].id);
+        assert_ne!(clone_data.templates[0].id, src_data.templates[0].id);
+        assert_ne!(clone_data.rules[0].id, src_data.rules[0].id);
+
+        // Verify cloned template points to a valid TT within the cloned project
+        let cloned_st = &clone_data.templates[0];
+        let cloned_tt = clone_data
+            .timestamp_templates
+            .iter()
+            .find(|t| t.id == cloned_st.timestamp_template_id)
+            .expect("cloned source template should reference a valid TT in cloned project");
+        assert_eq!(cloned_tt.name, "custom_ts");
+        assert_eq!(cloned_tt.extraction_regex.as_deref(), Some(r"\[(.+?)\]"));
+        assert_eq!(cloned_tt.default_year, Some(2025));
     }
 
     #[tokio::test]
@@ -2466,5 +3180,369 @@ mod tests {
         let templates = db2.list_templates(p.id).await.unwrap();
         assert_eq!(templates.len(), 1);
         assert_eq!(templates[0].name, "tmpl");
+    }
+
+    // -----------------------------------------------------------------------
+    // Selective import tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_import_preview() {
+        use crate::routes::import_export::ProjectExport;
+
+        let db = test_db().await;
+        let p = db.create_project("P1").await.unwrap();
+
+        // Create one entity of each type in the project
+        let existing_tt = db
+            .create_timestamp_template(p.id, "existing_tt", "%Y-%m-%d", None, None)
+            .await
+            .unwrap();
+        let existing_st = db
+            .create_template(
+                p.id,
+                "existing_st",
+                existing_tt.id as i64,
+                "\n",
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let existing_rule = db
+            .create_rule(p.id, "existing_rule", &MatchMode::Any, &[], &[], None)
+            .await
+            .unwrap();
+        let existing_rs = db
+            .create_ruleset(p.id, "existing_rs", existing_st.id as i64, &[])
+            .await
+            .unwrap();
+        let existing_pat = db.create_pattern(p.id, "existing_pat", &[]).await.unwrap();
+
+        // Build export with both conflicting and new names
+        let export = ProjectExport {
+            version: 1,
+            timestamp_templates: vec![
+                existing_tt.clone(),
+                TimestampTemplate {
+                    id: 9999,
+                    name: "new_tt".to_string(),
+                    format: "%H:%M".to_string(),
+                    extraction_regex: None,
+                    default_year: None,
+                },
+            ],
+            source_templates: vec![
+                existing_st.clone(),
+                SourceTemplate {
+                    id: 9998,
+                    name: "new_st".to_string(),
+                    timestamp_template_id: existing_tt.id,
+                    line_delimiter: "\n".to_string(),
+                    content_regex: None,
+                    continuation_regex: None,
+                    json_timestamp_field: None,
+                    file_name_regex: None,
+                    log_content_regex: None,
+                },
+            ],
+            rules: vec![
+                existing_rule.clone(),
+                LogRule {
+                    id: 9997,
+                    name: "new_rule".to_string(),
+                    match_mode: MatchMode::Any,
+                    match_rules: vec![],
+                    extraction_rules: vec![],
+                    event_text: None,
+                },
+            ],
+            rulesets: vec![
+                existing_rs.clone(),
+                Ruleset {
+                    id: 9996,
+                    name: "new_rs".to_string(),
+                    template_id: existing_st.id,
+                    rule_ids: vec![],
+                },
+            ],
+            patterns: vec![
+                existing_pat.clone(),
+                Pattern {
+                    id: 9995,
+                    name: "new_pat".to_string(),
+                    predicates: vec![],
+                },
+            ],
+        };
+
+        let preview = db.get_import_preview(p.id, &export).await.unwrap();
+
+        // Conflicting names should have existing_id = Some(...)
+        assert_eq!(
+            preview.timestamp_templates[0].existing_id,
+            Some(existing_tt.id)
+        );
+        assert_eq!(
+            preview.source_templates[0].existing_id,
+            Some(existing_st.id)
+        );
+        assert_eq!(preview.rules[0].existing_id, Some(existing_rule.id));
+        assert_eq!(preview.rulesets[0].existing_id, Some(existing_rs.id));
+        assert_eq!(preview.patterns[0].existing_id, Some(existing_pat.id));
+
+        // New names should have existing_id = None
+        assert_eq!(preview.timestamp_templates[1].existing_id, None);
+        assert_eq!(preview.source_templates[1].existing_id, None);
+        assert_eq!(preview.rules[1].existing_id, None);
+        assert_eq!(preview.rulesets[1].existing_id, None);
+        assert_eq!(preview.patterns[1].existing_id, None);
+
+        // Names are preserved
+        assert_eq!(preview.timestamp_templates[0].name, "existing_tt");
+        assert_eq!(preview.timestamp_templates[1].name, "new_tt");
+    }
+
+    #[tokio::test]
+    async fn test_selective_import_add() {
+        use crate::routes::import_export::{EntitySelection, ImportAction, ImportSelections};
+
+        let db = test_db().await;
+        let p = db.create_project("P1").await.unwrap();
+        // Only seeded TTs exist at start
+        let initial_tts = db.list_timestamp_templates(p.id).await.unwrap();
+        let initial_rules = db.list_rules(p.id).await.unwrap();
+        let initial_pats = db.list_patterns(p.id).await.unwrap();
+
+        // Build a small export
+        let export_tt = TimestampTemplate {
+            id: 100,
+            name: "my_tt".to_string(),
+            format: "%Y-%m-%d".to_string(),
+            extraction_regex: None,
+            default_year: None,
+        };
+        let export_st = SourceTemplate {
+            id: 200,
+            name: "my_st".to_string(),
+            timestamp_template_id: 100,
+            line_delimiter: "\n".to_string(),
+            content_regex: None,
+            continuation_regex: None,
+            json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
+        };
+        let export_rule = LogRule {
+            id: 300,
+            name: "my_rule".to_string(),
+            match_mode: MatchMode::Any,
+            match_rules: vec![],
+            extraction_rules: vec![],
+            event_text: None,
+        };
+        let export_rs = Ruleset {
+            id: 400,
+            name: "my_rs".to_string(),
+            template_id: 200,
+            rule_ids: vec![300],
+        };
+        let export_pat = Pattern {
+            id: 500,
+            name: "my_pat".to_string(),
+            predicates: vec![],
+        };
+
+        let export = crate::routes::import_export::ProjectExport {
+            version: 1,
+            timestamp_templates: vec![export_tt],
+            source_templates: vec![export_st],
+            rules: vec![export_rule],
+            rulesets: vec![export_rs],
+            patterns: vec![export_pat],
+        };
+
+        let selections = ImportSelections {
+            timestamp_templates: vec![EntitySelection {
+                export_id: 100,
+                action: ImportAction::Add,
+                existing_id: None,
+            }],
+            source_templates: vec![EntitySelection {
+                export_id: 200,
+                action: ImportAction::Add,
+                existing_id: None,
+            }],
+            rules: vec![EntitySelection {
+                export_id: 300,
+                action: ImportAction::Add,
+                existing_id: None,
+            }],
+            rulesets: vec![EntitySelection {
+                export_id: 400,
+                action: ImportAction::Add,
+                existing_id: None,
+            }],
+            patterns: vec![EntitySelection {
+                export_id: 500,
+                action: ImportAction::Add,
+                existing_id: None,
+            }],
+        };
+
+        let result = db
+            .selective_import_project_config(p.id, &export, &selections)
+            .await
+            .unwrap();
+
+        assert_eq!(result.timestamp_templates, 1);
+        assert_eq!(result.source_templates, 1);
+        assert_eq!(result.rules, 1);
+        assert_eq!(result.rulesets, 1);
+        assert_eq!(result.patterns, 1);
+
+        let after_tts = db.list_timestamp_templates(p.id).await.unwrap();
+        let after_rules = db.list_rules(p.id).await.unwrap();
+        let after_pats = db.list_patterns(p.id).await.unwrap();
+        assert_eq!(after_tts.len(), initial_tts.len() + 1);
+        assert_eq!(after_rules.len(), initial_rules.len() + 1);
+        assert_eq!(after_pats.len(), initial_pats.len() + 1);
+    }
+
+    #[tokio::test]
+    async fn test_selective_import_overwrite() {
+        use crate::routes::import_export::{EntitySelection, ImportAction, ImportSelections};
+
+        let db = test_db().await;
+        let p = db.create_project("P1").await.unwrap();
+
+        // Create an existing rule
+        let existing_rule = db
+            .create_rule(
+                p.id,
+                "my_rule",
+                &MatchMode::Any,
+                &[CreateMatchRule {
+                    pattern: "OLD".to_string(),
+                }],
+                &[],
+                None,
+            )
+            .await
+            .unwrap();
+        let initial_rules = db.list_rules(p.id).await.unwrap();
+
+        // Export with same name but different pattern
+        let export_rule = LogRule {
+            id: 999,
+            name: "my_rule".to_string(),
+            match_mode: MatchMode::Any,
+            match_rules: vec![MatchRule {
+                id: 1,
+                pattern: "NEW".to_string(),
+            }],
+            extraction_rules: vec![],
+            event_text: None,
+        };
+
+        let export = crate::routes::import_export::ProjectExport {
+            version: 1,
+            timestamp_templates: vec![],
+            source_templates: vec![],
+            rules: vec![export_rule],
+            rulesets: vec![],
+            patterns: vec![],
+        };
+
+        let selections = ImportSelections {
+            timestamp_templates: vec![],
+            source_templates: vec![],
+            rules: vec![EntitySelection {
+                export_id: 999,
+                action: ImportAction::Overwrite,
+                existing_id: Some(existing_rule.id),
+            }],
+            rulesets: vec![],
+            patterns: vec![],
+        };
+
+        let result = db
+            .selective_import_project_config(p.id, &export, &selections)
+            .await
+            .unwrap();
+        assert_eq!(result.rules, 1);
+
+        // No duplicate should have been created
+        let after_rules = db.list_rules(p.id).await.unwrap();
+        assert_eq!(after_rules.len(), initial_rules.len());
+
+        // Content should be updated
+        let updated_rule = db.get_rule(p.id, existing_rule.id as i64).await.unwrap();
+        assert_eq!(updated_rule.match_rules[0].pattern, "NEW");
+    }
+
+    #[tokio::test]
+    async fn test_selective_import_skip() {
+        use crate::routes::import_export::{EntitySelection, ImportAction, ImportSelections};
+
+        let db = test_db().await;
+        let p = db.create_project("P1").await.unwrap();
+
+        let initial_rules = db.list_rules(p.id).await.unwrap();
+        let initial_pats = db.list_patterns(p.id).await.unwrap();
+
+        let export_rule = LogRule {
+            id: 1,
+            name: "skip_me".to_string(),
+            match_mode: MatchMode::Any,
+            match_rules: vec![],
+            extraction_rules: vec![],
+            event_text: None,
+        };
+        let export_pat = Pattern {
+            id: 2,
+            name: "skip_me_too".to_string(),
+            predicates: vec![],
+        };
+        let export = crate::routes::import_export::ProjectExport {
+            version: 1,
+            timestamp_templates: vec![],
+            source_templates: vec![],
+            rules: vec![export_rule],
+            rulesets: vec![],
+            patterns: vec![export_pat],
+        };
+
+        let selections = ImportSelections {
+            timestamp_templates: vec![],
+            source_templates: vec![],
+            rules: vec![EntitySelection {
+                export_id: 1,
+                action: ImportAction::Skip,
+                existing_id: None,
+            }],
+            rulesets: vec![],
+            patterns: vec![EntitySelection {
+                export_id: 2,
+                action: ImportAction::Skip,
+                existing_id: None,
+            }],
+        };
+
+        let result = db
+            .selective_import_project_config(p.id, &export, &selections)
+            .await
+            .unwrap();
+        assert_eq!(result.rules, 0);
+        assert_eq!(result.patterns, 0);
+
+        // Nothing should have been created
+        let after_rules = db.list_rules(p.id).await.unwrap();
+        let after_pats = db.list_patterns(p.id).await.unwrap();
+        assert_eq!(after_rules.len(), initial_rules.len());
+        assert_eq!(after_pats.len(), initial_pats.len());
     }
 }

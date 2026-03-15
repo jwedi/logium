@@ -3,7 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import AnalysisView from '../AnalysisView.svelte';
 import { invalidateAnalysis } from '../analysisInvalidation.svelte';
-import { clearCachedAnalysis } from '../analysisCache.svelte';
+import { clearCachedAnalysis, setCachedAnalysis } from '../analysisCache.svelte';
+import type { AnalysisResult } from '../api';
 import {
   makeAnalysisResult,
   makeSource,
@@ -570,6 +571,65 @@ describe('AnalysisView', () => {
     expect(screen.getByText('State changes')).toBeInTheDocument();
     expect(screen.getByText('Download JSON')).toBeInTheDocument();
     expect(screen.getByText('Download CSV')).toBeInTheDocument();
+  });
+
+  // --- Double-count regression ---
+
+  it('does not double-count results when cache is updated mid-stream', async () => {
+    // Simulate the zombie-analysis scenario: a previous (zombie) analysis completed and
+    // populated the cache while the current component is actively streaming its own results.
+    // The live stream's flushInterval must NOT write into the zombie's cached result object.
+    clearCachedAnalysis();
+
+    let liveCallbacks: any = null;
+    runStreamingImpl = (_pid: number, callbacks: any) => {
+      liveCallbacks = callbacks;
+      return { close: vi.fn() };
+    };
+    vi.mocked(analysisApi.runStreaming).mockImplementation((...args: any[]) =>
+      runStreamingImpl(args[0], args[1]),
+    );
+
+    renderAnalysis();
+    await tick();
+
+    // Manually trigger analysis (simulates auto-run on mount)
+    await fireEvent.click(getRunButton());
+    await tick();
+
+    // While streaming is in progress, inject a "zombie" result into the cache.
+    // This simulates a zombie component's analysis completing and calling setCachedAnalysis.
+    const zombieResult: AnalysisResult = {
+      rule_matches: [
+        { ...mockRuleMatch, event_text: null },
+        { ...mockRuleMatch, event_text: null },
+      ], // 2 zombie matches
+      pattern_matches: [],
+      state_changes: [],
+    };
+    setCachedAnalysis(1, zombieResult);
+    await tick();
+
+    // Now complete the live stream with 1 fresh match
+    liveCallbacks.onRuleMatch(mockRuleMatch);
+    vi.advanceTimersByTime(200);
+    liveCallbacks.onComplete({
+      total_lines: 5,
+      total_rule_matches: 1,
+      total_pattern_matches: 0,
+      total_state_changes: 0,
+    });
+    await tick();
+
+    // Result should show only the 1 live match, not 2 zombie + 1 live = 3
+    await waitFor(() => {
+      const statValues = document.querySelectorAll('.stat-value');
+      const ruleMatchStat = Array.from(statValues).find((el) => el.textContent === '1');
+      expect(ruleMatchStat).toBeTruthy();
+    });
+    // Make sure it's not 3 (double-counted)
+    const statValues = document.querySelectorAll('.stat-value');
+    expect(Array.from(statValues).some((el) => el.textContent === '3')).toBe(false);
   });
 
   // --- Snapshot ---

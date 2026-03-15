@@ -145,9 +145,11 @@ fn test_syslog_parsing() {
 #[test]
 fn test_zookeeper_cross_source() {
     let ts = make_ts_template(1, "zk_ts", "%Y-%m-%d %H:%M:%S", None, None);
-    let tmpl = make_source_template(1, "zk", 1, None);
+    // Give each source a different template so rulesets can distinguish them.
+    let tmpl_a = make_source_template(1, "zk_a", 1, None);
+    let tmpl_b = make_source_template(2, "zk_b", 1, None);
     let src_a = make_source(1, "source_a", &fixture_path("zookeeper", "source_a.log"), 1);
-    let src_b = make_source(2, "source_b", &fixture_path("zookeeper", "source_b.log"), 1);
+    let src_b = make_source(2, "source_b", &fixture_path("zookeeper", "source_b.log"), 2);
 
     let warn_rule = LogRule {
         id: 1,
@@ -189,10 +191,16 @@ fn test_zookeeper_cross_source() {
         event_text: None,
     };
 
-    let ruleset = Ruleset {
+    let ruleset_a = Ruleset {
         id: 1,
-        name: "zk_rules".into(),
+        name: "zk_rules_a".into(),
         template_id: 1,
+        rule_ids: vec![1, 2],
+    };
+    let ruleset_b = Ruleset {
+        id: 2,
+        name: "zk_rules_b".into(),
+        template_id: 2,
         rule_ids: vec![1, 2],
     };
 
@@ -201,13 +209,13 @@ fn test_zookeeper_cross_source() {
         name: "warn_and_connection".into(),
         predicates: vec![
             PatternPredicate {
-                source_name: "source_a".into(),
+                ruleset_name: "zk_rules_a".into(),
                 state_key: "level".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("warn".into())),
             },
             PatternPredicate {
-                source_name: "source_b".into(),
+                ruleset_name: "zk_rules_b".into(),
                 state_key: "connection_event".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("true".into())),
@@ -217,10 +225,10 @@ fn test_zookeeper_cross_source() {
 
     let result = analyze(
         &[src_a, src_b],
-        &[tmpl],
+        &[tmpl_a, tmpl_b],
         &[ts],
         &[warn_rule, connection_rule],
-        &[ruleset],
+        &[ruleset_a, ruleset_b],
         &[pattern],
         &TimeRange::default(),
     )
@@ -246,9 +254,11 @@ fn test_nginx_cross_source() {
         Some(r"\[(\d{2}/\w{3}/\d{4}:\d{2}:\d{2}:\d{2})"),
         None,
     );
-    let tmpl = make_source_template(1, "nginx", 1, None);
+    // Give each source a different template so rulesets can distinguish them.
+    let tmpl_a = make_source_template(1, "nginx_a", 1, None);
+    let tmpl_b = make_source_template(2, "nginx_b", 1, None);
     let src_a = make_source(1, "source_a", &fixture_path("nginx", "source_a.log"), 1);
-    let src_b = make_source(2, "source_b", &fixture_path("nginx", "source_b.log"), 1);
+    let src_b = make_source(2, "source_b", &fixture_path("nginx", "source_b.log"), 2);
 
     let status_rule = LogRule {
         id: 1,
@@ -270,10 +280,16 @@ fn test_nginx_cross_source() {
         event_text: None,
     };
 
-    let ruleset = Ruleset {
+    let ruleset_a = Ruleset {
         id: 1,
-        name: "nginx_rules".into(),
+        name: "nginx_rules_a".into(),
         template_id: 1,
+        rule_ids: vec![1],
+    };
+    let ruleset_b = Ruleset {
+        id: 2,
+        name: "nginx_rules_b".into(),
+        template_id: 2,
         rule_ids: vec![1],
     };
 
@@ -282,13 +298,13 @@ fn test_nginx_cross_source() {
         name: "both_404".into(),
         predicates: vec![
             PatternPredicate {
-                source_name: "source_a".into(),
+                ruleset_name: "nginx_rules_a".into(),
                 state_key: "status".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::Integer(404)),
             },
             PatternPredicate {
-                source_name: "source_b".into(),
+                ruleset_name: "nginx_rules_b".into(),
                 state_key: "status".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::Integer(404)),
@@ -298,10 +314,10 @@ fn test_nginx_cross_source() {
 
     let result = analyze(
         &[src_a, src_b],
-        &[tmpl],
+        &[tmpl_a, tmpl_b],
         &[ts],
         &[status_rule],
-        &[ruleset],
+        &[ruleset_a, ruleset_b],
         &[pattern],
         &TimeRange::default(),
     )
@@ -325,9 +341,11 @@ fn test_nginx_cross_source() {
 #[test]
 fn test_syslog_cross_source() {
     let ts = make_ts_template(1, "syslog_ts", "%b %d %H:%M:%S", None, Some(2005));
-    let tmpl = make_source_template(1, "syslog", 1, None);
+    // Give each source a different template so rulesets can distinguish them.
+    let tmpl_a = make_source_template(1, "syslog_a", 1, None);
+    let tmpl_b = make_source_template(2, "syslog_b", 1, None);
     let src_a = make_source(1, "source_a", &fixture_path("syslog", "source_a.log"), 1);
-    let src_b = make_source(2, "source_b", &fixture_path("syslog", "source_b.log"), 1);
+    let src_b = make_source(2, "source_b", &fixture_path("syslog", "source_b.log"), 2);
 
     let auth_rule = LogRule {
         id: 1,
@@ -369,10 +387,16 @@ fn test_syslog_cross_source() {
         event_text: None,
     };
 
-    let ruleset = Ruleset {
+    let ruleset_a = Ruleset {
         id: 1,
-        name: "syslog_rules".into(),
+        name: "syslog_rules_a".into(),
         template_id: 1,
+        rule_ids: vec![1, 2],
+    };
+    let ruleset_b = Ruleset {
+        id: 2,
+        name: "syslog_rules_b".into(),
+        template_id: 2,
         rule_ids: vec![1, 2],
     };
 
@@ -381,13 +405,13 @@ fn test_syslog_cross_source() {
         name: "both_auth_fail".into(),
         predicates: vec![
             PatternPredicate {
-                source_name: "source_a".into(),
+                ruleset_name: "syslog_rules_a".into(),
                 state_key: "auth_failed".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("true".into())),
             },
             PatternPredicate {
-                source_name: "source_b".into(),
+                ruleset_name: "syslog_rules_b".into(),
                 state_key: "auth_failed".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("true".into())),
@@ -397,10 +421,10 @@ fn test_syslog_cross_source() {
 
     let result = analyze(
         &[src_a, src_b],
-        &[tmpl],
+        &[tmpl_a, tmpl_b],
         &[ts],
         &[auth_rule, rhost_rule],
-        &[ruleset],
+        &[ruleset_a, ruleset_b],
         &[pattern],
         &TimeRange::default(),
     )
@@ -488,13 +512,13 @@ fn test_timestamp_template_reuse() {
         name: "both_seen".into(),
         predicates: vec![
             PatternPredicate {
-                source_name: "source_a".into(),
+                ruleset_name: "rs_a".into(),
                 state_key: "seen".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("true".into())),
             },
             PatternPredicate {
-                source_name: "source_b".into(),
+                ruleset_name: "rs_b".into(),
                 state_key: "seen".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("true".into())),
@@ -531,9 +555,11 @@ fn test_timestamp_template_reuse() {
 #[test]
 fn test_cross_source_state_ref() {
     let ts = make_ts_template(1, "zk_ts", "%Y-%m-%d %H:%M:%S", None, None);
-    let tmpl = make_source_template(1, "zk", 1, None);
+    // Give each source a different template so rulesets can distinguish them.
+    let tmpl_a = make_source_template(1, "zk_a", 1, None);
+    let tmpl_b = make_source_template(2, "zk_b", 1, None);
     let src_a = make_source(1, "source_a", &fixture_path("zookeeper", "source_a.log"), 1);
-    let src_b = make_source(2, "source_b", &fixture_path("zookeeper", "source_b.log"), 1);
+    let src_b = make_source(2, "source_b", &fixture_path("zookeeper", "source_b.log"), 2);
 
     // Extract log level from both sources
     let level_rule = LogRule {
@@ -556,23 +582,29 @@ fn test_cross_source_state_ref() {
         event_text: None,
     };
 
-    let ruleset = Ruleset {
+    let ruleset_a = Ruleset {
         id: 1,
-        name: "level_rules".into(),
+        name: "level_rules_a".into(),
         template_id: 1,
         rule_ids: vec![1],
     };
+    let ruleset_b = Ruleset {
+        id: 2,
+        name: "level_rules_b".into(),
+        template_id: 2,
+        rule_ids: vec![1],
+    };
 
-    // Pattern: source_a.level == StateRef(source_b.level) — both at same level
+    // Pattern: source_a level == StateRef(source_b level) — both at same level
     let pattern = Pattern {
         id: 1,
         name: "same_level".into(),
         predicates: vec![PatternPredicate {
-            source_name: "source_a".into(),
+            ruleset_name: "level_rules_a".into(),
             state_key: "level".into(),
             operator: Operator::Eq,
             operand: Operand::StateRef {
-                source_name: "source_b".into(),
+                ruleset_name: "level_rules_b".into(),
                 state_key: "level".into(),
             },
         }],
@@ -580,10 +612,10 @@ fn test_cross_source_state_ref() {
 
     let result = analyze(
         &[src_a, src_b],
-        &[tmpl],
+        &[tmpl_a, tmpl_b],
         &[ts],
         &[level_rule],
-        &[ruleset],
+        &[ruleset_a, ruleset_b],
         &[pattern],
         &TimeRange::default(),
     )
@@ -679,9 +711,21 @@ fn test_multiline_parsing() {
 #[test]
 fn test_multiline_cross_source() {
     let ts = make_ts_template(1, "multiline_ts", "%Y-%m-%d %H:%M:%S", None, None);
-    let tmpl = SourceTemplate {
+    // Give each source a different template so rulesets can distinguish them.
+    let tmpl_a = SourceTemplate {
         id: 1,
-        name: "multiline".into(),
+        name: "multiline_a".into(),
+        timestamp_template_id: 1,
+        line_delimiter: "\n".into(),
+        content_regex: None,
+        continuation_regex: Some(r"^\s".to_string()),
+        json_timestamp_field: None,
+        file_name_regex: None,
+        log_content_regex: None,
+    };
+    let tmpl_b = SourceTemplate {
+        id: 2,
+        name: "multiline_b".into(),
         timestamp_template_id: 1,
         line_delimiter: "\n".into(),
         content_regex: None,
@@ -691,7 +735,7 @@ fn test_multiline_cross_source() {
         log_content_regex: None,
     };
     let src_a = make_source(1, "source_a", &fixture_path("multiline", "source_a.log"), 1);
-    let src_b = make_source(2, "source_b", &fixture_path("multiline", "source_b.log"), 1);
+    let src_b = make_source(2, "source_b", &fixture_path("multiline", "source_b.log"), 2);
 
     // Rule: detect OutOfMemoryError in merged content
     let oom_rule = LogRule {
@@ -735,10 +779,16 @@ fn test_multiline_cross_source() {
         event_text: None,
     };
 
-    let ruleset = Ruleset {
+    let ruleset_a = Ruleset {
         id: 1,
-        name: "multiline_rules".into(),
+        name: "multiline_rules_a".into(),
         template_id: 1,
+        rule_ids: vec![1, 2],
+    };
+    let ruleset_b = Ruleset {
+        id: 2,
+        name: "multiline_rules_b".into(),
+        template_id: 2,
         rule_ids: vec![1, 2],
     };
 
@@ -748,13 +798,13 @@ fn test_multiline_cross_source() {
         name: "warn_and_oom".into(),
         predicates: vec![
             PatternPredicate {
-                source_name: "source_a".into(),
+                ruleset_name: "multiline_rules_a".into(),
                 state_key: "warned".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("true".into())),
             },
             PatternPredicate {
-                source_name: "source_b".into(),
+                ruleset_name: "multiline_rules_b".into(),
                 state_key: "oom".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("true".into())),
@@ -764,10 +814,10 @@ fn test_multiline_cross_source() {
 
     let result = analyze(
         &[src_a, src_b],
-        &[tmpl],
+        &[tmpl_a, tmpl_b],
         &[ts],
         &[oom_rule, warn_rule],
-        &[ruleset],
+        &[ruleset_a, ruleset_b],
         &[pattern],
         &TimeRange::default(),
     )
@@ -861,19 +911,32 @@ fn test_json_cross_source() {
     let src_app = make_source(1, "app", &fixture_path("json", "app.log"), 1);
     let src_metrics = make_source(2, "metrics", &fixture_path("json", "metrics.log"), 2);
 
+    let ruleset_app = Ruleset {
+        id: 1,
+        name: "app_rules".into(),
+        template_id: 1,
+        rule_ids: vec![],
+    };
+    let ruleset_metrics = Ruleset {
+        id: 2,
+        name: "metrics_rules".into(),
+        template_id: 2,
+        rule_ids: vec![],
+    };
+
     // Pattern: app has ERROR level AND metrics has high CPU (> 90)
     let pattern = Pattern {
         id: 1,
         name: "error_and_high_cpu".into(),
         predicates: vec![
             PatternPredicate {
-                source_name: "app".into(),
+                ruleset_name: "app_rules".into(),
                 state_key: "level".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("ERROR".into())),
             },
             PatternPredicate {
-                source_name: "metrics".into(),
+                ruleset_name: "metrics_rules".into(),
                 state_key: "value".into(),
                 operator: Operator::Gt,
                 operand: Operand::Literal(StateValue::Float(90.0)),
@@ -886,7 +949,7 @@ fn test_json_cross_source() {
         &[tmpl_app, tmpl_metrics],
         &[ts],
         &[],
-        &[],
+        &[ruleset_app, ruleset_metrics],
         &[pattern],
         &TimeRange::default(),
     )

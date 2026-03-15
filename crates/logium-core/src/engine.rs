@@ -6,6 +6,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 
+/// Maps each ruleset name referenced in a pattern to one specific source_id.
+type Binding = HashMap<String, u64>;
+
 use chrono::{Datelike, NaiveDateTime};
 use rayon::prelude::*;
 use regex::{Regex, RegexSet};
@@ -935,20 +938,37 @@ pub struct StateManager {
     pub per_source_state: HashMap<u64, Arc<HashMap<String, TrackedValue>>>,
     pub source_names: HashMap<u64, String>,
     name_to_id: HashMap<String, u64>,
+    /// Maps ruleset name → source IDs whose template matches the ruleset's template_id.
+    ruleset_to_source_ids: HashMap<String, Vec<u64>>,
 }
 
 impl StateManager {
-    pub fn new(sources: &[Source]) -> Self {
+    pub fn new(sources: &[Source], rulesets: &[Ruleset]) -> Self {
         let mut source_names = HashMap::new();
         let mut name_to_id = HashMap::new();
         for src in sources {
             source_names.insert(src.id, src.name.clone());
             name_to_id.insert(src.name.clone(), src.id);
         }
+        // Build ruleset_name → [source_id] index:
+        // For each ruleset, find all sources whose template_id matches the ruleset's template_id.
+        let mut ruleset_to_source_ids: HashMap<String, Vec<u64>> = HashMap::new();
+        for rs in rulesets {
+            let source_ids: Vec<u64> = sources
+                .iter()
+                .filter(|s| s.template_id == rs.template_id)
+                .map(|s| s.id)
+                .collect();
+            ruleset_to_source_ids
+                .entry(rs.name.clone())
+                .or_default()
+                .extend(source_ids);
+        }
         Self {
             per_source_state: HashMap::new(),
             source_names,
             name_to_id,
+            ruleset_to_source_ids,
         }
     }
 
@@ -1028,10 +1048,50 @@ impl StateManager {
         changes
     }
 
-    /// Resolve the value of a source's state key by source name.
+    /// Resolve the value of a source's state key by source name (kept for internal use).
     pub fn get_state_by_name(&self, source_name: &str, key: &str) -> Option<&StateValue> {
         let id = self.name_to_id.get(source_name)?;
         self.per_source_state.get(id)?.get(key).map(|t| &t.value)
+    }
+
+    /// Resolve a state key across all sources belonging to a ruleset (OR semantics).
+    /// Returns the first value found among all sources whose template matches the ruleset.
+    pub fn get_state_by_ruleset(&self, ruleset_name: &str, key: &str) -> Option<&StateValue> {
+        let source_ids = self.ruleset_to_source_ids.get(ruleset_name)?;
+        for id in source_ids {
+            if let Some(val) = self
+                .per_source_state
+                .get(id)
+                .and_then(|s| s.get(key))
+                .map(|t| &t.value)
+            {
+                return Some(val);
+            }
+        }
+        None
+    }
+
+    /// Look up state for a specific source_id directly (used by bound evaluation).
+    pub fn get_state_by_source_id(&self, source_id: u64, key: &str) -> Option<&StateValue> {
+        self.per_source_state
+            .get(&source_id)?
+            .get(key)
+            .map(|t| &t.value)
+    }
+
+    /// Snapshot only the sources referenced in a binding (keyed by source name).
+    pub fn snapshot_for_binding(
+        &self,
+        binding: &Binding,
+    ) -> HashMap<String, Arc<HashMap<String, TrackedValue>>> {
+        binding
+            .values()
+            .filter_map(|source_id| {
+                let name = self.source_names.get(source_id)?;
+                let state = self.per_source_state.get(source_id)?;
+                Some((name.clone(), Arc::clone(state)))
+            })
+            .collect()
     }
 
     /// Snapshot all state, keyed by source name.
@@ -1083,85 +1143,33 @@ fn accumulate(
 }
 
 // ---------------------------------------------------------------------------
-// Pattern evaluator
+// Pattern evaluator (per-binding state machines)
 // ---------------------------------------------------------------------------
 
-/// Evaluates ordered-predicate patterns against the current state.
-pub struct PatternEvaluator {
-    /// Current progress index per pattern (index into predicates).
-    progress: Vec<usize>,
-}
+/// Evaluate a single predicate against the current state, using a specific source binding.
+fn evaluate_predicate_bound(
+    pred: &PatternPredicate,
+    state: &StateManager,
+    binding: &Binding,
+) -> bool {
+    let Some(&source_id) = binding.get(&pred.ruleset_name) else {
+        return false;
+    };
+    let current_val = state.get_state_by_source_id(source_id, &pred.state_key);
 
-impl PatternEvaluator {
-    pub fn new(patterns: &[Pattern]) -> Self {
-        Self {
-            progress: vec![0; patterns.len()],
-        }
-    }
-
-    /// Evaluate all patterns against the current state. Returns any new matches.
-    pub fn evaluate_patterns(
-        &mut self,
-        patterns: &[Pattern],
-        state: &StateManager,
-    ) -> Vec<PatternMatch> {
-        let mut matches = Vec::new();
-
-        for (i, pattern) in patterns.iter().enumerate() {
-            if pattern.predicates.is_empty() {
-                continue;
-            }
-
-            let progress = self.progress[i];
-
-            // Check if the current predicate (at progress index) is satisfied
-            let current_pred = &pattern.predicates[progress];
-            if evaluate_predicate(current_pred, state) {
-                // Verify all previous predicates still hold
-                let mut all_previous_hold = true;
-                for prev_idx in 0..progress {
-                    if !evaluate_predicate(&pattern.predicates[prev_idx], state) {
-                        all_previous_hold = false;
-                        break;
-                    }
-                }
-
-                if !all_previous_hold {
-                    // Previous predicate no longer holds, reset progress
-                    self.progress[i] = 0;
-                } else {
-                    // Advance progress
-                    self.progress[i] = progress + 1;
-
-                    // Check if all predicates are satisfied
-                    if self.progress[i] == pattern.predicates.len() {
-                        matches.push(PatternMatch {
-                            pattern_id: pattern.id,
-                            timestamp: chrono::Utc::now().naive_utc(),
-                            state_snapshot: state.snapshot(),
-                        });
-                        // Reset for potential re-firing
-                        self.progress[i] = 0;
-                    }
-                }
-            }
-        }
-
-        matches
-    }
-}
-
-/// Evaluate a single predicate against the current state.
-fn evaluate_predicate(pred: &PatternPredicate, state: &StateManager) -> bool {
-    let current_val = state.get_state_by_name(&pred.source_name, &pred.state_key);
-
-    // Resolve the operand
     let operand_val: Option<StateValue> = match &pred.operand {
         Operand::Literal(v) => Some(v.clone()),
         Operand::StateRef {
-            source_name,
+            ruleset_name,
             state_key,
-        } => state.get_state_by_name(source_name, state_key).cloned(),
+        } => {
+            let Some(&ref_source_id) = binding.get(ruleset_name) else {
+                return false;
+            };
+            state
+                .get_state_by_source_id(ref_source_id, state_key)
+                .cloned()
+        }
     };
 
     match pred.operator {
@@ -1198,6 +1206,152 @@ fn evaluate_predicate(pred: &PatternPredicate, state: &StateManager) -> bool {
             (Some(StateValue::String(a)), Some(StateValue::String(b))) => a.contains(b.as_str()),
             _ => false,
         },
+    }
+}
+
+/// One independent state machine for one (pattern × source-binding) combination.
+struct BoundEvaluator {
+    pattern_idx: usize,
+    binding: Binding,
+    progress: usize,
+}
+
+impl BoundEvaluator {
+    fn step(&mut self, patterns: &[Pattern], state: &StateManager) -> Option<PatternMatch> {
+        let pattern = &patterns[self.pattern_idx];
+        if pattern.predicates.is_empty() {
+            return None;
+        }
+        let progress = self.progress;
+        let current_pred = &pattern.predicates[progress];
+
+        if evaluate_predicate_bound(current_pred, state, &self.binding) {
+            let all_previous_hold = (0..progress).all(|prev_idx| {
+                evaluate_predicate_bound(&pattern.predicates[prev_idx], state, &self.binding)
+            });
+
+            if !all_previous_hold {
+                self.progress = 0;
+            } else {
+                self.progress = progress + 1;
+                if self.progress == pattern.predicates.len() {
+                    let pm = PatternMatch {
+                        pattern_id: pattern.id,
+                        timestamp: chrono::Utc::now().naive_utc(),
+                        state_snapshot: state.snapshot_for_binding(&self.binding),
+                    };
+                    self.progress = 0;
+                    return Some(pm);
+                }
+            }
+        }
+        None
+    }
+}
+
+/// Build the Cartesian product of source IDs per ruleset name.
+/// Returns an empty Vec if any ruleset has no sources.
+fn cartesian_product(per_ruleset: &[(&str, &[u64])]) -> Vec<Binding> {
+    let mut result: Vec<Binding> = vec![HashMap::new()];
+    for (ruleset_name, source_ids) in per_ruleset {
+        if source_ids.is_empty() {
+            return vec![];
+        }
+        let mut next = Vec::with_capacity(result.len() * source_ids.len());
+        for binding in &result {
+            for &src_id in *source_ids {
+                let mut new_binding = binding.clone();
+                new_binding.insert(ruleset_name.to_string(), src_id);
+                next.push(new_binding);
+            }
+        }
+        result = next;
+    }
+    result
+}
+
+const MAX_EVALUATOR_INSTANCES: usize = 100;
+
+/// Evaluates ordered-predicate patterns against the current state,
+/// with one independent state machine per (pattern × source-binding) combination.
+pub struct PatternEvaluatorSet {
+    evaluators: Vec<BoundEvaluator>,
+}
+
+impl PatternEvaluatorSet {
+    pub fn new(patterns: &[Pattern], state_manager: &StateManager) -> Self {
+        let mut evaluators = Vec::new();
+        let mut total = 0usize;
+
+        for (pattern_idx, pattern) in patterns.iter().enumerate() {
+            if pattern.predicates.is_empty() {
+                continue;
+            }
+
+            // Collect unique ruleset names from predicates (including StateRef operands).
+            // Use a Vec with dedup to maintain deterministic ordering.
+            let mut ruleset_names: Vec<String> = Vec::new();
+            for pred in &pattern.predicates {
+                if !ruleset_names.contains(&pred.ruleset_name) {
+                    ruleset_names.push(pred.ruleset_name.clone());
+                }
+                if let Operand::StateRef { ruleset_name, .. } = &pred.operand
+                    && !ruleset_names.contains(ruleset_name)
+                {
+                    ruleset_names.push(ruleset_name.clone());
+                }
+            }
+
+            let per_ruleset: Vec<(String, Vec<u64>)> = ruleset_names
+                .iter()
+                .map(|rs| {
+                    let sources = state_manager
+                        .ruleset_to_source_ids
+                        .get(rs.as_str())
+                        .cloned()
+                        .unwrap_or_default();
+                    (rs.clone(), sources)
+                })
+                .collect();
+
+            let per_ruleset_refs: Vec<(&str, &[u64])> = per_ruleset
+                .iter()
+                .map(|(name, ids)| (name.as_str(), ids.as_slice()))
+                .collect();
+
+            let bindings = cartesian_product(&per_ruleset_refs);
+            total += bindings.len();
+
+            for binding in bindings {
+                evaluators.push(BoundEvaluator {
+                    pattern_idx,
+                    binding,
+                    progress: 0,
+                });
+            }
+        }
+
+        if total > MAX_EVALUATOR_INSTANCES {
+            eprintln!(
+                "[logium] Warning: pattern evaluation created {} evaluator instances \
+                 (threshold: {}). Consider reducing sources per ruleset or splitting patterns.",
+                total, MAX_EVALUATOR_INSTANCES
+            );
+        }
+
+        Self { evaluators }
+    }
+
+    /// Evaluate all bound state machines against the current state. Returns any new matches.
+    pub fn evaluate_all(
+        &mut self,
+        patterns: &[Pattern],
+        state: &StateManager,
+    ) -> Vec<PatternMatch> {
+        self.evaluators
+            .iter_mut()
+            .filter_map(|eval| eval.step(patterns, state))
+            .collect()
     }
 }
 
@@ -1295,9 +1449,9 @@ pub fn analyze(
     // --- Phase 2: sequential merge + state mutations + pattern evaluation ---
     let merger = ProcessedLineMerger::new(processed_sources);
 
-    let mut state_manager = StateManager::new(sources);
+    let mut state_manager = StateManager::new(sources, rulesets);
     let source_name_cache = state_manager.source_names.clone();
-    let mut pattern_eval = PatternEvaluator::new(patterns);
+    let mut pattern_eval = PatternEvaluatorSet::new(patterns, &state_manager);
 
     let mut all_rule_matches = Vec::new();
     let mut all_pattern_matches = Vec::new();
@@ -1399,7 +1553,7 @@ pub fn analyze(
 
         // Evaluate patterns when state changed or any rule matched (patterns re-fire)
         if state_changed || !processed.rule_matches.is_empty() {
-            let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
+            let pmatches = pattern_eval.evaluate_all(patterns, &state_manager);
             for mut pm in pmatches {
                 pm.timestamp = line.timestamp;
                 all_pattern_matches.push(pm);
@@ -1483,9 +1637,9 @@ pub fn analyze_streaming(
     // --- Phase 2: sequential merge + state mutations + pattern evaluation ---
     let merger = ProcessedLineMerger::new(processed_sources);
 
-    let mut state_manager = StateManager::new(sources);
+    let mut state_manager = StateManager::new(sources, rulesets);
     let source_name_cache = state_manager.source_names.clone();
-    let mut pattern_eval = PatternEvaluator::new(patterns);
+    let mut pattern_eval = PatternEvaluatorSet::new(patterns, &state_manager);
 
     let mut lines_processed: u64 = 0;
     let mut total_rule_matches: u64 = 0;
@@ -1606,7 +1760,7 @@ pub fn analyze_streaming(
 
         // Evaluate patterns when state changed or any rule matched (patterns re-fire)
         if state_changed || !processed.rule_matches.is_empty() {
-            let pmatches = pattern_eval.evaluate_patterns(patterns, &state_manager);
+            let pmatches = pattern_eval.evaluate_all(patterns, &state_manager);
             for mut pm in pmatches {
                 pm.timestamp = line.timestamp;
                 total_pattern_matches += 1;
@@ -1921,7 +2075,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -1957,7 +2111,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "tags".into(),
             TrackedValue {
@@ -1993,7 +2147,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "count".into(),
             TrackedValue {
@@ -2031,7 +2185,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -2129,9 +2283,26 @@ mod tests {
             Source {
                 id: 2,
                 name: "client".into(),
-                template_id: 1,
+                template_id: 2,
                 file_path: "".into(),
                 color: String::new(),
+            },
+        ]
+    }
+
+    fn make_rulesets() -> Vec<Ruleset> {
+        vec![
+            Ruleset {
+                id: 1,
+                name: "server_rs".into(),
+                template_id: 1,
+                rule_ids: vec![],
+            },
+            Ruleset {
+                id: 2,
+                name: "client_rs".into(),
+                template_id: 2,
+                rule_ids: vec![],
             },
         ]
     }
@@ -2139,20 +2310,21 @@ mod tests {
     #[test]
     fn test_simple_two_predicate_pattern() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
 
         let pattern = Pattern {
             id: 1,
             name: "test_pattern".into(),
             predicates: vec![
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rs".into(),
                     state_key: "status".into(),
                     operator: Operator::Eq,
                     operand: Operand::Literal(StateValue::String("running".into())),
                 },
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rs".into(),
                     state_key: "players".into(),
                     operator: Operator::Gt,
                     operand: Operand::Literal(StateValue::Integer(0)),
@@ -2160,10 +2332,10 @@ mod tests {
             ],
         };
         let patterns = vec![pattern];
-        let mut eval = PatternEvaluator::new(&patterns);
+        let mut eval = PatternEvaluatorSet::new(&patterns, &sm);
 
         // Pred 1 not yet satisfied
-        let matches = eval.evaluate_patterns(&patterns, &sm);
+        let matches = eval.evaluate_all(&patterns, &sm);
         assert!(matches.is_empty());
 
         // Set status = running -> pred 1 satisfied
@@ -2174,7 +2346,7 @@ mod tests {
                 set_at: test_ts(),
             },
         );
-        let matches = eval.evaluate_patterns(&patterns, &sm);
+        let matches = eval.evaluate_all(&patterns, &sm);
         assert!(matches.is_empty()); // only 1 of 2 done
 
         // Set players = 5 -> pred 2 satisfied
@@ -2185,7 +2357,7 @@ mod tests {
                 set_at: test_ts(),
             },
         );
-        let matches = eval.evaluate_patterns(&patterns, &sm);
+        let matches = eval.evaluate_all(&patterns, &sm);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].pattern_id, 1);
     }
@@ -2193,20 +2365,21 @@ mod tests {
     #[test]
     fn test_predicate_invalidation_resets_progress() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
 
         let pattern = Pattern {
             id: 1,
             name: "test".into(),
             predicates: vec![
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rs".into(),
                     state_key: "status".into(),
                     operator: Operator::Eq,
                     operand: Operand::Literal(StateValue::String("running".into())),
                 },
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rs".into(),
                     state_key: "count".into(),
                     operator: Operator::Gt,
                     operand: Operand::Literal(StateValue::Integer(10)),
@@ -2214,9 +2387,9 @@ mod tests {
             ],
         };
         let patterns = vec![pattern];
-        let mut eval = PatternEvaluator::new(&patterns);
+        let mut eval = PatternEvaluatorSet::new(&patterns, &sm);
 
-        // Satisfy pred 1
+        // Satisfy pred 1 — progress should advance to 1
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "status".into(),
             TrackedValue {
@@ -2224,10 +2397,12 @@ mod tests {
                 set_at: test_ts(),
             },
         );
-        eval.evaluate_patterns(&patterns, &sm);
-        assert_eq!(eval.progress[0], 1);
+        let matches = eval.evaluate_all(&patterns, &sm);
+        assert!(matches.is_empty()); // pred 2 not yet satisfied
 
-        // Now invalidate pred 1 (change status away from "running") and try pred 2
+        // Now invalidate pred 1 (change status away from "running") and try pred 2.
+        // Since the evaluator sees pred 2 satisfied but pred 1 no longer holds, it
+        // should reset progress (no match emitted).
         Arc::make_mut(sm.per_source_state.get_mut(&1).unwrap()).insert(
             "status".into(),
             TrackedValue {
@@ -2242,29 +2417,52 @@ mod tests {
                 set_at: test_ts(),
             },
         );
-        let matches = eval.evaluate_patterns(&patterns, &sm);
+        let matches = eval.evaluate_all(&patterns, &sm);
         assert!(matches.is_empty());
-        // Progress should be reset to 0
-        assert_eq!(eval.progress[0], 0);
+
+        // After reset, re-satisfying pred 1 while pred 2 is still satisfied should NOT
+        // immediately fire — we need to go through the ordered activation again.
+        Arc::make_mut(sm.per_source_state.get_mut(&1).unwrap()).insert(
+            "status".into(),
+            TrackedValue {
+                value: StateValue::String("running".into()),
+                set_at: test_ts(),
+            },
+        );
+        let matches = eval.evaluate_all(&patterns, &sm);
+        // pred 1 re-satisfied (progress→1), but pred 2 now needs to trigger once more
+        assert!(matches.is_empty());
+
+        // Trigger pred 2 again → full match
+        Arc::make_mut(sm.per_source_state.get_mut(&1).unwrap()).insert(
+            "count".into(),
+            TrackedValue {
+                value: StateValue::Integer(25),
+                set_at: test_ts(),
+            },
+        );
+        let matches = eval.evaluate_all(&patterns, &sm);
+        assert_eq!(matches.len(), 1);
     }
 
     #[test]
     fn test_pattern_refire_after_match() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
 
         let pattern = Pattern {
             id: 1,
             name: "test".into(),
             predicates: vec![PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "flag".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::Bool(true)),
             }],
         };
         let patterns = vec![pattern];
-        let mut eval = PatternEvaluator::new(&patterns);
+        let mut eval = PatternEvaluatorSet::new(&patterns, &sm);
 
         // Set flag=true -> should match
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -2274,37 +2472,35 @@ mod tests {
                 set_at: test_ts(),
             },
         );
-        let matches = eval.evaluate_patterns(&patterns, &sm);
+        let matches = eval.evaluate_all(&patterns, &sm);
         assert_eq!(matches.len(), 1);
 
-        // Progress should be reset after match, so it can fire again
-        assert_eq!(eval.progress[0], 0);
-
-        // Should fire again immediately since flag is still true
-        let matches = eval.evaluate_patterns(&patterns, &sm);
+        // Should fire again immediately since flag is still true (re-fire after match)
+        let matches = eval.evaluate_all(&patterns, &sm);
         assert_eq!(matches.len(), 1);
     }
 
     #[test]
     fn test_cross_source_state_reference() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
 
         let pattern = Pattern {
             id: 1,
             name: "cross_source".into(),
             predicates: vec![PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "region".into(),
                 operator: Operator::Eq,
                 operand: Operand::StateRef {
-                    source_name: "client".into(),
+                    ruleset_name: "client_rs".into(),
                     state_key: "region".into(),
                 },
             }],
         };
         let patterns = vec![pattern];
-        let mut eval = PatternEvaluator::new(&patterns);
+        let mut eval = PatternEvaluatorSet::new(&patterns, &sm);
 
         // Different regions -> no match
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
@@ -2321,7 +2517,7 @@ mod tests {
                 set_at: test_ts(),
             },
         );
-        let matches = eval.evaluate_patterns(&patterns, &sm);
+        let matches = eval.evaluate_all(&patterns, &sm);
         assert!(matches.is_empty());
 
         // Same regions -> match
@@ -2332,14 +2528,15 @@ mod tests {
                 set_at: test_ts(),
             },
         );
-        let matches = eval.evaluate_patterns(&patterns, &sm);
+        let matches = eval.evaluate_all(&patterns, &sm);
         assert_eq!(matches.len(), 1);
     }
 
     #[test]
     fn test_all_operators() {
         let sources = make_sources();
-        let mut sm = StateManager::new(&sources);
+        let rulesets = make_rulesets();
+        let mut sm = StateManager::new(&sources, &rulesets);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "val".into(),
             TrackedValue {
@@ -2355,103 +2552,115 @@ mod tests {
             },
         );
 
+        // Binding: server_rs → source id 1 (the "server" source with template_id=1)
+        let binding: Binding = [("server_rs".to_string(), 1u64)].into();
+
         // Eq
-        assert!(evaluate_predicate(
+        assert!(evaluate_predicate_bound(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::Integer(10)),
             },
             &sm,
+            &binding,
         ));
 
         // Neq
-        assert!(evaluate_predicate(
+        assert!(evaluate_predicate_bound(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Neq,
                 operand: Operand::Literal(StateValue::Integer(5)),
             },
             &sm,
+            &binding,
         ));
 
         // Gt
-        assert!(evaluate_predicate(
+        assert!(evaluate_predicate_bound(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Gt,
                 operand: Operand::Literal(StateValue::Integer(5)),
             },
             &sm,
+            &binding,
         ));
 
         // Lt
-        assert!(evaluate_predicate(
+        assert!(evaluate_predicate_bound(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Lt,
                 operand: Operand::Literal(StateValue::Integer(20)),
             },
             &sm,
+            &binding,
         ));
 
         // Gte (equal case)
-        assert!(evaluate_predicate(
+        assert!(evaluate_predicate_bound(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Gte,
                 operand: Operand::Literal(StateValue::Integer(10)),
             },
             &sm,
+            &binding,
         ));
 
         // Lte (equal case)
-        assert!(evaluate_predicate(
+        assert!(evaluate_predicate_bound(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Lte,
                 operand: Operand::Literal(StateValue::Integer(10)),
             },
             &sm,
+            &binding,
         ));
 
         // Contains
-        assert!(evaluate_predicate(
+        assert!(evaluate_predicate_bound(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "name".into(),
                 operator: Operator::Contains,
                 operand: Operand::Literal(StateValue::String("world".into())),
             },
             &sm,
+            &binding,
         ));
 
         // Exists
-        assert!(evaluate_predicate(
+        assert!(evaluate_predicate_bound(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "val".into(),
                 operator: Operator::Exists,
                 operand: Operand::Literal(StateValue::Bool(false)),
             },
             &sm,
+            &binding,
         ));
 
         // Exists - false case
-        assert!(!evaluate_predicate(
+        assert!(!evaluate_predicate_bound(
             &PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "server_rs".into(),
                 state_key: "nonexistent".into(),
                 operator: Operator::Exists,
                 operand: Operand::Literal(StateValue::Bool(false)),
             },
             &sm,
+            &binding,
         ));
     }
 
@@ -2578,9 +2787,21 @@ mod tests {
 
         let ts_template = make_ts_template();
 
-        let template = SourceTemplate {
+        // Server and client use different templates so rulesets can distinguish them.
+        let server_template = SourceTemplate {
             id: 1,
-            name: "default".into(),
+            name: "server_tmpl".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
+            json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
+        };
+        let client_template = SourceTemplate {
+            id: 2,
+            name: "client_tmpl".into(),
             timestamp_template_id: 1,
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
@@ -2601,7 +2822,7 @@ mod tests {
             Source {
                 id: 2,
                 name: "client".into(),
-                template_id: 1,
+                template_id: 2,
                 file_path: client_log.path().to_str().unwrap().into(),
                 color: String::new(),
             },
@@ -2672,29 +2893,38 @@ mod tests {
 
         let rules = vec![server_region_rule, player_count_rule, client_region_rule];
 
-        let rulesets = vec![Ruleset {
-            id: 1,
-            name: "server_rules".into(),
-            template_id: 1,
-            rule_ids: vec![1, 2, 3],
-        }];
+        let rulesets = vec![
+            Ruleset {
+                id: 1,
+                name: "server_rules".into(),
+                template_id: 1,
+                rule_ids: vec![1, 2],
+            },
+            Ruleset {
+                id: 2,
+                name: "client_rules".into(),
+                template_id: 2,
+                rule_ids: vec![3],
+            },
+        ];
 
-        // Pattern: detect when server and client are in same region AND player count > 50
+        // Pattern: detect when server_rules and client_rules are in same region AND
+        // server_rules has player_count > 50
         let pattern = Pattern {
             id: 1,
             name: "cross_source_detect".into(),
             predicates: vec![
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rules".into(),
                     state_key: "region".into(),
                     operator: Operator::Eq,
                     operand: Operand::StateRef {
-                        source_name: "client".into(),
+                        ruleset_name: "client_rules".into(),
                         state_key: "region".into(),
                     },
                 },
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rules".into(),
                     state_key: "player_count".into(),
                     operator: Operator::Gt,
                     operand: Operand::Literal(StateValue::Integer(50)),
@@ -2704,7 +2934,7 @@ mod tests {
 
         let result = analyze(
             &sources,
-            &[template],
+            &[server_template, client_template],
             &[ts_template],
             &rules,
             &rulesets,
@@ -2769,9 +2999,10 @@ mod tests {
         .unwrap();
 
         let ts_template = make_ts_template();
-        let template = SourceTemplate {
+        // Server and client use different templates so rulesets can distinguish them.
+        let server_template = SourceTemplate {
             id: 1,
-            name: "default".into(),
+            name: "server_tmpl".into(),
             timestamp_template_id: 1,
             line_delimiter: "\n".into(),
             content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
@@ -2780,6 +3011,18 @@ mod tests {
             file_name_regex: None,
             log_content_regex: None,
         };
+        let client_template = SourceTemplate {
+            id: 2,
+            name: "client_tmpl".into(),
+            timestamp_template_id: 1,
+            line_delimiter: "\n".into(),
+            content_regex: Some(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} (.+)$".into()),
+            continuation_regex: None,
+            json_timestamp_field: None,
+            file_name_regex: None,
+            log_content_regex: None,
+        };
+        let templates = vec![server_template, client_template];
 
         let sources = vec![
             Source {
@@ -2792,7 +3035,7 @@ mod tests {
             Source {
                 id: 2,
                 name: "client".into(),
-                template_id: 1,
+                template_id: 2,
                 file_path: client_log.path().to_str().unwrap().into(),
                 color: String::new(),
             },
@@ -2858,28 +3101,36 @@ mod tests {
             },
         ];
 
-        let rulesets = vec![Ruleset {
-            id: 1,
-            name: "server_rules".into(),
-            template_id: 1,
-            rule_ids: vec![1, 2, 3],
-        }];
+        let rulesets = vec![
+            Ruleset {
+                id: 1,
+                name: "server_rules".into(),
+                template_id: 1,
+                rule_ids: vec![1, 2],
+            },
+            Ruleset {
+                id: 2,
+                name: "client_rules".into(),
+                template_id: 2,
+                rule_ids: vec![3],
+            },
+        ];
 
         let pattern = Pattern {
             id: 1,
             name: "cross_source_detect".into(),
             predicates: vec![
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rules".into(),
                     state_key: "region".into(),
                     operator: Operator::Eq,
                     operand: Operand::StateRef {
-                        source_name: "client".into(),
+                        ruleset_name: "client_rules".into(),
                         state_key: "region".into(),
                     },
                 },
                 PatternPredicate {
-                    source_name: "server".into(),
+                    ruleset_name: "server_rules".into(),
                     state_key: "player_count".into(),
                     operator: Operator::Gt,
                     operand: Operand::Literal(StateValue::Integer(50)),
@@ -2891,7 +3142,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         analyze_streaming(
             &sources,
-            std::slice::from_ref(&template),
+            &templates,
             std::slice::from_ref(&ts_template),
             &rules,
             &rulesets,
@@ -2904,7 +3155,7 @@ mod tests {
         // Also run synchronous analysis for comparison
         let sync_result = analyze(
             &sources,
-            std::slice::from_ref(&template),
+            &templates,
             std::slice::from_ref(&ts_template),
             &rules,
             &rulesets,
@@ -2958,6 +3209,217 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Multi-source-per-ruleset independent evaluation test
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_multi_source_per_ruleset_independent_evaluation() {
+        // Sources: client (id=1, template=1), server_a (id=2, template=2), server_b (id=3, template=2)
+        let sources = vec![
+            Source {
+                id: 1,
+                name: "client".into(),
+                template_id: 1,
+                file_path: "".into(),
+                color: String::new(),
+            },
+            Source {
+                id: 2,
+                name: "server_a".into(),
+                template_id: 2,
+                file_path: "".into(),
+                color: String::new(),
+            },
+            Source {
+                id: 3,
+                name: "server_b".into(),
+                template_id: 2,
+                file_path: "".into(),
+                color: String::new(),
+            },
+        ];
+        // Rulesets: client_rs → template 1 (sources: [1]), server_rs → template 2 (sources: [2, 3])
+        let rulesets = vec![
+            Ruleset {
+                id: 1,
+                name: "client_rs".into(),
+                template_id: 1,
+                rule_ids: vec![],
+            },
+            Ruleset {
+                id: 2,
+                name: "server_rs".into(),
+                template_id: 2,
+                rule_ids: vec![],
+            },
+        ];
+        let mut sm = StateManager::new(&sources, &rulesets);
+
+        // Pattern: client_rs/request_id Exists, then server_rs/status Eq 500
+        let pattern = Pattern {
+            id: 1,
+            name: "test_multi_source".into(),
+            predicates: vec![
+                PatternPredicate {
+                    ruleset_name: "client_rs".into(),
+                    state_key: "request_id".into(),
+                    operator: Operator::Exists,
+                    operand: Operand::Literal(StateValue::Bool(false)),
+                },
+                PatternPredicate {
+                    ruleset_name: "server_rs".into(),
+                    state_key: "status".into(),
+                    operator: Operator::Eq,
+                    operand: Operand::Literal(StateValue::Integer(500)),
+                },
+            ],
+        };
+        let patterns = vec![pattern];
+        let mut eval = PatternEvaluatorSet::new(&patterns, &sm);
+
+        // Set client request_id=42 → pred 1 satisfied for the one client binding
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
+            "request_id".into(),
+            TrackedValue {
+                value: StateValue::Integer(42),
+                set_at: test_ts(),
+            },
+        );
+        let matches = eval.evaluate_all(&patterns, &sm);
+        assert!(matches.is_empty()); // pred 2 not yet satisfied
+
+        // Set server_a status=200 (not 500) and server_b status=500
+        Arc::make_mut(sm.per_source_state.entry(2).or_default()).insert(
+            "status".into(),
+            TrackedValue {
+                value: StateValue::Integer(200),
+                set_at: test_ts(),
+            },
+        );
+        Arc::make_mut(sm.per_source_state.entry(3).or_default()).insert(
+            "status".into(),
+            TrackedValue {
+                value: StateValue::Integer(500),
+                set_at: test_ts(),
+            },
+        );
+        let matches = eval.evaluate_all(&patterns, &sm);
+        // Only the binding {client_rs→1, server_rs→3} should match (server_b has status=500)
+        assert_eq!(
+            matches.len(),
+            1,
+            "expected exactly 1 match (server_b binding), got {}",
+            matches.len()
+        );
+        assert_eq!(matches[0].pattern_id, 1);
+        // Snapshot should contain client and server_b
+        let snap = &matches[0].state_snapshot;
+        assert!(snap.contains_key("client"), "snapshot missing 'client'");
+        assert!(snap.contains_key("server_b"), "snapshot missing 'server_b'");
+        assert!(
+            !snap.contains_key("server_a"),
+            "snapshot should not contain 'server_a'"
+        );
+    }
+
+    #[test]
+    fn test_multi_source_per_ruleset_both_match() {
+        // Same setup as above but both servers have status=500 → 2 matches
+        let sources = vec![
+            Source {
+                id: 1,
+                name: "client".into(),
+                template_id: 1,
+                file_path: "".into(),
+                color: String::new(),
+            },
+            Source {
+                id: 2,
+                name: "server_a".into(),
+                template_id: 2,
+                file_path: "".into(),
+                color: String::new(),
+            },
+            Source {
+                id: 3,
+                name: "server_b".into(),
+                template_id: 2,
+                file_path: "".into(),
+                color: String::new(),
+            },
+        ];
+        let rulesets = vec![
+            Ruleset {
+                id: 1,
+                name: "client_rs".into(),
+                template_id: 1,
+                rule_ids: vec![],
+            },
+            Ruleset {
+                id: 2,
+                name: "server_rs".into(),
+                template_id: 2,
+                rule_ids: vec![],
+            },
+        ];
+        let mut sm = StateManager::new(&sources, &rulesets);
+
+        let pattern = Pattern {
+            id: 1,
+            name: "test_both_match".into(),
+            predicates: vec![
+                PatternPredicate {
+                    ruleset_name: "client_rs".into(),
+                    state_key: "request_id".into(),
+                    operator: Operator::Exists,
+                    operand: Operand::Literal(StateValue::Bool(false)),
+                },
+                PatternPredicate {
+                    ruleset_name: "server_rs".into(),
+                    state_key: "status".into(),
+                    operator: Operator::Eq,
+                    operand: Operand::Literal(StateValue::Integer(500)),
+                },
+            ],
+        };
+        let patterns = vec![pattern];
+        let mut eval = PatternEvaluatorSet::new(&patterns, &sm);
+
+        // Set client request_id → advance pred 1 for both bindings
+        Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
+            "request_id".into(),
+            TrackedValue {
+                value: StateValue::Integer(42),
+                set_at: test_ts(),
+            },
+        );
+        eval.evaluate_all(&patterns, &sm);
+
+        // Both servers get status=500
+        Arc::make_mut(sm.per_source_state.entry(2).or_default()).insert(
+            "status".into(),
+            TrackedValue {
+                value: StateValue::Integer(500),
+                set_at: test_ts(),
+            },
+        );
+        Arc::make_mut(sm.per_source_state.entry(3).or_default()).insert(
+            "status".into(),
+            TrackedValue {
+                value: StateValue::Integer(500),
+                set_at: test_ts(),
+            },
+        );
+        let matches = eval.evaluate_all(&patterns, &sm);
+        assert_eq!(
+            matches.len(),
+            2,
+            "expected 2 matches (one per server binding), got {}",
+            matches.len()
+        );
+    }
+
+    // -----------------------------------------------------------------------
     // State change tracking tests
     // -----------------------------------------------------------------------
 
@@ -2970,7 +3432,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -3006,7 +3468,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -3042,7 +3504,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -3071,7 +3533,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
         Arc::make_mut(sm.per_source_state.entry(1).or_default()).insert(
             "key".into(),
             TrackedValue {
@@ -3104,7 +3566,7 @@ mod tests {
             file_path: "".into(),
             color: String::new(),
         }];
-        let mut sm = StateManager::new(&sources);
+        let mut sm = StateManager::new(&sources, &[]);
 
         let extractions: HashMap<String, StateValue> = HashMap::new();
         let rules = vec![ExtractionRule {
@@ -4373,7 +4835,7 @@ mod tests {
             id: 1,
             name: "status_running".into(),
             predicates: vec![PatternPredicate {
-                source_name: "server".into(),
+                ruleset_name: "rules".into(),
                 state_key: "status".into(),
                 operator: Operator::Eq,
                 operand: Operand::Literal(StateValue::String("running".into())),

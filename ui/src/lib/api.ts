@@ -77,10 +77,10 @@ export interface TrackedValue {
 }
 
 export interface PatternPredicate {
-  source_name: string;
+  ruleset_name: string;
   state_key: string;
   operator: string;
-  operand: { Literal: StateValue } | { StateRef: { source_name: string; state_key: string } };
+  operand: { Literal: StateValue } | { StateRef: { ruleset_name: string; state_key: string } };
 }
 
 export interface Pattern {
@@ -175,6 +175,42 @@ export interface TimeRange {
   end: string | null;
 }
 
+export interface ImportItemStatus {
+  export_id: number;
+  name: string;
+  existing_id: number | null;
+}
+
+export interface ImportPreview {
+  timestamp_templates: ImportItemStatus[];
+  source_templates: ImportItemStatus[];
+  rules: ImportItemStatus[];
+  rulesets: ImportItemStatus[];
+  patterns: ImportItemStatus[];
+}
+
+export interface EntitySelection {
+  export_id: number;
+  action: 'add' | 'overwrite' | 'skip';
+  existing_id?: number;
+}
+
+export interface ImportSelections {
+  timestamp_templates: EntitySelection[];
+  source_templates: EntitySelection[];
+  rules: EntitySelection[];
+  rulesets: EntitySelection[];
+  patterns: EntitySelection[];
+}
+
+export interface ImportResult {
+  timestamp_templates: number;
+  source_templates: number;
+  rules: number;
+  rulesets: number;
+  patterns: number;
+}
+
 // ---- API Client ----
 
 const BASE = '/api';
@@ -204,22 +240,25 @@ export const projects = {
   update: (id: number, data: Partial<Project>) =>
     request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
+  clone: (id: number, data: { name: string }) =>
+    request<Project>(`/projects/${id}/clone`, { method: 'POST', body: JSON.stringify(data) }),
   exportConfig: async (id: number): Promise<Blob> => {
     const res = await fetch(`${BASE}/projects/${id}/export`);
     if (!res.ok) throw new Error(`Export failed: ${res.status}`);
     return res.blob();
   },
-  importConfig: (
-    id: number,
-    data: unknown,
-  ): Promise<{
-    timestamp_templates: number;
-    source_templates: number;
-    rules: number;
-    rulesets: number;
-    patterns: number;
-  }> =>
+  importConfig: (id: number, data: unknown): Promise<ImportResult> =>
     request(`/projects/${id}/import`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  importPreview: (id: number, data: unknown) =>
+    request<ImportPreview>(`/projects/${id}/import/preview`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  importSelective: (id: number, data: { export: unknown; selections: ImportSelections }) =>
+    request<ImportResult>(`/projects/${id}/import/selective`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -406,6 +445,8 @@ export const analysis = {
       `${proto}//${window.location.host}/api/projects/${pid}/analyze/ws${qs}`,
     );
 
+    let finished = false;
+
     ws.onmessage = (ev) => {
       const event: AnalysisEvent = JSON.parse(ev.data);
       switch (event.type) {
@@ -422,10 +463,12 @@ export const analysis = {
           callbacks.onProgress(event.data.lines_processed);
           break;
         case 'complete':
+          finished = true;
           callbacks.onComplete(event.data);
           ws.close();
           break;
         case 'error':
+          finished = true;
           callbacks.onError(event.data.message);
           ws.close();
           break;
@@ -433,10 +476,23 @@ export const analysis = {
     };
 
     ws.onerror = () => {
+      finished = true;
       callbacks.onError('WebSocket connection failed');
     };
 
-    return { close: () => ws.close() };
+    ws.onclose = () => {
+      if (!finished) {
+        finished = true;
+        callbacks.onError('Connection to server lost');
+      }
+    };
+
+    return {
+      close: () => {
+        finished = true;
+        ws.close();
+      },
+    };
   },
   exportJson: (pid: number, timeRange?: TimeRange, include?: string[]) => {
     const params = new URLSearchParams({ format: 'json' });

@@ -912,3 +912,62 @@ When `rule` is absent (create mode), all fields default to empty, `save()` calls
 **Files changed:**
 - `ui/src/lib/RuleEditor.svelte` — made `rule` prop optional (`rule?: LogRule`), updated init state to use optional chaining with defaults, branched `save()` on `rule` presence, updated footer button label
 - `ui/src/lib/RuleList.svelte` — removed all create-form state/helpers (`newName`, `newMatchMode`, `newMatchPattern`, `newExtractionRules`, dry-run state, `addNewExtractionRule`, `removeNewExtractionRule`, `loadSources`, `runNewDryRun`, `formatStateValue`, `createRule`), replaced inline form with `<RuleEditor>`, removed unused CSS
+
+### 71. Pattern Portability — Bind Predicates to Ruleset — Done
+
+**Status:** Done — Migrated `PatternPredicate.source_name` to `ruleset_name` and `Operand::StateRef { source_name }` to `{ ruleset_name }` across the entire stack. Resolution semantics: ruleset → template_id → all sources with that template (OR, first match wins).
+
+`StateManager` now accepts `rulesets: &[Ruleset]` at construction and builds a `ruleset_name → Vec<source_id>` index. `get_state_by_ruleset()` returns the first non-None state value across sources in that ruleset. Cross-source integration tests updated to use separate `template_id`s per source so distinct rulesets can target each independently. Legacy deserialization in `deserialize_operand()` falls back to `source_name` JSON key for backward compatibility.
+
+**Files changed:**
+- `crates/logium-server/migrations/20260314000000_pattern_predicates_ruleset.sql` — new migration: renames column and migrates existing data
+- `crates/logium-core/src/model.rs` — renamed `source_name` to `ruleset_name` in `PatternPredicate` and `Operand::StateRef`
+- `crates/logium-core/src/engine.rs` — `StateManager` tracks ruleset→source_ids index; `analyze()` / `analyze_streaming()` pass rulesets; all tests updated
+- `crates/logium-core/tests/real_data_tests.rs` — all cross-source tests use per-source templates and named rulesets
+- `crates/logium-core/benches/analysis_benchmark.rs` — updated to use `ruleset_name` and per-source templates in cross-source bench
+- `crates/logium-server/src/db.rs` — CRUD updated; `serialize_operand` / `deserialize_operand` updated with legacy fallback; tests updated
+- `ui/src/lib/api.ts` — `PatternPredicate` and `StateRef` types use `ruleset_name`
+- `ui/src/lib/PatternEditor.svelte` — source dropdown replaced with ruleset dropdown; state keys scoped to selected ruleset
+
+---
+
+### 72. Per-Source-Binding Pattern Evaluation
+
+**Status:** Done
+
+Replace single-evaluator-per-pattern with one independent state machine per
+(pattern × source-binding) combination, where a binding is a tuple of one specific source per
+ruleset referenced in the pattern's predicates. Fixes incorrect "first source wins" behaviour
+when multiple sources share a ruleset. Adds a combinatorial explosion warning when total
+evaluator count exceeds 100.
+
+**Files changed:**
+- `crates/logium-core/src/engine.rs` — removed `PatternEvaluator`; added `Binding` type alias, `get_state_by_source_id()` and `snapshot_for_binding()` on `StateManager`, `evaluate_predicate_bound()`, `BoundEvaluator`, `cartesian_product()`, `PatternEvaluatorSet`; updated `analyze()` and `analyze_streaming()` call sites; updated all pattern evaluator tests to use new API; added `test_multi_source_per_ruleset_independent_evaluation` and `test_multi_source_per_ruleset_both_match`
+
+---
+
+### 73. Clone Project
+
+**Status:** Done
+
+Added `POST /api/projects/{id}/clone` endpoint that deep-copies all project entities (timestamp templates, source templates, rules, rulesets, patterns, sources) into a new project with a user-supplied name. IDs are remapped throughout; `file_path` and `color` are preserved verbatim on sources. Frontend adds a "Clone" button per project card in `ProjectManager.svelte` with the same inline-input UX as rename (pre-populated with `"{name} (copy)"`).
+
+**Files changed:**
+- `crates/logium-server/src/db.rs` — added `clone_project()` method and `test_clone_project` test
+- `crates/logium-server/src/routes/projects.rs` — added `POST /api/projects/{id}/clone` route and `clone` handler
+- `ui/src/lib/api.ts` — added `projects.clone()` API method
+- `ui/src/lib/ProjectManager.svelte` — added `cloningId`/`cloneName` state, `startClone()`/`cancelClone()`/`cloneProject()` functions, and inline clone UI in the project card template
+
+
+---
+
+### 74. Selective Import with Conflict Resolution
+
+**Status:** Done
+
+Modified the import flow to show a preview modal after file selection. The modal lists all
+entities from the import file with checkboxes. Items whose name matches an existing entity
+are flagged as conflicts with per-item options: Overwrite (update existing), Add as duplicate,
+or Discard (uncheck). Two new API endpoints: `POST /api/projects/{id}/import/preview` (returns
+conflict info) and `POST /api/projects/{id}/import/selective` (applies selections). The
+existing `/import` endpoint is unchanged and still used by the load-starter flow.

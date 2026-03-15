@@ -216,7 +216,7 @@
       </div>
     {/if}
 
-    {#if loading && allProjects.length === 0}
+    {#if loading && allProjects.length === 0 && !currentProjectId}
       <div class="empty">Loading...</div>
     {:else if currentView === 'projects'}
       <ProjectManager

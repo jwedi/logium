@@ -63,14 +63,23 @@ async fn main() {
         )
         .init();
 
-    let db_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:logium.db?mode=rwc".to_string());
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+
+    let data_dir = std::env::var("LOGIUM_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            dirs::data_dir()
+                .expect("could not determine data directory")
+                .join("logium")
+        });
+
+    let db_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| format!("sqlite:{}?mode=rwc", data_dir.join("logium.db").display()));
     let uploads_dir = std::env::var("UPLOADS_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("uploads"));
+        .unwrap_or_else(|_| data_dir.join("uploads"));
 
-    // Ensure uploads directory exists
+    // Ensure data directories exist
     tokio::fs::create_dir_all(&uploads_dir)
         .await
         .expect("failed to create uploads directory");
@@ -123,6 +132,7 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("failed to bind");
+    tracing::info!("Data directory: {}", data_dir.display());
     tracing::info!("Logium server listening on http://localhost:{port}");
 
     // Auto-open the browser (release builds only; skipped on headless/server)
