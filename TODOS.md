@@ -928,3 +928,18 @@ When `rule` is absent (create mode), all fields default to empty, `save()` calls
 - `crates/logium-server/src/db.rs` — CRUD updated; `serialize_operand` / `deserialize_operand` updated with legacy fallback; tests updated
 - `ui/src/lib/api.ts` — `PatternPredicate` and `StateRef` types use `ruleset_name`
 - `ui/src/lib/PatternEditor.svelte` — source dropdown replaced with ruleset dropdown; state keys scoped to selected ruleset
+
+---
+
+### 72. Per-Source-Binding Pattern Evaluation
+
+**Status:** Done
+
+Replace single-evaluator-per-pattern with one independent state machine per
+(pattern × source-binding) combination, where a binding is a tuple of one specific source per
+ruleset referenced in the pattern's predicates. Fixes incorrect "first source wins" behaviour
+when multiple sources share a ruleset. Adds a combinatorial explosion warning when total
+evaluator count exceeds 100.
+
+**Files changed:**
+- `crates/logium-core/src/engine.rs` — removed `PatternEvaluator`; added `Binding` type alias, `get_state_by_source_id()` and `snapshot_for_binding()` on `StateManager`, `evaluate_predicate_bound()`, `BoundEvaluator`, `cartesian_product()`, `PatternEvaluatorSet`; updated `analyze()` and `analyze_streaming()` call sites; updated all pattern evaluator tests to use new API; added `test_multi_source_per_ruleset_independent_evaluation` and `test_multi_source_per_ruleset_both_match`
