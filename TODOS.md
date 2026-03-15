@@ -957,3 +957,17 @@ Added `POST /api/projects/{id}/clone` endpoint that deep-copies all project enti
 - `crates/logium-server/src/routes/projects.rs` — added `POST /api/projects/{id}/clone` route and `clone` handler
 - `ui/src/lib/api.ts` — added `projects.clone()` API method
 - `ui/src/lib/ProjectManager.svelte` — added `cloningId`/`cloneName` state, `startClone()`/`cancelClone()`/`cloneProject()` functions, and inline clone UI in the project card template
+
+
+---
+
+### 74. Selective Import with Conflict Resolution
+
+**Status:** Done
+
+Modified the import flow to show a preview modal after file selection. The modal lists all
+entities from the import file with checkboxes. Items whose name matches an existing entity
+are flagged as conflicts with per-item options: Overwrite (update existing), Add as duplicate,
+or Discard (uncheck). Two new API endpoints: `POST /api/projects/{id}/import/preview` (returns
+conflict info) and `POST /api/projects/{id}/import/selective` (applies selections). The
+existing `/import` endpoint is unchanged and still used by the load-starter flow.

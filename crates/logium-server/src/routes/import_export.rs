@@ -31,12 +31,70 @@ pub struct ImportResult {
     pub patterns: usize,
 }
 
+// --- Preview types ---
+
+#[derive(Debug, Serialize)]
+pub struct ImportItemStatus {
+    pub export_id: u64,
+    pub name: String,
+    pub existing_id: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImportPreview {
+    pub timestamp_templates: Vec<ImportItemStatus>,
+    pub source_templates: Vec<ImportItemStatus>,
+    pub rules: Vec<ImportItemStatus>,
+    pub rulesets: Vec<ImportItemStatus>,
+    pub patterns: Vec<ImportItemStatus>,
+}
+
+// --- Selective import types ---
+
+#[derive(Debug, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImportAction {
+    Add,
+    Overwrite,
+    Skip,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EntitySelection {
+    pub export_id: u64,
+    pub action: ImportAction,
+    pub existing_id: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ImportSelections {
+    pub timestamp_templates: Vec<EntitySelection>,
+    pub source_templates: Vec<EntitySelection>,
+    pub rules: Vec<EntitySelection>,
+    pub rulesets: Vec<EntitySelection>,
+    pub patterns: Vec<EntitySelection>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SelectiveImportRequest {
+    pub export: ProjectExport,
+    pub selections: ImportSelections,
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/projects/{project_id}/export", get(export))
         .route(
             "/api/projects/{project_id}/import",
             axum::routing::post(import),
+        )
+        .route(
+            "/api/projects/{project_id}/import/preview",
+            axum::routing::post(preview),
+        )
+        .route(
+            "/api/projects/{project_id}/import/selective",
+            axum::routing::post(import_selective),
         )
 }
 
@@ -88,5 +146,35 @@ async fn import(
 
     let result = state.db.import_project_config(project_id, &body).await?;
 
+    Ok((StatusCode::OK, Json(result)))
+}
+
+async fn preview(
+    State(state): State<AppState>,
+    Path(project_id): Path<i64>,
+    Json(body): Json<ProjectExport>,
+) -> ApiResult<Json<ImportPreview>> {
+    if body.version != 1 {
+        return Err(DbError::InvalidData(format!("unsupported version {}", body.version)).into());
+    }
+    state.db.get_project(project_id).await?;
+    Ok(Json(state.db.get_import_preview(project_id, &body).await?))
+}
+
+async fn import_selective(
+    State(state): State<AppState>,
+    Path(project_id): Path<i64>,
+    Json(body): Json<SelectiveImportRequest>,
+) -> ApiResult<(StatusCode, Json<ImportResult>)> {
+    if body.export.version != 1 {
+        return Err(
+            DbError::InvalidData(format!("unsupported version {}", body.export.version)).into(),
+        );
+    }
+    state.db.get_project(project_id).await?;
+    let result = state
+        .db
+        .selective_import_project_config(project_id, &body.export, &body.selections)
+        .await?;
     Ok((StatusCode::OK, Json(result)))
 }

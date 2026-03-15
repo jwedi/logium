@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { projects as projectsApi, type Project } from './api';
+  import { projects as projectsApi, type Project, type ImportPreview } from './api';
+  import ImportPreviewModal from './ImportPreviewModal.svelte';
 
   let {
     projects,
@@ -19,6 +20,9 @@
   let creating = $state(false);
   let fileInput: HTMLInputElement | null = $state(null);
   let importTargetId: number | null = $state(null);
+  let importPreview: ImportPreview | null = $state(null);
+  let importPreviewExportData: unknown = $state(null);
+  let showImportModal = $state(false);
   let editingId: number | null = $state(null);
   let editName = $state('');
   let starterMenuId: number | null = $state(null);
@@ -63,27 +67,19 @@
   }
 
   async function handleImportFile(e: Event) {
-    const input = e.target as HTMLInputElement;
-    const file = input.files?.[0];
+    const file = (e.target as HTMLInputElement).files?.[0];
     if (!file || importTargetId == null) return;
     try {
       const text = await file.text();
       const data = JSON.parse(text);
-      const result = await projectsApi.importConfig(importTargetId, data);
-      const total =
-        result.timestamp_templates +
-        result.source_templates +
-        result.rules +
-        result.rulesets +
-        result.patterns;
-      alert(
-        `Imported ${total} items: ${result.timestamp_templates} timestamp templates, ${result.source_templates} source templates, ${result.rules} rules, ${result.rulesets} rulesets, ${result.patterns} patterns`,
-      );
-    } catch (e: any) {
-      alert(`Import failed: ${e.message}`);
+      const preview = await projectsApi.importPreview(importTargetId, data);
+      importPreviewExportData = data;
+      importPreview = preview;
+      showImportModal = true;
+    } catch (err: any) {
+      alert(err.message);
     } finally {
-      input.value = '';
-      importTargetId = null;
+      if (fileInput) fileInput.value = '';
     }
   }
 
@@ -277,6 +273,25 @@
       </div>
     {/each}
   </div>
+{/if}
+
+{#if showImportModal && importPreview && importTargetId != null}
+  <ImportPreviewModal
+    exportData={importPreviewExportData}
+    preview={importPreview}
+    projectId={importTargetId}
+    onClose={() => {
+      showImportModal = false;
+      importPreview = null;
+    }}
+    onImported={(result) => {
+      showImportModal = false;
+      importPreview = null;
+      alert(
+        `Imported: ${result.rules} rules, ${result.patterns} patterns, ${result.rulesets} rulesets, ${result.source_templates} source templates, ${result.timestamp_templates} timestamp templates.`,
+      );
+    }}
+  />
 {/if}
 
 <input

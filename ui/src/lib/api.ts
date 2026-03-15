@@ -175,6 +175,42 @@ export interface TimeRange {
   end: string | null;
 }
 
+export interface ImportItemStatus {
+  export_id: number;
+  name: string;
+  existing_id: number | null;
+}
+
+export interface ImportPreview {
+  timestamp_templates: ImportItemStatus[];
+  source_templates: ImportItemStatus[];
+  rules: ImportItemStatus[];
+  rulesets: ImportItemStatus[];
+  patterns: ImportItemStatus[];
+}
+
+export interface EntitySelection {
+  export_id: number;
+  action: 'add' | 'overwrite' | 'skip';
+  existing_id?: number;
+}
+
+export interface ImportSelections {
+  timestamp_templates: EntitySelection[];
+  source_templates: EntitySelection[];
+  rules: EntitySelection[];
+  rulesets: EntitySelection[];
+  patterns: EntitySelection[];
+}
+
+export interface ImportResult {
+  timestamp_templates: number;
+  source_templates: number;
+  rules: number;
+  rulesets: number;
+  patterns: number;
+}
+
 // ---- API Client ----
 
 const BASE = '/api';
@@ -211,17 +247,18 @@ export const projects = {
     if (!res.ok) throw new Error(`Export failed: ${res.status}`);
     return res.blob();
   },
-  importConfig: (
-    id: number,
-    data: unknown,
-  ): Promise<{
-    timestamp_templates: number;
-    source_templates: number;
-    rules: number;
-    rulesets: number;
-    patterns: number;
-  }> =>
+  importConfig: (id: number, data: unknown): Promise<ImportResult> =>
     request(`/projects/${id}/import`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  importPreview: (id: number, data: unknown) =>
+    request<ImportPreview>(`/projects/${id}/import/preview`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  importSelective: (id: number, data: { export: unknown; selections: ImportSelections }) =>
+    request<ImportResult>(`/projects/${id}/import/selective`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
