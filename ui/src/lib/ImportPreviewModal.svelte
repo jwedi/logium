@@ -48,9 +48,13 @@
 
   let importing = $state(false);
 
-  let allSkipped = $derived(
-    [...tts, ...sts, ...rules, ...rulesets, ...patterns].every((s) => !s.include),
-  );
+  let allItems = $derived([...tts, ...sts, ...rules, ...rulesets, ...patterns]);
+  let allSkipped = $derived(allItems.every((s) => !s.include));
+  let allSelected = $derived(allItems.every((s) => s.include));
+
+  function setAll(value: boolean) {
+    for (const item of allItems) item.include = value;
+  }
 
   function toSelection(items: ItemState[]): EntitySelection[] {
     return items.map((s) => ({
@@ -124,10 +128,21 @@
     {@render section('Patterns', patterns)}
   </div>
   <div class="modal-footer">
-    <button onclick={onClose}>Cancel</button>
-    <button class="primary" onclick={doImport} disabled={allSkipped || importing}>
-      {importing ? 'Importing...' : 'Import'}
-    </button>
+    <label class="select-all-label">
+      <input
+        type="checkbox"
+        checked={allSelected}
+        indeterminate={!allSelected && !allSkipped}
+        onchange={(e) => setAll((e.target as HTMLInputElement).checked)}
+      />
+      Select all
+    </label>
+    <div class="footer-actions">
+      <button onclick={onClose}>Cancel</button>
+      <button class="primary" onclick={doImport} disabled={allSkipped || importing}>
+        {importing ? 'Importing...' : 'Import'}
+      </button>
+    </div>
   </div>
 </div>
 
@@ -233,9 +248,23 @@
 
   .modal-footer {
     display: flex;
-    justify-content: flex-end;
-    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
     padding: 12px 20px;
     border-top: 1px solid var(--border);
+  }
+
+  .select-all-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  .footer-actions {
+    display: flex;
+    gap: 8px;
   }
 </style>
